@@ -2072,7 +2072,21 @@ private fun EditButtonDialog(
                             ) {
                                 iconChoices().forEach { item ->
                                     DropdownMenuItem(
-                                        text = { Text(stringResource(item.labelRes)) },
+                                        text = {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                            ) {
+                                                iconVectorForKey(item.key)?.let { vector ->
+                                                    Icon(
+                                                        imageVector = vector,
+                                                        contentDescription = null,
+                                                        modifier = Modifier.size(22.dp)
+                                                    )
+                                                } ?: Box(modifier = Modifier.size(22.dp))
+                                                Text(stringResource(item.labelRes))
+                                            }
+                                        },
                                         onClick = {
                                             icon = item.key
                                             iconMenuExpanded = false
@@ -2366,7 +2380,7 @@ private fun saveDeckButtons(context: Context, buttons: List<DeckButton>) {
 
 private fun loadDeckPages(context: Context): List<DeckPageConfig> {
     val raw = context.deckPrefs().getString(PREF_PAGES, null)
-        ?: return listOf(DeckPageConfig(1, "Page 1", loadDeckButtons(context)))
+        ?: return defaultDeckPages(loadDeckButtons(context))
     return runCatching {
         val array = JSONArray(raw)
         List(array.length()) { index ->
@@ -2382,9 +2396,16 @@ private fun loadDeckPages(context: Context): List<DeckPageConfig> {
                 )
             )
         }.ifEmpty {
-            listOf(DeckPageConfig(1, "Page 1", defaultButtons()))
+            defaultDeckPages()
         }
-    }.getOrDefault(listOf(DeckPageConfig(1, "Page 1", defaultButtons())))
+    }.getOrDefault(defaultDeckPages())
+}
+
+private fun defaultDeckPages(firstPageButtons: List<DeckButton> = defaultButtons()): List<DeckPageConfig> {
+    return listOf(
+        DeckPageConfig(1, "Page 1", firstPageButtons),
+        DeckPageConfig(2, "Page 2", emptyList())
+    )
 }
 
 private fun saveDeckPages(context: Context, pages: List<DeckPageConfig>) {
@@ -2595,11 +2616,11 @@ private const val PREF_PAGE_SWIPE_ANIMATION = "page_swipe_animation"
 private const val PREF_INFINITE_PAGE_SWIPE = "infinite_page_swipe"
 private const val MAX_PAGES = 5
 private const val MIN_COLUMNS = 4
-private const val MAX_COLUMNS = 6
+private const val MAX_COLUMNS = 9
 private const val DEFAULT_COLUMNS = 6
 private const val MIN_ROWS = 2
-private const val MAX_ROWS = 4
-private const val DEFAULT_ROWS = 2
+private const val MAX_ROWS = 6
+private const val DEFAULT_ROWS = 3
 private const val ICON_AUTO = "AUTO"
 private const val ICON_SETTINGS = "ICON_SETTINGS"
 private const val ICON_BLUETOOTH = "ICON_BLUETOOTH"
