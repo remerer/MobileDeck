@@ -13,6 +13,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -96,6 +98,7 @@ import androidx.compose.ui.unit.dp
 import com.example.mobiledeck.ui.theme.MobileDeckTheme
 import org.json.JSONArray
 import org.json.JSONObject
+import kotlin.math.abs
 import kotlin.math.roundToInt
 
 class MainActivity : ComponentActivity() {
@@ -114,6 +117,8 @@ class MainActivity : ComponentActivity() {
 private enum class DeckActionType(val label: String) {
     Settings("Settings"),
     BluetoothStatus("Bluetooth status"),
+    PreviousPage("Previous page"),
+    NextPage("Next page"),
     MediaKey("Media key"),
     Hotkey("Hotkey"),
     Text("Text"),
@@ -124,6 +129,11 @@ private enum class DeckActionType(val label: String) {
 private enum class DeckDisplayMode(val label: String) {
     IconOnly("Icon only"),
     IconAndText("Icon + text")
+}
+
+private enum class PageSwipeAxis(val label: String) {
+    Horizontal("Horizontal pages"),
+    Vertical("Vertical pages")
 }
 
 private data class DeckButton(
@@ -192,6 +202,8 @@ private fun MobileDeckApp() {
     var activeDeckPageId by remember { mutableStateOf(deckPages.first().id) }
     var deckColumns by remember { mutableStateOf(loadDeckColumns(context)) }
     var deckRows by remember { mutableStateOf(loadDeckRows(context)) }
+    var pageSwipeAxis by remember { mutableStateOf(loadPageSwipeAxis(context)) }
+    var multiTouchPageSwipe by remember { mutableStateOf(loadMultiTouchPageSwipe(context)) }
     var editingButton by remember { mutableStateOf<DeckButton?>(null) }
     var logs by remember { mutableStateOf(emptyList<ActivityLog>()) }
     var page by remember { mutableStateOf(AppPage.Deck) }
@@ -223,6 +235,7 @@ private fun MobileDeckApp() {
             position = targetPosition
         )
         val pageCapacity = deckColumns * deckRows
+        if (position == null && deckButtons.size >= pageCapacity && deckPages.size >= MAX_PAGES) return
         val updatedPages = if (position == null && deckButtons.size >= pageCapacity) {
             val newPage = DeckPageConfig(
                 id = nextDeckPageId(deckPages),
@@ -261,6 +274,7 @@ private fun MobileDeckApp() {
     }
 
     fun addDeckPage() {
+        if (deckPages.size >= MAX_PAGES) return
         val nextPageNumber = deckPages.size + 1
         val newPage = DeckPageConfig(
             id = nextDeckPageId(deckPages),
@@ -273,6 +287,12 @@ private fun MobileDeckApp() {
         saveDeckPages(context, updatedPages)
     }
 
+    fun switchDeckPage(delta: Int) {
+        val currentIndex = deckPages.indexOfFirst { it.id == activeDeckPage.id }
+        val target = (currentIndex + delta).coerceIn(deckPages.indices)
+        activeDeckPageId = deckPages[target].id
+    }
+
     fun pressDeckButton(button: DeckButton) {
         val delivered = when (button.actionType) {
             DeckActionType.Settings -> {
@@ -281,6 +301,14 @@ private fun MobileDeckApp() {
             }
             DeckActionType.BluetoothStatus -> {
                 page = AppPage.Settings
+                true
+            }
+            DeckActionType.PreviousPage -> {
+                switchDeckPage(-1)
+                true
+            }
+            DeckActionType.NextPage -> {
+                switchDeckPage(1)
                 true
             }
             DeckActionType.MediaKey -> hidManager.sendMediaKey(button.payload)
@@ -292,6 +320,8 @@ private fun MobileDeckApp() {
         val note = when {
             button.actionType == DeckActionType.Settings -> "opened settings"
             button.actionType == DeckActionType.BluetoothStatus -> "opened connection"
+            button.actionType == DeckActionType.PreviousPage -> "previous page"
+            button.actionType == DeckActionType.NextPage -> "next page"
             delivered -> "sent"
             button.actionType == DeckActionType.AppCommand -> "not supported by keyboard HID"
             hidStatus.state != HidConnectionState.Connected -> "no connected PC"
@@ -357,7 +387,9 @@ private fun MobileDeckApp() {
                 rows = deckRows,
                 status = hidStatus,
                 previewMode = false,
-                onPageSelected = { activeDeckPageId = it },
+                pageSwipeAxis = pageSwipeAxis,
+                multiTouchPageSwipe = multiTouchPageSwipe,
+                onPageSwipe = ::switchDeckPage,
                 onAddPage = ::addDeckPage,
                 onButtonPressed = ::pressDeckButton,
                 onButtonEdit = {},
@@ -376,6 +408,8 @@ private fun MobileDeckApp() {
                 columns = deckColumns,
                 rows = deckRows,
                 status = hidStatus,
+                pageSwipeAxis = pageSwipeAxis,
+                multiTouchPageSwipe = multiTouchPageSwipe,
                 onBack = { page = AppPage.Settings },
                 onColumnsChange = { columns ->
                     deckColumns = columns
@@ -385,7 +419,7 @@ private fun MobileDeckApp() {
                     deckRows = rows
                     saveDeckRows(context, rows)
                 },
-                onPageSelected = { activeDeckPageId = it },
+                onPageSwipe = ::switchDeckPage,
                 onAddPage = ::addDeckPage,
                 onButtonEdit = { editingButton = it },
                 onButtonMoved = ::moveDeckButtonToSlot,
@@ -406,8 +440,17 @@ private fun MobileDeckApp() {
                 onBack = { page = AppPage.Deck },
                 deckPages = deckPages,
                 activePageId = activeDeckPage.id,
+                pageSwipeAxis = pageSwipeAxis,
+                multiTouchPageSwipe = multiTouchPageSwipe,
                 onLayoutEditor = { page = AppPage.LayoutEditor },
-                onPageSelected = { activeDeckPageId = it },
+                onPageSwipeAxisChange = { axis ->
+                    pageSwipeAxis = axis
+                    savePageSwipeAxis(context, axis)
+                },
+                onMultiTouchPageSwipeChange = { enabled ->
+                    multiTouchPageSwipe = enabled
+                    saveMultiTouchPageSwipe(context, enabled)
+                },
                 onStart = ::startHid,
                 onStop = { hidManager.stop() },
                 onMakeDiscoverable = {
@@ -485,12 +528,15 @@ private fun SettingsPage(
     rows: Int,
     deckPages: List<DeckPageConfig>,
     activePageId: Int,
+    pageSwipeAxis: PageSwipeAxis,
+    multiTouchPageSwipe: Boolean,
     pageName: String,
     pageCount: Int,
     pairedHosts: List<PairedHidHost>,
     onBack: () -> Unit,
     onLayoutEditor: () -> Unit,
-    onPageSelected: (Int) -> Unit,
+    onPageSwipeAxisChange: (PageSwipeAxis) -> Unit,
+    onMultiTouchPageSwipeChange: (Boolean) -> Unit,
     onStart: () -> Unit,
     onStop: () -> Unit,
     onMakeDiscoverable: () -> Unit,
@@ -557,9 +603,12 @@ private fun SettingsPage(
             DeckSettingsPanel(
                 deckPages = deckPages,
                 activePageId = activePageId,
+                pageSwipeAxis = pageSwipeAxis,
+                multiTouchPageSwipe = multiTouchPageSwipe,
                 pageName = pageName,
                 pageCount = pageCount,
-                onPageSelected = onPageSelected,
+                onPageSwipeAxisChange = onPageSwipeAxisChange,
+                onMultiTouchPageSwipeChange = onMultiTouchPageSwipeChange,
                 canAddBluetoothStatus = canAddBluetoothStatus,
                 onAddBluetoothStatus = onAddBluetoothStatus,
                 onAddPage = onAddPage
@@ -576,9 +625,12 @@ private fun SettingsPage(
 private fun DeckSettingsPanel(
     deckPages: List<DeckPageConfig>,
     activePageId: Int,
+    pageSwipeAxis: PageSwipeAxis,
+    multiTouchPageSwipe: Boolean,
     pageName: String,
     pageCount: Int,
-    onPageSelected: (Int) -> Unit,
+    onPageSwipeAxisChange: (PageSwipeAxis) -> Unit,
+    onMultiTouchPageSwipeChange: (Boolean) -> Unit,
     canAddBluetoothStatus: Boolean,
     onAddBluetoothStatus: () -> Unit,
     onAddPage: () -> Unit
@@ -605,26 +657,39 @@ private fun DeckSettingsPanel(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
+            PageIndicator(
+                modifier = Modifier.fillMaxWidth(),
+                pageCount = deckPages.size,
+                activeIndex = deckPages.indexOfFirst { it.id == activePageId }.coerceAtLeast(0)
+            )
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                deckPages.forEachIndexed { index, page ->
+                PageSwipeAxis.values().forEach { axis ->
                     OutlinedButton(
                         modifier = Modifier.weight(1f),
                         shape = RoundedCornerShape(8.dp),
-                        onClick = { onPageSelected(page.id) }
+                        onClick = { onPageSwipeAxisChange(axis) }
                     ) {
-                        Text(if (page.id == activePageId) "Page ${index + 1}" else (index + 1).toString())
+                        Text(if (pageSwipeAxis == axis) axis.label else axis.label.removeSuffix(" pages"))
                     }
                 }
             }
             OutlinedButton(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(8.dp),
+                onClick = { onMultiTouchPageSwipeChange(!multiTouchPageSwipe) }
+            ) {
+                Text(if (multiTouchPageSwipe) "Multi-touch swipe on" else "Multi-touch swipe off")
+            }
+            OutlinedButton(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(8.dp),
+                enabled = pageCount < MAX_PAGES,
                 onClick = onAddPage
             ) {
-                Text("Add page")
+                Text("Add page ($pageCount/$MAX_PAGES)")
             }
             if (canAddBluetoothStatus) {
                 OutlinedButton(
@@ -805,10 +870,12 @@ private fun LayoutEditorPage(
     columns: Int,
     rows: Int,
     status: HidStatus,
+    pageSwipeAxis: PageSwipeAxis,
+    multiTouchPageSwipe: Boolean,
     onBack: () -> Unit,
     onColumnsChange: (Int) -> Unit,
     onRowsChange: (Int) -> Unit,
-    onPageSelected: (Int) -> Unit,
+    onPageSwipe: (Int) -> Unit,
     onAddPage: () -> Unit,
     onButtonEdit: (DeckButton) -> Unit,
     onButtonMoved: (DeckButton, Int) -> Unit,
@@ -855,7 +922,9 @@ private fun LayoutEditorPage(
                 rows = rows,
                 status = status,
                 previewMode = true,
-                onPageSelected = onPageSelected,
+                pageSwipeAxis = pageSwipeAxis,
+                multiTouchPageSwipe = multiTouchPageSwipe,
+                onPageSwipe = onPageSwipe,
                 onAddPage = onAddPage,
                 onButtonPressed = onButtonEdit,
                 onButtonEdit = onButtonEdit,
@@ -950,7 +1019,9 @@ private fun DeckPage(
     rows: Int,
     status: HidStatus,
     previewMode: Boolean,
-    onPageSelected: (Int) -> Unit,
+    pageSwipeAxis: PageSwipeAxis,
+    multiTouchPageSwipe: Boolean,
+    onPageSwipe: (Int) -> Unit,
     onAddPage: () -> Unit,
     onButtonPressed: (DeckButton) -> Unit,
     onButtonEdit: (DeckButton) -> Unit,
@@ -962,35 +1033,48 @@ private fun DeckPage(
         val safeRows = rows.coerceIn(MIN_ROWS, MAX_ROWS)
         val density = LocalDensity.current
         val spacing = 8.dp
-        val railWidth = 116.dp
+        val swipeModifier = Modifier.multiTouchPageSwipe(
+            enabled = multiTouchPageSwipe,
+            axis = pageSwipeAxis,
+            onPageSwipe = onPageSwipe
+        )
         val cellSize = with(density) {
             val spacingPx = spacing.toPx()
-            val railWidthPx = railWidth.toPx()
-            val gridWidthPx = constraints.maxWidth - railWidthPx - spacingPx
-            val maxCellWidth = (gridWidthPx - spacingPx * (safeColumns - 1)) / safeColumns
+            val maxCellWidth = (constraints.maxWidth - spacingPx * (safeColumns - 1)) / safeColumns
             val maxCellHeight = (constraints.maxHeight - spacingPx * (safeRows - 1)) / safeRows
             minOf(maxCellWidth, maxCellHeight).toDp()
         }
 
-        Row(horizontalArrangement = Arrangement.spacedBy(spacing)) {
-            DeckRail(
-                modifier = Modifier
-                    .width(railWidth)
-                    .fillMaxHeight(),
-                cellSize = cellSize,
-                spacing = spacing,
-                pages = deckPages,
-                activePageId = activePageId,
-                rows = safeRows,
-                status = status,
-                onPageSelected = onPageSelected,
-                onAddPage = onAddPage
-            )
-
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .then(swipeModifier),
+            verticalArrangement = Arrangement.spacedBy(spacing)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "MobileDeck",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Box(
+                    modifier = Modifier
+                        .size(8.dp)
+                        .clip(RoundedCornerShape(50))
+                        .background(statusDotColor(status.state))
+                )
+                Spacer(Modifier.weight(1f))
+            }
             ButtonGrid(
                 modifier = Modifier
                     .weight(1f)
-                    .fillMaxHeight(),
+                    .fillMaxWidth(),
                 buttons = buttons,
                 columns = safeColumns,
                 rows = safeRows,
@@ -1003,83 +1087,96 @@ private fun DeckPage(
                 onButtonMoved = onButtonMoved,
                 onEmptySlotLongPressed = onEmptySlotLongPressed
             )
+            PageIndicator(
+                modifier = Modifier.fillMaxWidth(),
+                pageCount = deckPages.size,
+                activeIndex = deckPages.indexOfFirst { it.id == activePageId }.coerceAtLeast(0)
+            )
         }
     }
 }
 
 @Composable
-private fun DeckRail(
+private fun PageIndicator(
     modifier: Modifier = Modifier,
-    cellSize: androidx.compose.ui.unit.Dp,
-    spacing: androidx.compose.ui.unit.Dp,
-    pages: List<DeckPageConfig>,
-    activePageId: Int,
-    rows: Int,
-    status: HidStatus,
-    onPageSelected: (Int) -> Unit,
-    onAddPage: () -> Unit
+    pageCount: Int,
+    activeIndex: Int
 ) {
-    Column(
+    Row(
         modifier = modifier,
-        verticalArrangement = Arrangement.spacedBy(spacing)
+        horizontalArrangement = Arrangement.End,
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            Text(
-                text = "MobileDeck",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
+        repeat(pageCount.coerceIn(1, MAX_PAGES)) { index ->
             Box(
                 modifier = Modifier
-                    .size(8.dp)
+                    .padding(horizontal = 3.dp)
+                    .size(if (index == activeIndex) 9.dp else 6.dp)
                     .clip(RoundedCornerShape(50))
-                    .background(statusDotColor(status.state))
-            )
-        }
-        val visiblePages = pages.take(rows)
-        visiblePages.forEachIndexed { index, page ->
-            PageKey(
-                modifier = Modifier.size(cellSize),
-                label = (index + 1).toString(),
-                selected = page.id == activePageId,
-                onClick = { onPageSelected(page.id) }
-            )
-        }
-        repeat((rows - visiblePages.size).coerceAtLeast(0)) {
-            EmptyDeckSlot(
-                modifier = Modifier.size(cellSize),
-                onLongPress = onAddPage
+                    .background(
+                        if (index == activeIndex) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f)
+                        }
+                    )
             )
         }
     }
 }
 
-@Composable
-@OptIn(ExperimentalFoundationApi::class)
-private fun PageKey(
-    modifier: Modifier = Modifier,
-    label: String,
-    selected: Boolean,
-    onClick: () -> Unit
-) {
-    Surface(
-        modifier = modifier.combinedClickable(onClick = onClick),
-        shape = RoundedCornerShape(8.dp),
-        tonalElevation = 2.dp,
-        color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant
-    ) {
-        Box(contentAlignment = Alignment.Center) {
-            Text(
-                text = label,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-                color = if (selected) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
-            )
+private fun Modifier.multiTouchPageSwipe(
+    enabled: Boolean,
+    axis: PageSwipeAxis,
+    onPageSwipe: (Int) -> Unit
+): Modifier {
+    if (!enabled) return this
+    return pointerInput(axis) {
+        awaitPointerEventScope {
+            var tracking = false
+            var previousCentroid: Offset? = null
+            var totalDrag = Offset.Zero
+            var maxPointerCount = 0
+
+            while (true) {
+                val event = awaitPointerEvent()
+                val pressed = event.changes.filter { it.pressed }
+                if (pressed.isNotEmpty()) {
+                    val centroid = pressed
+                        .map { it.position }
+                        .reduce { acc, offset -> acc + offset } / pressed.size.toFloat()
+                    if (!tracking) {
+                        tracking = true
+                        previousCentroid = centroid
+                        totalDrag = Offset.Zero
+                        maxPointerCount = pressed.size
+                    } else {
+                        previousCentroid?.let { totalDrag += centroid - it }
+                        previousCentroid = centroid
+                        maxPointerCount = maxOf(maxPointerCount, pressed.size)
+                    }
+                } else if (tracking) {
+                    if (maxPointerCount in 2..3) {
+                        val threshold = 80f
+                        when (axis) {
+                            PageSwipeAxis.Horizontal -> {
+                                if (abs(totalDrag.x) > threshold && abs(totalDrag.x) > abs(totalDrag.y)) {
+                                    onPageSwipe(if (totalDrag.x < 0f) 1 else -1)
+                                }
+                            }
+                            PageSwipeAxis.Vertical -> {
+                                if (abs(totalDrag.y) > threshold && abs(totalDrag.y) > abs(totalDrag.x)) {
+                                    onPageSwipe(if (totalDrag.y < 0f) 1 else -1)
+                                }
+                            }
+                        }
+                    }
+                    tracking = false
+                    previousCentroid = null
+                    totalDrag = Offset.Zero
+                    maxPointerCount = 0
+                }
+            }
         }
     }
 }
@@ -1184,6 +1281,23 @@ private fun DeckKey(
     val contentColor = if (enabled) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
     val density = LocalDensity.current
     var dragOffset by remember(button.id) { mutableStateOf(Offset.Zero) }
+    val moveThresholdPx = with(density) { ((cellSize + spacing) * 0.55f).toPx() }
+    val dragActive = abs(dragOffset.x) > moveThresholdPx || abs(dragOffset.y) > moveThresholdPx
+    val animatedX by animateFloatAsState(
+        targetValue = dragOffset.x,
+        animationSpec = tween(durationMillis = if (dragOffset == Offset.Zero) 140 else 40),
+        label = "keyDragX"
+    )
+    val animatedY by animateFloatAsState(
+        targetValue = dragOffset.y,
+        animationSpec = tween(durationMillis = if (dragOffset == Offset.Zero) 140 else 40),
+        label = "keyDragY"
+    )
+    val animatedScale by animateFloatAsState(
+        targetValue = if (dragActive) 1.06f else 1f,
+        animationSpec = tween(durationMillis = 120),
+        label = "keyDragScale"
+    )
     val dragModifier = if (previewMode) {
         Modifier.pointerInput(button.id, columns, slot, cellSize, spacing) {
             detectDragGestures(
@@ -1209,6 +1323,12 @@ private fun DeckKey(
     Surface(
         modifier = modifier
             .then(dragModifier)
+            .graphicsLayer {
+                translationX = animatedX
+                translationY = animatedY
+                scaleX = animatedScale
+                scaleY = animatedScale
+            }
             .combinedClickable(
                 onClick = onPressed,
                 onLongClick = if (previewMode) onEdit else null
@@ -1347,6 +1467,8 @@ private fun materialIconFor(button: DeckButton): ImageVector? {
     return when (button.actionType) {
         DeckActionType.Settings -> Icons.Filled.Settings
         DeckActionType.BluetoothStatus -> Icons.Filled.Bluetooth
+        DeckActionType.PreviousPage -> Icons.Filled.SkipPrevious
+        DeckActionType.NextPage -> Icons.Filled.SkipNext
         DeckActionType.MediaKey -> when (button.payload.uppercase()) {
             "MUTE" -> Icons.Filled.VolumeOff
             "VOLUME_UP", "VOLUMEUP" -> Icons.Filled.VolumeUp
@@ -1698,7 +1820,7 @@ private fun loadDeckButtons(context: Context): List<DeckButton> {
     val raw = context.deckPrefs().getString(PREF_BUTTONS, null) ?: return defaultButtons()
     return runCatching {
         val array = JSONArray(raw)
-        List(array.length()) { index ->
+        List(array.length().coerceAtMost(MAX_PAGES)) { index ->
             decodeDeckButton(array.getJSONObject(index), index)
         }
     }.map { normalizeDeckButtons(it) }.getOrDefault(defaultButtons())
@@ -1806,7 +1928,9 @@ private fun normalizeDeckButtons(buttons: List<DeckButton>): List<DeckButton> {
 private fun payloadRequired(actionType: DeckActionType): Boolean {
     return when (actionType) {
         DeckActionType.Settings,
-        DeckActionType.BluetoothStatus -> false
+        DeckActionType.BluetoothStatus,
+        DeckActionType.PreviousPage,
+        DeckActionType.NextPage -> false
         DeckActionType.MediaKey,
         DeckActionType.Hotkey,
         DeckActionType.Text,
@@ -1829,6 +1953,24 @@ private fun loadDeckRows(context: Context): Int {
 
 private fun saveDeckRows(context: Context, rows: Int) {
     context.deckPrefs().edit().putInt(PREF_ROWS, rows.coerceIn(MIN_ROWS, MAX_ROWS)).apply()
+}
+
+private fun loadPageSwipeAxis(context: Context): PageSwipeAxis {
+    return runCatching {
+        PageSwipeAxis.valueOf(context.deckPrefs().getString(PREF_PAGE_SWIPE_AXIS, null) ?: PageSwipeAxis.Horizontal.name)
+    }.getOrDefault(PageSwipeAxis.Horizontal)
+}
+
+private fun savePageSwipeAxis(context: Context, axis: PageSwipeAxis) {
+    context.deckPrefs().edit().putString(PREF_PAGE_SWIPE_AXIS, axis.name).apply()
+}
+
+private fun loadMultiTouchPageSwipe(context: Context): Boolean {
+    return context.deckPrefs().getBoolean(PREF_MULTI_TOUCH_PAGE_SWIPE, true)
+}
+
+private fun saveMultiTouchPageSwipe(context: Context, enabled: Boolean) {
+    context.deckPrefs().edit().putBoolean(PREF_MULTI_TOUCH_PAGE_SWIPE, enabled).apply()
 }
 
 private fun nextDeckButtonId(buttons: List<DeckButton>): Int {
@@ -1887,6 +2029,9 @@ private const val PREF_PAGES = "pages"
 private const val PREF_BUTTONS = "buttons"
 private const val PREF_COLUMNS = "columns"
 private const val PREF_ROWS = "rows"
+private const val PREF_PAGE_SWIPE_AXIS = "page_swipe_axis"
+private const val PREF_MULTI_TOUCH_PAGE_SWIPE = "multi_touch_page_swipe"
+private const val MAX_PAGES = 5
 private const val MIN_COLUMNS = 4
 private const val MAX_COLUMNS = 6
 private const val DEFAULT_COLUMNS = 6
