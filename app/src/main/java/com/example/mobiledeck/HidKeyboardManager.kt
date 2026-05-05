@@ -86,19 +86,13 @@ class HidKeyboardManager(
         0x09, 0x01,
         0xA1, 0x01,
         0x85, MEDIA_REPORT_ID,
+        0x19, 0x00,
+        0x2A, 0xFF, 0x03,
         0x15, 0x00,
-        0x25, 0x01,
-        0x75, 0x01,
-        0x95, 0x08,
-        0x09, 0xE2,
-        0x09, 0xE9,
-        0x09, 0xEA,
-        0x09, 0xCD,
-        0x09, 0xB7,
-        0x09, 0xB5,
-        0x09, 0xB6,
-        0x09, 0xB8,
-        0x81, 0x02,
+        0x26, 0xFF, 0x03,
+        0x75, 0x10,
+        0x95, 0x01,
+        0x81, 0x00,
         0xC0
     ).map { it.toByte() }.toByteArray()
 
@@ -274,6 +268,21 @@ class HidKeyboardManager(
         return sentAny
     }
 
+    @SuppressLint("MissingPermission")
+    fun runWindowsCommand(command: String): Boolean {
+        val device = host ?: return false
+        val hid = hidDevice ?: return false
+        val openRunDialog = hotkeyReport("WIN+R") ?: return false
+        var sent = sendReportTap(hid, device, KEYBOARD_REPORT_ID, openRunDialog, KEYBOARD_REPORT_SIZE)
+        Thread.sleep(250)
+        command.forEach { char ->
+            val report = charReport(char) ?: return@forEach
+            sent = sendReportTap(hid, device, KEYBOARD_REPORT_ID, report, KEYBOARD_REPORT_SIZE) && sent
+        }
+        val enter = hotkeyReport("ENTER") ?: return false
+        return sendReportTap(hid, device, KEYBOARD_REPORT_ID, enter, KEYBOARD_REPORT_SIZE) && sent
+    }
+
     fun hasRequiredPermissions(): Boolean {
         return Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
             REQUIRED_BLUETOOTH_PERMISSIONS.all { permission ->
@@ -339,7 +348,7 @@ class HidKeyboardManager(
         private const val TAG = "MobileDeckHid"
         private const val DEVICE_NAME = "MobileDeck Keyboard"
         private const val KEYBOARD_REPORT_SIZE = 8
-        private const val MEDIA_REPORT_SIZE = 1
+        private const val MEDIA_REPORT_SIZE = 2
         private const val MOD_LEFT_CTRL = 0x01
         private const val MOD_LEFT_SHIFT = 0x02
         private const val MOD_LEFT_ALT = 0x04
@@ -372,30 +381,82 @@ class HidKeyboardManager(
         }
 
         fun charReport(char: Char): ByteArray? {
-            val token = char.uppercaseChar().toString()
-            val key = when {
-                char == ' ' -> 0x2C
-                char in 'a'..'z' || char in 'A'..'Z' -> hidKeyCode(token)
-                char in '0'..'9' -> hidKeyCode(token)
-                else -> null
-            } ?: return null
-            val modifier = if (char.isUpperCase()) MOD_LEFT_SHIFT else 0
-            return keyboardReport(modifier, listOf(key))
+            val mapped = charKey(char) ?: return null
+            val modifier = if (mapped.shift) MOD_LEFT_SHIFT else 0
+            return keyboardReport(modifier, listOf(mapped.keyCode))
         }
 
+        private fun charKey(char: Char): CharKey? {
+            val token = char.uppercaseChar().toString()
+            if (char in 'a'..'z' || char in 'A'..'Z') {
+                return CharKey(hidKeyCode(token) ?: return null, char.isUpperCase())
+            }
+            if (char in '0'..'9') return CharKey(hidKeyCode(token) ?: return null, false)
+            val shiftedDigits = mapOf(
+                '!' to '1',
+                '@' to '2',
+                '#' to '3',
+                '$' to '4',
+                '%' to '5',
+                '^' to '6',
+                '&' to '7',
+                '*' to '8',
+                '(' to '9',
+                ')' to '0'
+            )
+            shiftedDigits[char]?.let { digit ->
+                return CharKey(hidKeyCode(digit.toString()) ?: return null, true)
+            }
+            val punctuation = when (char) {
+                ' ' -> CharKey(0x2C, false)
+                '-' -> CharKey(0x2D, false)
+                '_' -> CharKey(0x2D, true)
+                '=' -> CharKey(0x2E, false)
+                '+' -> CharKey(0x2E, true)
+                '[' -> CharKey(0x2F, false)
+                '{' -> CharKey(0x2F, true)
+                ']' -> CharKey(0x30, false)
+                '}' -> CharKey(0x30, true)
+                '\\' -> CharKey(0x31, false)
+                '|' -> CharKey(0x31, true)
+                ';' -> CharKey(0x33, false)
+                ':' -> CharKey(0x33, true)
+                '\'' -> CharKey(0x34, false)
+                '"' -> CharKey(0x34, true)
+                '`' -> CharKey(0x35, false)
+                '~' -> CharKey(0x35, true)
+                ',' -> CharKey(0x36, false)
+                '<' -> CharKey(0x36, true)
+                '.' -> CharKey(0x37, false)
+                '>' -> CharKey(0x37, true)
+                '/' -> CharKey(0x38, false)
+                '?' -> CharKey(0x38, true)
+                else -> null
+            }
+            return punctuation
+        }
+
+        private data class CharKey(
+            val keyCode: Int,
+            val shift: Boolean
+        )
+
         fun mediaReport(payload: String): ByteArray? {
-            val bit = when (payload.trim().uppercase(Locale.US)) {
-                "MUTE" -> 0
-                "VOLUME_UP", "VOLUMEUP" -> 1
-                "VOLUME_DOWN", "VOLUMEDOWN" -> 2
-                "PLAY_PAUSE", "PLAYPAUSE", "PLAY", "PAUSE" -> 3
-                "STOP" -> 4
-                "NEXT", "NEXT_TRACK" -> 5
-                "PREVIOUS", "PREV", "PREVIOUS_TRACK" -> 6
-                "EJECT" -> 7
+            val usage = when (payload.trim().uppercase(Locale.US)) {
+                "MUTE" -> 0x00E2
+                "VOLUME_UP", "VOLUMEUP" -> 0x00E9
+                "VOLUME_DOWN", "VOLUMEDOWN" -> 0x00EA
+                "PLAY_PAUSE", "PLAYPAUSE", "PLAY", "PAUSE" -> 0x00CD
+                "STOP" -> 0x00B7
+                "NEXT", "NEXT_TRACK" -> 0x00B5
+                "PREVIOUS", "PREV", "PREVIOUS_TRACK" -> 0x00B6
+                "EJECT" -> 0x00B8
                 else -> return null
             }
-            return byteArrayOf((1 shl bit).toByte())
+            return byteArrayOf(
+                (usage and 0xFF).toByte(),
+                ((usage shr 8) and 0xFF).toByte()
+            )
         }
 
         private fun keyboardReport(modifier: Int, keys: List<Int>): ByteArray {

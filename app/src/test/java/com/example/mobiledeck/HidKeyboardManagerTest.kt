@@ -40,8 +40,8 @@ class HidKeyboardManagerTest {
 
     @Test
     fun mediaReport_mapsConsumerControlKeys() {
-        assertArrayEquals(byteArrayOf(0x01), HidKeyboardManager.mediaReport("MUTE"))
-        assertArrayEquals(byteArrayOf(0x08), HidKeyboardManager.mediaReport("PLAY_PAUSE"))
-        assertArrayEquals(byteArrayOf(0x10), HidKeyboardManager.mediaReport("STOP"))
+        assertArrayEquals(byteArrayOf(0xE2.toByte(), 0x00), HidKeyboardManager.mediaReport("MUTE"))
+        assertArrayEquals(byteArrayOf(0xCD.toByte(), 0x00), HidKeyboardManager.mediaReport("PLAY_PAUSE"))
+        assertArrayEquals(byteArrayOf(0xB7.toByte(), 0x00), HidKeyboardManager.mediaReport("STOP"))
     }
 }
