@@ -187,7 +187,8 @@ private data class ActivityLog(
 
 private data class PageAnimationTarget(
     val pageId: Int,
-    val delta: Int
+    val delta: Int,
+    val sequence: Int
 )
 
 private enum class AppPage {
@@ -234,6 +235,7 @@ private fun MobileDeckApp() {
     var multiTouchPageSwipe by remember { mutableStateOf(loadMultiTouchPageSwipe(context)) }
     var pageSwipeAnimation by remember { mutableStateOf(loadPageSwipeAnimation(context)) }
     var lastPageDelta by remember { mutableStateOf(1) }
+    var pageAnimationSequence by remember { mutableStateOf(0) }
     var editingButton by remember { mutableStateOf<DeckButton?>(null) }
     var logs by remember { mutableStateOf(emptyList<ActivityLog>()) }
     var page by remember { mutableStateOf(AppPage.Deck) }
@@ -330,7 +332,10 @@ private fun MobileDeckApp() {
     fun switchDeckPage(delta: Int) {
         val currentIndex = deckPages.indexOfFirst { it.id == activeDeckPage.id }
         val target = (currentIndex + delta).coerceIn(deckPages.indices)
-        if (target != currentIndex) lastPageDelta = delta
+        if (target != currentIndex) {
+            lastPageDelta = delta
+            pageAnimationSequence += 1
+        }
         activeDeckPageId = deckPages[target].id
     }
 
@@ -432,6 +437,7 @@ private fun MobileDeckApp() {
                 multiTouchPageSwipe = multiTouchPageSwipe,
                 pageSwipeAnimation = pageSwipeAnimation,
                 pageSwipeDelta = lastPageDelta,
+                pageAnimationSequence = pageAnimationSequence,
                 onPageSwipe = ::switchDeckPage,
                 onAddPage = ::addDeckPage,
                 onButtonPressed = ::pressDeckButton,
@@ -455,6 +461,7 @@ private fun MobileDeckApp() {
                 multiTouchPageSwipe = multiTouchPageSwipe,
                 pageSwipeAnimation = pageSwipeAnimation,
                 pageSwipeDelta = lastPageDelta,
+                pageAnimationSequence = pageAnimationSequence,
                 onBack = { page = AppPage.Settings },
                 onColumnsChange = { columns ->
                     deckColumns = columns
@@ -951,6 +958,7 @@ private fun LayoutEditorPage(
     multiTouchPageSwipe: Boolean,
     pageSwipeAnimation: Boolean,
     pageSwipeDelta: Int,
+    pageAnimationSequence: Int,
     onBack: () -> Unit,
     onColumnsChange: (Int) -> Unit,
     onRowsChange: (Int) -> Unit,
@@ -1005,6 +1013,7 @@ private fun LayoutEditorPage(
                 multiTouchPageSwipe = multiTouchPageSwipe,
                 pageSwipeAnimation = pageSwipeAnimation,
                 pageSwipeDelta = pageSwipeDelta,
+                pageAnimationSequence = pageAnimationSequence,
                 onPageSwipe = onPageSwipe,
                 onAddPage = onAddPage,
                 onButtonPressed = onButtonEdit,
@@ -1166,6 +1175,7 @@ private fun DeckPage(
     multiTouchPageSwipe: Boolean,
     pageSwipeAnimation: Boolean,
     pageSwipeDelta: Int,
+    pageAnimationSequence: Int,
     onPageSwipe: (Int) -> Unit,
     onAddPage: () -> Unit,
     onButtonPressed: (DeckButton) -> Unit,
@@ -1202,7 +1212,7 @@ private fun DeckPage(
                 .then(swipeModifier)
         ) {
             AnimatedContent(
-                targetState = PageAnimationTarget(activePageId, pageSwipeDelta),
+                targetState = PageAnimationTarget(activePageId, pageSwipeDelta, pageAnimationSequence),
                 modifier = Modifier.fillMaxSize(),
                 transitionSpec = {
                     if (!pageSwipeAnimation) {
@@ -1396,7 +1406,7 @@ private fun ButtonGrid(
                         } else if (button == null) {
                         EmptyDeckSlot(
                             modifier = Modifier.size(cellSize),
-                            showAddIcon = !previewMode,
+                            showAddIcon = previewMode,
                             createOnClick = previewMode,
                             onCreate = { onEmptySlotPressed(slot - 1) }
                         )
