@@ -103,6 +103,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -182,6 +183,11 @@ private data class ActivityLog(
     val payload: String,
     val delivered: Boolean,
     val note: String
+)
+
+private data class PageAnimationTarget(
+    val pageId: Int,
+    val delta: Int
 )
 
 private enum class AppPage {
@@ -311,6 +317,16 @@ private fun MobileDeckApp() {
         saveDeckPages(context, updatedPages)
     }
 
+    fun deleteActiveDeckPage() {
+        if (deckPages.size <= 1) return
+        val currentIndex = deckPages.indexOfFirst { it.id == activeDeckPage.id }.coerceAtLeast(0)
+        val updatedPages = deckPages.filterNot { it.id == activeDeckPage.id }
+        val nextIndex = currentIndex.coerceAtMost(updatedPages.lastIndex)
+        deckPages = updatedPages
+        activeDeckPageId = updatedPages[nextIndex].id
+        saveDeckPages(context, updatedPages)
+    }
+
     fun switchDeckPage(delta: Int) {
         val currentIndex = deckPages.indexOfFirst { it.id == activeDeckPage.id }
         val target = (currentIndex + delta).coerceIn(deckPages.indices)
@@ -421,7 +437,7 @@ private fun MobileDeckApp() {
                 onButtonPressed = ::pressDeckButton,
                 onButtonEdit = {},
                 onButtonMoved = ::moveDeckButtonToSlot,
-                onEmptySlotLongPressed = { slot -> addDeckButton(slot, editAfterCreate = true) }
+                onEmptySlotPressed = { slot -> addDeckButton(slot, editAfterCreate = true) }
             )
 
             AppPage.LayoutEditor -> LayoutEditorPage(
@@ -452,7 +468,7 @@ private fun MobileDeckApp() {
                 onAddPage = ::addDeckPage,
                 onButtonEdit = { editingButton = it },
                 onButtonMoved = ::moveDeckButtonToSlot,
-                onEmptySlotLongPressed = { slot -> addDeckButton(slot, editAfterCreate = true) }
+                onEmptySlotPressed = { slot -> addDeckButton(slot, editAfterCreate = true) }
             )
 
             AppPage.Settings -> SettingsPage(
@@ -507,7 +523,8 @@ private fun MobileDeckApp() {
                 onAddButton = { addDeckButton() },
                 canAddBluetoothStatus = deckPages.none { page -> page.buttons.any { it.actionType == DeckActionType.BluetoothStatus } },
                 onAddBluetoothStatus = ::addBluetoothStatusButton,
-                onAddPage = ::addDeckPage
+                onAddPage = ::addDeckPage,
+                onDeletePage = ::deleteActiveDeckPage
             )
         }
     }
@@ -583,7 +600,8 @@ private fun SettingsPage(
     onAddButton: () -> Unit,
     canAddBluetoothStatus: Boolean,
     onAddBluetoothStatus: () -> Unit,
-    onAddPage: () -> Unit
+    onAddPage: () -> Unit,
+    onDeletePage: () -> Unit
 ) {
     LazyColumn(
         modifier = modifier,
@@ -649,7 +667,8 @@ private fun SettingsPage(
                 onPageSwipeAnimationChange = onPageSwipeAnimationChange,
                 canAddBluetoothStatus = canAddBluetoothStatus,
                 onAddBluetoothStatus = onAddBluetoothStatus,
-                onAddPage = onAddPage
+                onAddPage = onAddPage,
+                onDeletePage = onDeletePage
             )
         }
 
@@ -675,7 +694,8 @@ private fun DeckSettingsPanel(
     onPageSwipeAnimationChange: (Boolean) -> Unit,
     canAddBluetoothStatus: Boolean,
     onAddBluetoothStatus: () -> Unit,
-    onAddPage: () -> Unit
+    onAddPage: () -> Unit,
+    onDeletePage: () -> Unit
 ) {
     Card(
         shape = RoundedCornerShape(8.dp),
@@ -739,6 +759,14 @@ private fun DeckSettingsPanel(
                 onClick = onAddPage
             ) {
                 Text(stringResource(R.string.add_page_count, pageCount, MAX_PAGES))
+            }
+            OutlinedButton(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(8.dp),
+                enabled = pageCount > 1,
+                onClick = onDeletePage
+            ) {
+                Text(stringResource(R.string.delete_current_page))
             }
             if (canAddBluetoothStatus) {
                 OutlinedButton(
@@ -930,7 +958,7 @@ private fun LayoutEditorPage(
     onAddPage: () -> Unit,
     onButtonEdit: (DeckButton) -> Unit,
     onButtonMoved: (DeckButton, Int) -> Unit,
-    onEmptySlotLongPressed: (Int) -> Unit
+    onEmptySlotPressed: (Int) -> Unit
 ) {
     Column(
         modifier = modifier,
@@ -982,7 +1010,7 @@ private fun LayoutEditorPage(
                 onButtonPressed = onButtonEdit,
                 onButtonEdit = onButtonEdit,
                 onButtonMoved = onButtonMoved,
-                onEmptySlotLongPressed = onEmptySlotLongPressed
+                onEmptySlotPressed = onEmptySlotPressed
             )
             VerticalLayoutSlider(
                 modifier = Modifier
@@ -1143,7 +1171,7 @@ private fun DeckPage(
     onButtonPressed: (DeckButton) -> Unit,
     onButtonEdit: (DeckButton) -> Unit,
     onButtonMoved: (DeckButton, Int) -> Unit,
-    onEmptySlotLongPressed: (Int) -> Unit
+    onEmptySlotPressed: (Int) -> Unit
 ) {
     BoxWithConstraints(modifier = modifier) {
         val safeColumns = columns.coerceIn(MIN_COLUMNS, MAX_COLUMNS)
@@ -1174,25 +1202,26 @@ private fun DeckPage(
                 .then(swipeModifier)
         ) {
             AnimatedContent(
-                targetState = activePageId,
+                targetState = PageAnimationTarget(activePageId, pageSwipeDelta),
                 modifier = Modifier.fillMaxSize(),
                 transitionSpec = {
                     if (!pageSwipeAnimation) {
                         fadeIn(tween(0)) togetherWith fadeOut(tween(0))
                     } else if (pageSwipeAxis == PageSwipeAxis.Horizontal) {
-                        slideInHorizontally { width -> pageSwipeDelta.signOrOne() * width } togetherWith
-                            slideOutHorizontally { width -> -pageSwipeDelta.signOrOne() * width }
+                        slideInHorizontally { width -> targetState.delta.signOrOne() * width } togetherWith
+                            slideOutHorizontally { width -> -targetState.delta.signOrOne() * width }
                     } else {
-                        slideInVertically { height -> pageSwipeDelta.signOrOne() * height } togetherWith
-                            slideOutVertically { height -> -pageSwipeDelta.signOrOne() * height }
+                        slideInVertically { height -> targetState.delta.signOrOne() * height } togetherWith
+                            slideOutVertically { height -> -targetState.delta.signOrOne() * height }
                     }
                 },
                 label = "pageSwipe"
-            ) {
+            ) { target ->
+                val targetButtons = deckPages.firstOrNull { it.id == target.pageId }?.buttons.orEmpty()
                 ButtonGrid(
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = indicatorPadding,
-                    buttons = buttons,
+                    buttons = targetButtons,
                     columns = safeColumns,
                     rows = safeRows,
                     cellSize = cellSize,
@@ -1202,7 +1231,7 @@ private fun DeckPage(
                     onButtonPressed = onButtonPressed,
                     onButtonEdit = onButtonEdit,
                     onButtonMoved = onButtonMoved,
-                    onEmptySlotLongPressed = onEmptySlotLongPressed
+                    onEmptySlotPressed = onEmptySlotPressed
                 )
             }
             PageIndicator(
@@ -1281,9 +1310,12 @@ private fun Modifier.multiTouchPageSwipe(
             var maxPointerCount = 0
 
             while (true) {
-                val event = awaitPointerEvent()
+                val event = awaitPointerEvent(PointerEventPass.Initial)
                 val pressed = event.changes.filter { it.pressed }
                 if (pressed.isNotEmpty()) {
+                    if (pressed.size >= 2) {
+                        event.changes.forEach { if (it.pressed) it.consume() }
+                    }
                     val centroid = pressed
                         .map { it.position }
                         .reduce { acc, offset -> acc + offset } / pressed.size.toFloat()
@@ -1299,6 +1331,7 @@ private fun Modifier.multiTouchPageSwipe(
                     }
                 } else if (tracking) {
                     if (maxPointerCount in 2..3) {
+                        event.changes.forEach { it.consume() }
                         val threshold = 80f
                         when (axis) {
                             PageSwipeAxis.Horizontal -> {
@@ -1339,7 +1372,7 @@ private fun ButtonGrid(
     onButtonPressed: (DeckButton) -> Unit,
     onButtonEdit: (DeckButton) -> Unit,
     onButtonMoved: (DeckButton, Int) -> Unit,
-    onEmptySlotLongPressed: (Int) -> Unit
+    onEmptySlotPressed: (Int) -> Unit
 ) {
     val safeColumns = columns.coerceAtLeast(1)
     val slotCount = safeColumns * rows.coerceAtLeast(1)
@@ -1361,10 +1394,12 @@ private fun ButtonGrid(
                                 status = status
                             )
                         } else if (button == null) {
-                            EmptyDeckSlot(
-                                modifier = Modifier.size(cellSize),
-                                onLongPress = { onEmptySlotLongPressed(slot - 1) }
-                            )
+                        EmptyDeckSlot(
+                            modifier = Modifier.size(cellSize),
+                            showAddIcon = !previewMode,
+                            createOnClick = previewMode,
+                            onCreate = { onEmptySlotPressed(slot - 1) }
+                        )
                         } else {
                             DeckKey(
                                 modifier = Modifier.size(cellSize),
@@ -1425,23 +1460,27 @@ private fun TitleDeckSlot(
 @OptIn(ExperimentalFoundationApi::class)
 private fun EmptyDeckSlot(
     modifier: Modifier = Modifier,
-    onLongPress: () -> Unit
+    showAddIcon: Boolean,
+    createOnClick: Boolean,
+    onCreate: () -> Unit
 ) {
     Surface(
         modifier = modifier.combinedClickable(
-            onClick = {},
-            onLongClick = onLongPress
+            onClick = { if (createOnClick) onCreate() },
+            onLongClick = { if (!createOnClick) onCreate() }
         ),
         shape = RoundedCornerShape(8.dp),
         tonalElevation = 0.dp,
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.36f)
     ) {
         Box(contentAlignment = Alignment.Center) {
-            Text(
-                text = "+",
-                style = MaterialTheme.typography.titleLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
-            )
+            if (showAddIcon) {
+                Text(
+                    text = "+",
+                    style = MaterialTheme.typography.titleLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                )
+            }
         }
     }
 }

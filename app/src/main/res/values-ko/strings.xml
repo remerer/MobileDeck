@@ -17,6 +17,7 @@
     <string name="page_swipe_animation_on">페이지 전환 애니메이션 켜짐</string>
     <string name="page_swipe_animation_off">페이지 전환 애니메이션 꺼짐</string>
     <string name="add_page_count">페이지 추가 (%1$d/%2$d)</string>
+    <string name="delete_current_page">현재 페이지 삭제</string>
     <string name="add_bluetooth_status_key">블루투스 상태 키 추가</string>
     <string name="register_hid">HID 등록</string>
     <string name="stop">중지</string>

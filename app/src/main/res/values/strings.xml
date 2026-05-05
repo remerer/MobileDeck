@@ -17,6 +17,7 @@
     <string name="page_swipe_animation_on">Page swipe animation on</string>
     <string name="page_swipe_animation_off">Page swipe animation off</string>
     <string name="add_page_count">Add page (%1$d/%2$d)</string>
+    <string name="delete_current_page">Delete current page</string>
     <string name="add_bluetooth_status_key">Add Bluetooth status key</string>
     <string name="register_hid">Register HID</string>
     <string name="stop">Stop</string>
