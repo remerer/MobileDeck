@@ -221,7 +221,8 @@ private fun MobileDeckApp() {
 
     fun addDeckButton(position: Int? = null, editAfterCreate: Boolean = false) {
         val colors = defaultDeckColors()
-        val targetPosition = position ?: nextOpenPosition(deckButtons, deckColumns * deckRows)
+        val buttonCapacity = deckColumns * deckRows - 1
+        val targetPosition = position ?: nextOpenPosition(deckButtons, buttonCapacity)
         val newButton = DeckButton(
             id = nextDeckButtonId(deckPages.flatMap { it.buttons }),
             title = "New key",
@@ -234,9 +235,8 @@ private fun MobileDeckApp() {
             color = colors[deckButtons.size % colors.size],
             position = targetPosition
         )
-        val pageCapacity = deckColumns * deckRows
-        if (position == null && deckButtons.size >= pageCapacity && deckPages.size >= MAX_PAGES) return
-        val updatedPages = if (position == null && deckButtons.size >= pageCapacity) {
+        if (position == null && deckButtons.size >= buttonCapacity && deckPages.size >= MAX_PAGES) return
+        val updatedPages = if (position == null && deckButtons.size >= buttonCapacity) {
             val newPage = DeckPageConfig(
                 id = nextDeckPageId(deckPages),
                 name = "Page ${deckPages.size + 1}",
@@ -266,7 +266,7 @@ private fun MobileDeckApp() {
             actionType = DeckActionType.BluetoothStatus,
             payload = "",
             color = colors[deckButtons.size % colors.size],
-            position = nextOpenPosition(deckButtons, deckColumns * deckRows)
+            position = nextOpenPosition(deckButtons, deckColumns * deckRows - 1)
         )
         val updatedPages = updateDeckPage(deckPages, activeDeckPage.id) { it.buttons + newButton }
         deckPages = updatedPages
@@ -338,7 +338,7 @@ private fun MobileDeckApp() {
     }
 
     fun moveDeckButtonToSlot(button: DeckButton, targetPosition: Int) {
-        val pageCapacity = deckColumns * deckRows
+        val pageCapacity = deckColumns * deckRows - 1
         if (targetPosition !in 0 until pageCapacity || button.position == targetPosition) return
         val targetButton = deckButtons.firstOrNull { it.position == targetPosition }
         val updatedPages = updateDeckPage(deckPages, activeDeckPage.id) { deckPage ->
@@ -1045,36 +1045,14 @@ private fun DeckPage(
             minOf(maxCellWidth, maxCellHeight).toDp()
         }
 
-        Column(
+        Box(
             modifier = Modifier
                 .fillMaxSize()
-                .then(swipeModifier),
-            verticalArrangement = Arrangement.spacedBy(spacing)
+                .then(swipeModifier)
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "MobileDeck",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Box(
-                    modifier = Modifier
-                        .size(8.dp)
-                        .clip(RoundedCornerShape(50))
-                        .background(statusDotColor(status.state))
-                )
-                Spacer(Modifier.weight(1f))
-            }
             ButtonGrid(
                 modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth(),
+                    .fillMaxSize(),
                 buttons = buttons,
                 columns = safeColumns,
                 rows = safeRows,
@@ -1088,9 +1066,18 @@ private fun DeckPage(
                 onEmptySlotLongPressed = onEmptySlotLongPressed
             )
             PageIndicator(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .align(
+                        if (pageSwipeAxis == PageSwipeAxis.Horizontal) {
+                            Alignment.BottomCenter
+                        } else {
+                            Alignment.CenterStart
+                        }
+                    )
+                    .padding(6.dp),
                 pageCount = deckPages.size,
-                activeIndex = deckPages.indexOfFirst { it.id == activePageId }.coerceAtLeast(0)
+                activeIndex = deckPages.indexOfFirst { it.id == activePageId }.coerceAtLeast(0),
+                axis = pageSwipeAxis
             )
         }
     }
@@ -1100,29 +1087,44 @@ private fun DeckPage(
 private fun PageIndicator(
     modifier: Modifier = Modifier,
     pageCount: Int,
-    activeIndex: Int
+    activeIndex: Int,
+    axis: PageSwipeAxis = PageSwipeAxis.Horizontal
 ) {
-    Row(
-        modifier = modifier,
-        horizontalArrangement = Arrangement.End,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
+    val content: @Composable () -> Unit = {
         repeat(pageCount.coerceIn(1, MAX_PAGES)) { index ->
-            Box(
-                modifier = Modifier
-                    .padding(horizontal = 3.dp)
-                    .size(if (index == activeIndex) 9.dp else 6.dp)
-                    .clip(RoundedCornerShape(50))
-                    .background(
-                        if (index == activeIndex) {
-                            MaterialTheme.colorScheme.primary
-                        } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f)
-                        }
-                    )
-            )
+            PageDot(index == activeIndex)
         }
     }
+    if (axis == PageSwipeAxis.Horizontal) {
+        Row(
+            modifier = modifier,
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically
+        ) { content() }
+    } else {
+        Column(
+            modifier = modifier,
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) { content() }
+    }
+}
+
+@Composable
+private fun PageDot(active: Boolean) {
+    Box(
+        modifier = Modifier
+            .padding(3.dp)
+            .size(if (active) 9.dp else 6.dp)
+            .clip(RoundedCornerShape(50))
+            .background(
+                if (active) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f)
+                }
+            )
+    )
 }
 
 private fun Modifier.multiTouchPageSwipe(
@@ -1199,7 +1201,7 @@ private fun ButtonGrid(
     val safeColumns = columns.coerceAtLeast(1)
     val slotCount = safeColumns * rows.coerceAtLeast(1)
     val slots = List(slotCount) { slot ->
-        buttons.firstOrNull { it.position == slot }
+        if (slot == 0) null else buttons.firstOrNull { it.position == slot - 1 }
     }
     Column(
         modifier = modifier,
@@ -1209,10 +1211,15 @@ private fun ButtonGrid(
             Row(horizontalArrangement = Arrangement.spacedBy(spacing)) {
                 rowButtons.forEachIndexed { columnIndex, button ->
                     val slot = rowIndex * safeColumns + columnIndex
-                    if (button == null) {
+                    if (slot == 0) {
+                        TitleDeckSlot(
+                            modifier = Modifier.size(cellSize),
+                            status = status
+                        )
+                    } else if (button == null) {
                         EmptyDeckSlot(
                             modifier = Modifier.size(cellSize),
-                            onLongPress = { onEmptySlotLongPressed(slot) }
+                            onLongPress = { onEmptySlotLongPressed(slot - 1) }
                         )
                     } else {
                         DeckKey(
@@ -1222,16 +1229,49 @@ private fun ButtonGrid(
                             enabled = true,
                             previewMode = previewMode,
                             columns = safeColumns,
-                            slot = slot,
+                            slot = slot - 1,
                             cellSize = cellSize,
                             spacing = spacing,
                             onPressed = { onButtonPressed(button) },
                             onEdit = { onButtonEdit(button) },
-                            onMove = { targetSlot -> onButtonMoved(button, targetSlot.coerceIn(0, slotCount - 1)) }
+                            onMove = { targetSlot -> onButtonMoved(button, targetSlot.coerceIn(0, slotCount - 2)) }
                         )
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun TitleDeckSlot(
+    modifier: Modifier = Modifier,
+    status: HidStatus
+) {
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(8.dp),
+        tonalElevation = 0.dp,
+        color = Color.Transparent
+    ) {
+        Column(
+            modifier = Modifier.padding(8.dp),
+            verticalArrangement = Arrangement.Center
+        ) {
+            Text(
+                text = "MobileDeck",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+            Box(
+                modifier = Modifier
+                    .padding(top = 6.dp)
+                    .size(8.dp)
+                    .clip(RoundedCornerShape(50))
+                    .background(statusDotColor(status.state))
+            )
         }
     }
 }
@@ -1920,7 +1960,7 @@ private fun normalizeDeckButtons(buttons: List<DeckButton>): List<DeckButton> {
         actionType = DeckActionType.Settings,
         payload = "",
         color = colors[4],
-        position = nextOpenPosition(buttons, DEFAULT_COLUMNS * DEFAULT_ROWS)
+        position = nextOpenPosition(buttons, DEFAULT_COLUMNS * DEFAULT_ROWS - 1)
     )
     return listOf(settingsButton) + buttons
 }
