@@ -48,6 +48,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -152,7 +153,7 @@ private data class ActivityLog(
 
 private enum class AppPage {
     Deck,
-    DeckPreview,
+    LayoutEditor,
     Settings
 }
 
@@ -363,7 +364,7 @@ private fun MobileDeckApp() {
                 onEmptySlotLongPressed = { slot -> addDeckButton(slot, editAfterCreate = true) }
             )
 
-            AppPage.DeckPreview -> DeckPreviewPage(
+            AppPage.LayoutEditor -> LayoutEditorPage(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(innerPadding)
@@ -402,7 +403,10 @@ private fun MobileDeckApp() {
                 pageCount = deckPages.size,
                 pairedHosts = pairedHosts,
                 onBack = { page = AppPage.Deck },
-                onPreview = { page = AppPage.DeckPreview },
+                deckPages = deckPages,
+                activePageId = activeDeckPage.id,
+                onLayoutEditor = { page = AppPage.LayoutEditor },
+                onPageSelected = { activeDeckPageId = it },
                 onStart = ::startHid,
                 onStop = { hidManager.stop() },
                 onMakeDiscoverable = {
@@ -478,11 +482,14 @@ private fun SettingsPage(
     logs: List<ActivityLog>,
     columns: Int,
     rows: Int,
+    deckPages: List<DeckPageConfig>,
+    activePageId: Int,
     pageName: String,
     pageCount: Int,
     pairedHosts: List<PairedHidHost>,
     onBack: () -> Unit,
-    onPreview: () -> Unit,
+    onLayoutEditor: () -> Unit,
+    onPageSelected: (Int) -> Unit,
     onStart: () -> Unit,
     onStop: () -> Unit,
     onMakeDiscoverable: () -> Unit,
@@ -513,7 +520,7 @@ private fun SettingsPage(
                         fontWeight = FontWeight.Bold
                     )
                     Text(
-                        text = "Connection, layout, and diagnostics",
+                    text = "Connection, pages, and diagnostics",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -526,9 +533,9 @@ private fun SettingsPage(
                 }
                 OutlinedButton(
                     shape = RoundedCornerShape(8.dp),
-                    onClick = onPreview
+                    onClick = onLayoutEditor
                 ) {
-                    Text("Preview")
+                    Text("Layout editor")
                 }
             }
         }
@@ -547,8 +554,11 @@ private fun SettingsPage(
 
         item {
             DeckSettingsPanel(
+                deckPages = deckPages,
+                activePageId = activePageId,
                 pageName = pageName,
                 pageCount = pageCount,
+                onPageSelected = onPageSelected,
                 canAddBluetoothStatus = canAddBluetoothStatus,
                 onAddBluetoothStatus = onAddBluetoothStatus,
                 onAddPage = onAddPage
@@ -563,8 +573,11 @@ private fun SettingsPage(
 
 @Composable
 private fun DeckSettingsPanel(
+    deckPages: List<DeckPageConfig>,
+    activePageId: Int,
     pageName: String,
     pageCount: Int,
+    onPageSelected: (Int) -> Unit,
     canAddBluetoothStatus: Boolean,
     onAddBluetoothStatus: () -> Unit,
     onAddPage: () -> Unit
@@ -591,6 +604,20 @@ private fun DeckSettingsPanel(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                deckPages.forEachIndexed { index, page ->
+                    OutlinedButton(
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(8.dp),
+                        onClick = { onPageSelected(page.id) }
+                    ) {
+                        Text(if (page.id == activePageId) "Page ${index + 1}" else (index + 1).toString())
+                    }
+                }
+            }
             OutlinedButton(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(8.dp),
@@ -769,7 +796,7 @@ private fun StatusPill(state: HidConnectionState) {
 }
 
 @Composable
-private fun DeckPreviewPage(
+private fun LayoutEditorPage(
     modifier: Modifier = Modifier,
     buttons: List<DeckButton>,
     deckPages: List<DeckPageConfig>,
@@ -801,24 +828,20 @@ private fun DeckPreviewPage(
             ) {
                 Text("Settings")
             }
-            listOf(4, 5, 6).forEach { option ->
-                OutlinedButton(
-                    modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(8.dp),
-                    onClick = { onColumnsChange(option) }
-                ) {
-                    Text(if (columns == option) "$option columns" else option.toString())
-                }
-            }
-            listOf(2, 3, 4).forEach { option ->
-                OutlinedButton(
-                    modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(8.dp),
-                    onClick = { onRowsChange(option) }
-                ) {
-                    Text(if (rows == option) "$option rows" else option.toString())
-                }
-            }
+            LayoutSlider(
+                modifier = Modifier.weight(1f),
+                label = "Columns",
+                value = columns,
+                range = MIN_COLUMNS..MAX_COLUMNS,
+                onValueChange = onColumnsChange
+            )
+            LayoutSlider(
+                modifier = Modifier.weight(1f),
+                label = "Rows",
+                value = rows,
+                range = MIN_ROWS..MAX_ROWS,
+                onValueChange = onRowsChange
+            )
         }
 
         DeckPage(
@@ -838,6 +861,31 @@ private fun DeckPreviewPage(
             onButtonEdit = onButtonEdit,
             onButtonMoved = onButtonMoved,
             onEmptySlotLongPressed = onEmptySlotLongPressed
+        )
+    }
+}
+
+@Composable
+private fun LayoutSlider(
+    modifier: Modifier = Modifier,
+    label: String,
+    value: Int,
+    range: IntRange,
+    onValueChange: (Int) -> Unit
+) {
+    Column(modifier = modifier) {
+        Text(
+            text = "$label $value",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Slider(
+            value = value.toFloat(),
+            onValueChange = { next ->
+                onValueChange(next.roundToInt().coerceIn(range.first, range.last))
+            },
+            valueRange = range.first.toFloat()..range.last.toFloat(),
+            steps = (range.last - range.first - 1).coerceAtLeast(0)
         )
     }
 }
@@ -1121,7 +1169,12 @@ private fun DeckKey(
     ) {
         Column(
             modifier = Modifier.padding(8.dp),
-            verticalArrangement = Arrangement.SpaceBetween
+            verticalArrangement = if (button.displayMode == DeckDisplayMode.IconOnly) {
+                Arrangement.Center
+            } else {
+                Arrangement.SpaceBetween
+            },
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 DeckButtonIcon(
