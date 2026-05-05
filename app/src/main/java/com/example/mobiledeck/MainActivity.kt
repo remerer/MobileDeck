@@ -17,6 +17,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -36,7 +37,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenuItem
@@ -54,10 +54,8 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.Bluetooth
-import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Keyboard
-import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Settings
@@ -69,7 +67,6 @@ import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.VolumeDown
 import androidx.compose.material.icons.filled.VolumeOff
 import androidx.compose.material.icons.filled.VolumeUp
-import androidx.compose.material.icons.filled.Web
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -82,18 +79,22 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.example.mobiledeck.ui.theme.MobileDeckTheme
 import org.json.JSONArray
 import org.json.JSONObject
+import kotlin.math.roundToInt
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -132,7 +133,8 @@ private data class DeckButton(
     val displayMode: DeckDisplayMode,
     val actionType: DeckActionType,
     val payload: String,
-    val color: Color
+    val color: Color,
+    val position: Int = 0
 )
 
 private data class DeckPageConfig(
@@ -150,6 +152,7 @@ private data class ActivityLog(
 
 private enum class AppPage {
     Deck,
+    DeckPreview,
     Settings
 }
 
@@ -202,8 +205,9 @@ private fun MobileDeckApp() {
         pairedHosts = hidManager.pairedHosts()
     }
 
-    fun addDeckButton() {
+    fun addDeckButton(position: Int? = null, editAfterCreate: Boolean = false) {
         val colors = defaultDeckColors()
+        val targetPosition = position ?: nextOpenPosition(deckButtons, deckColumns * deckRows)
         val newButton = DeckButton(
             id = nextDeckButtonId(deckPages.flatMap { it.buttons }),
             title = "New key",
@@ -213,14 +217,15 @@ private fun MobileDeckApp() {
             displayMode = DeckDisplayMode.IconAndText,
             actionType = DeckActionType.Hotkey,
             payload = "CTRL+F9",
-            color = colors[deckButtons.size % colors.size]
+            color = colors[deckButtons.size % colors.size],
+            position = targetPosition
         )
         val pageCapacity = deckColumns * deckRows
-        val updatedPages = if (deckButtons.size >= pageCapacity) {
+        val updatedPages = if (position == null && deckButtons.size >= pageCapacity) {
             val newPage = DeckPageConfig(
                 id = nextDeckPageId(deckPages),
                 name = "Page ${deckPages.size + 1}",
-                buttons = listOf(newButton)
+                buttons = listOf(newButton.copy(position = 0))
             )
             activeDeckPageId = newPage.id
             deckPages + newPage
@@ -229,6 +234,9 @@ private fun MobileDeckApp() {
         }
         deckPages = updatedPages
         saveDeckPages(context, updatedPages)
+        if (editAfterCreate) {
+            editingButton = newButton
+        }
     }
 
     fun addBluetoothStatusButton() {
@@ -242,7 +250,8 @@ private fun MobileDeckApp() {
             displayMode = DeckDisplayMode.IconAndText,
             actionType = DeckActionType.BluetoothStatus,
             payload = "",
-            color = colors[deckButtons.size % colors.size]
+            color = colors[deckButtons.size % colors.size],
+            position = nextOpenPosition(deckButtons, deckColumns * deckRows)
         )
         val updatedPages = updateDeckPage(deckPages, activeDeckPage.id) { it.buttons + newButton }
         deckPages = updatedPages
@@ -296,6 +305,23 @@ private fun MobileDeckApp() {
         ) + logs.take(9)
     }
 
+    fun moveDeckButtonToSlot(button: DeckButton, targetPosition: Int) {
+        val pageCapacity = deckColumns * deckRows
+        if (targetPosition !in 0 until pageCapacity || button.position == targetPosition) return
+        val targetButton = deckButtons.firstOrNull { it.position == targetPosition }
+        val updatedPages = updateDeckPage(deckPages, activeDeckPage.id) { deckPage ->
+            deckPage.buttons.map { existing ->
+                when (existing.id) {
+                    button.id -> existing.copy(position = targetPosition)
+                    targetButton?.id -> existing.copy(position = button.position)
+                    else -> existing
+                }
+            }
+        }
+        deckPages = updatedPages
+        saveDeckPages(context, updatedPages)
+    }
+
     DisposableEffect(hidManager) {
         onDispose { hidManager.stop() }
     }
@@ -328,11 +354,40 @@ private fun MobileDeckApp() {
                 columns = deckColumns,
                 rows = deckRows,
                 status = hidStatus,
+                previewMode = false,
                 onPageSelected = { activeDeckPageId = it },
                 onAddPage = ::addDeckPage,
                 onButtonPressed = ::pressDeckButton,
+                onButtonEdit = {},
+                onButtonMoved = ::moveDeckButtonToSlot,
+                onEmptySlotLongPressed = { slot -> addDeckButton(slot, editAfterCreate = true) }
+            )
+
+            AppPage.DeckPreview -> DeckPreviewPage(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
+                    .padding(10.dp),
+                buttons = deckButtons,
+                deckPages = deckPages,
+                activePageId = activeDeckPage.id,
+                columns = deckColumns,
+                rows = deckRows,
+                status = hidStatus,
+                onBack = { page = AppPage.Settings },
+                onColumnsChange = { columns ->
+                    deckColumns = columns
+                    saveDeckColumns(context, columns)
+                },
+                onRowsChange = { rows ->
+                    deckRows = rows
+                    saveDeckRows(context, rows)
+                },
+                onPageSelected = { activeDeckPageId = it },
+                onAddPage = ::addDeckPage,
                 onButtonEdit = { editingButton = it },
-                onEmptySlotPressed = ::addDeckButton
+                onButtonMoved = ::moveDeckButtonToSlot,
+                onEmptySlotLongPressed = { slot -> addDeckButton(slot, editAfterCreate = true) }
             )
 
             AppPage.Settings -> SettingsPage(
@@ -347,6 +402,7 @@ private fun MobileDeckApp() {
                 pageCount = deckPages.size,
                 pairedHosts = pairedHosts,
                 onBack = { page = AppPage.Deck },
+                onPreview = { page = AppPage.DeckPreview },
                 onStart = ::startHid,
                 onStop = { hidManager.stop() },
                 onMakeDiscoverable = {
@@ -366,7 +422,7 @@ private fun MobileDeckApp() {
                     deckRows = rows
                     saveDeckRows(context, rows)
                 },
-                onAddButton = ::addDeckButton,
+                onAddButton = { addDeckButton() },
                 canAddBluetoothStatus = deckPages.none { page -> page.buttons.any { it.actionType == DeckActionType.BluetoothStatus } },
                 onAddBluetoothStatus = ::addBluetoothStatusButton,
                 onAddPage = ::addDeckPage
@@ -426,6 +482,7 @@ private fun SettingsPage(
     pageCount: Int,
     pairedHosts: List<PairedHidHost>,
     onBack: () -> Unit,
+    onPreview: () -> Unit,
     onStart: () -> Unit,
     onStop: () -> Unit,
     onMakeDiscoverable: () -> Unit,
@@ -467,6 +524,12 @@ private fun SettingsPage(
                 ) {
                     Text("Deck")
                 }
+                OutlinedButton(
+                    shape = RoundedCornerShape(8.dp),
+                    onClick = onPreview
+                ) {
+                    Text("Preview")
+                }
             }
         }
 
@@ -484,13 +547,8 @@ private fun SettingsPage(
 
         item {
             DeckSettingsPanel(
-                columns = columns,
-                rows = rows,
                 pageName = pageName,
                 pageCount = pageCount,
-                onColumnsChange = onColumnsChange,
-                onRowsChange = onRowsChange,
-                onAddButton = onAddButton,
                 canAddBluetoothStatus = canAddBluetoothStatus,
                 onAddBluetoothStatus = onAddBluetoothStatus,
                 onAddPage = onAddPage
@@ -505,13 +563,8 @@ private fun SettingsPage(
 
 @Composable
 private fun DeckSettingsPanel(
-    columns: Int,
-    rows: Int,
     pageName: String,
     pageCount: Int,
-    onColumnsChange: (Int) -> Unit,
-    onRowsChange: (Int) -> Unit,
-    onAddButton: () -> Unit,
     canAddBluetoothStatus: Boolean,
     onAddBluetoothStatus: () -> Unit,
     onAddPage: () -> Unit
@@ -538,43 +591,6 @@ private fun DeckSettingsPanel(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                listOf(4, 5, 6).forEach { option ->
-                    val selected = columns == option
-                    OutlinedButton(
-                        modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(8.dp),
-                        onClick = { onColumnsChange(option) }
-                    ) {
-                        Text(if (selected) "$option columns" else option.toString())
-                    }
-                }
-            }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                listOf(2, 3, 4).forEach { option ->
-                    val selected = rows == option
-                    OutlinedButton(
-                        modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(8.dp),
-                        onClick = { onRowsChange(option) }
-                    ) {
-                        Text(if (selected) "$option rows" else option.toString())
-                    }
-                }
-                Button(
-                    modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(8.dp),
-                    onClick = onAddButton
-                ) {
-                    Text("Add key")
-                }
-            }
             OutlinedButton(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(8.dp),
@@ -753,6 +769,80 @@ private fun StatusPill(state: HidConnectionState) {
 }
 
 @Composable
+private fun DeckPreviewPage(
+    modifier: Modifier = Modifier,
+    buttons: List<DeckButton>,
+    deckPages: List<DeckPageConfig>,
+    activePageId: Int,
+    columns: Int,
+    rows: Int,
+    status: HidStatus,
+    onBack: () -> Unit,
+    onColumnsChange: (Int) -> Unit,
+    onRowsChange: (Int) -> Unit,
+    onPageSelected: (Int) -> Unit,
+    onAddPage: () -> Unit,
+    onButtonEdit: (DeckButton) -> Unit,
+    onButtonMoved: (DeckButton, Int) -> Unit,
+    onEmptySlotLongPressed: (Int) -> Unit
+) {
+    Column(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            OutlinedButton(
+                shape = RoundedCornerShape(8.dp),
+                onClick = onBack
+            ) {
+                Text("Settings")
+            }
+            listOf(4, 5, 6).forEach { option ->
+                OutlinedButton(
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(8.dp),
+                    onClick = { onColumnsChange(option) }
+                ) {
+                    Text(if (columns == option) "$option columns" else option.toString())
+                }
+            }
+            listOf(2, 3, 4).forEach { option ->
+                OutlinedButton(
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(8.dp),
+                    onClick = { onRowsChange(option) }
+                ) {
+                    Text(if (rows == option) "$option rows" else option.toString())
+                }
+            }
+        }
+
+        DeckPage(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth(),
+            buttons = buttons,
+            deckPages = deckPages,
+            activePageId = activePageId,
+            columns = columns,
+            rows = rows,
+            status = status,
+            previewMode = true,
+            onPageSelected = onPageSelected,
+            onAddPage = onAddPage,
+            onButtonPressed = onButtonEdit,
+            onButtonEdit = onButtonEdit,
+            onButtonMoved = onButtonMoved,
+            onEmptySlotLongPressed = onEmptySlotLongPressed
+        )
+    }
+}
+
+@Composable
 private fun DeckPage(
     modifier: Modifier = Modifier,
     buttons: List<DeckButton>,
@@ -761,11 +851,13 @@ private fun DeckPage(
     columns: Int,
     rows: Int,
     status: HidStatus,
+    previewMode: Boolean,
     onPageSelected: (Int) -> Unit,
     onAddPage: () -> Unit,
     onButtonPressed: (DeckButton) -> Unit,
     onButtonEdit: (DeckButton) -> Unit,
-    onEmptySlotPressed: () -> Unit
+    onButtonMoved: (DeckButton, Int) -> Unit,
+    onEmptySlotLongPressed: (Int) -> Unit
 ) {
     BoxWithConstraints(modifier = modifier) {
         val safeColumns = columns.coerceIn(MIN_COLUMNS, MAX_COLUMNS)
@@ -805,10 +897,13 @@ private fun DeckPage(
                 columns = safeColumns,
                 rows = safeRows,
                 cellSize = cellSize,
+                spacing = spacing,
                 status = status,
+                previewMode = previewMode,
                 onButtonPressed = onButtonPressed,
                 onButtonEdit = onButtonEdit,
-                onEmptySlotPressed = onEmptySlotPressed
+                onButtonMoved = onButtonMoved,
+                onEmptySlotLongPressed = onEmptySlotLongPressed
             )
         }
     }
@@ -860,7 +955,7 @@ private fun DeckRail(
         repeat((rows - visiblePages.size).coerceAtLeast(0)) {
             EmptyDeckSlot(
                 modifier = Modifier.size(cellSize),
-                onClick = onAddPage
+                onLongPress = onAddPage
             )
         }
     }
@@ -897,25 +992,32 @@ private fun ButtonGrid(
     buttons: List<DeckButton>,
     columns: Int,
     rows: Int,
-    cellSize: androidx.compose.ui.unit.Dp,
+    cellSize: Dp,
+    spacing: Dp,
     status: HidStatus,
+    previewMode: Boolean,
     onButtonPressed: (DeckButton) -> Unit,
     onButtonEdit: (DeckButton) -> Unit,
-    onEmptySlotPressed: () -> Unit
+    onButtonMoved: (DeckButton, Int) -> Unit,
+    onEmptySlotLongPressed: (Int) -> Unit
 ) {
     val safeColumns = columns.coerceAtLeast(1)
-    val slots = List(safeColumns * rows.coerceAtLeast(1)) { buttons.getOrNull(it) }
+    val slotCount = safeColumns * rows.coerceAtLeast(1)
+    val slots = List(slotCount) { slot ->
+        buttons.firstOrNull { it.position == slot }
+    }
     Column(
         modifier = modifier,
-        verticalArrangement = Arrangement.spacedBy(8.dp)
+        verticalArrangement = Arrangement.spacedBy(spacing)
     ) {
-        slots.chunked(safeColumns).forEach { rowButtons ->
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                rowButtons.forEach { button ->
+        slots.chunked(safeColumns).forEachIndexed { rowIndex, rowButtons ->
+            Row(horizontalArrangement = Arrangement.spacedBy(spacing)) {
+                rowButtons.forEachIndexed { columnIndex, button ->
+                    val slot = rowIndex * safeColumns + columnIndex
                     if (button == null) {
                         EmptyDeckSlot(
                             modifier = Modifier.size(cellSize),
-                            onClick = onEmptySlotPressed
+                            onLongPress = { onEmptySlotLongPressed(slot) }
                         )
                     } else {
                         DeckKey(
@@ -923,8 +1025,14 @@ private fun ButtonGrid(
                             button = button,
                             status = status,
                             enabled = true,
+                            previewMode = previewMode,
+                            columns = safeColumns,
+                            slot = slot,
+                            cellSize = cellSize,
+                            spacing = spacing,
                             onPressed = { onButtonPressed(button) },
-                            onEdit = { onButtonEdit(button) }
+                            onEdit = { onButtonEdit(button) },
+                            onMove = { targetSlot -> onButtonMoved(button, targetSlot.coerceIn(0, slotCount - 1)) }
                         )
                     }
                 }
@@ -937,10 +1045,13 @@ private fun ButtonGrid(
 @OptIn(ExperimentalFoundationApi::class)
 private fun EmptyDeckSlot(
     modifier: Modifier = Modifier,
-    onClick: () -> Unit
+    onLongPress: () -> Unit
 ) {
     Surface(
-        modifier = modifier.combinedClickable(onClick = onClick),
+        modifier = modifier.combinedClickable(
+            onClick = {},
+            onLongClick = onLongPress
+        ),
         shape = RoundedCornerShape(8.dp),
         tonalElevation = 0.dp,
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.36f)
@@ -962,17 +1073,47 @@ private fun DeckKey(
     button: DeckButton,
     status: HidStatus,
     enabled: Boolean,
+    previewMode: Boolean,
+    columns: Int,
+    slot: Int,
+    cellSize: Dp,
+    spacing: Dp,
     onPressed: () -> Unit,
-    onEdit: () -> Unit
+    onEdit: () -> Unit,
+    onMove: (Int) -> Unit
 ) {
     val containerColor = if (enabled) button.color else MaterialTheme.colorScheme.surfaceVariant
     val contentColor = if (enabled) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
+    val density = LocalDensity.current
+    var dragOffset by remember(button.id) { mutableStateOf(Offset.Zero) }
+    val dragModifier = if (previewMode) {
+        Modifier.pointerInput(button.id, columns, slot, cellSize, spacing) {
+            detectDragGesturesAfterLongPress(
+                onDragStart = { dragOffset = Offset.Zero },
+                onDrag = { change, dragAmount ->
+                    change.consume()
+                    dragOffset += dragAmount
+                },
+                onDragEnd = {
+                    val stepPx = with(density) { (cellSize + spacing).toPx() }
+                    val columnDelta = (dragOffset.x / stepPx).roundToInt()
+                    val rowDelta = (dragOffset.y / stepPx).roundToInt()
+                    onMove(slot + columnDelta + rowDelta * columns)
+                    dragOffset = Offset.Zero
+                },
+                onDragCancel = { dragOffset = Offset.Zero }
+            )
+        }
+    } else {
+        Modifier
+    }
 
     Surface(
         modifier = modifier
+            .then(dragModifier)
             .combinedClickable(
                 onClick = onPressed,
-                onLongClick = onEdit
+                onLongClick = if (previewMode) onEdit else null
             ),
         shape = RoundedCornerShape(8.dp),
         tonalElevation = 2.dp,
@@ -985,7 +1126,8 @@ private fun DeckKey(
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 DeckButtonIcon(
                     button = button,
-                    tint = contentColor
+                    tint = contentColor,
+                    large = button.displayMode == DeckDisplayMode.IconOnly
                 )
                 if (button.displayMode == DeckDisplayMode.IconAndText) {
                     Row(
@@ -1044,15 +1186,17 @@ private fun buttonSubtitle(button: DeckButton, status: HidStatus): String {
 @Composable
 private fun DeckButtonIcon(
     button: DeckButton,
-    tint: Color
+    tint: Color,
+    large: Boolean = false
 ) {
     val image = rememberImageBitmap(button.iconImageUri)
+    val iconSize = if (large) 46.dp else 30.dp
     when {
         image != null -> {
             Image(
                 bitmap = image,
                 contentDescription = button.title,
-                modifier = Modifier.size(30.dp)
+                modifier = Modifier.size(iconSize)
             )
         }
 
@@ -1060,7 +1204,7 @@ private fun DeckButtonIcon(
             Icon(
                 imageVector = materialIconFor(button)!!,
                 contentDescription = button.title,
-                modifier = Modifier.size(30.dp),
+                modifier = Modifier.size(iconSize),
                 tint = tint
             )
         }
@@ -1068,7 +1212,7 @@ private fun DeckButtonIcon(
         else -> {
             Text(
                 text = button.icon.ifBlank { button.title.take(1).uppercase() },
-                style = MaterialTheme.typography.titleLarge,
+                style = if (large) MaterialTheme.typography.headlineMedium else MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold,
                 color = tint,
                 maxLines = 1,
@@ -1129,44 +1273,6 @@ private fun statusDotColor(state: HidConnectionState): Color {
         HidConnectionState.Unsupported,
         HidConnectionState.PermissionMissing,
         HidConnectionState.Error -> Color(0xFFD32F2F)
-    }
-}
-
-@Composable
-private fun IconPresetPicker(
-    selectedIcon: String,
-    onIconSelected: (String) -> Unit
-) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(
-            text = "Icon preset",
-            style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        val rows = iconPresets().chunked(6)
-        rows.forEach { row ->
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                row.forEach { icon ->
-                    OutlinedButton(
-                        modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(8.dp),
-                        onClick = { onIconSelected(icon) }
-                    ) {
-                        Text(
-                            text = if (selectedIcon == icon) "[$icon]" else icon,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                }
-                repeat(6 - row.size) {
-                    Spacer(Modifier.weight(1f))
-                }
-            }
-        }
     }
 }
 
@@ -1321,12 +1427,6 @@ private fun EditButtonDialog(
                     }
                 }
                 item {
-                    IconPresetPicker(
-                        selectedIcon = icon,
-                        onIconSelected = { icon = it }
-                    )
-                }
-                item {
                     if (actionLocked) {
                         OutlinedTextField(
                             modifier = Modifier.fillMaxWidth(),
@@ -1472,31 +1572,6 @@ private fun defaultDeckColors(): List<Color> {
     )
 }
 
-private fun iconPresets(): List<String> {
-    return listOf(
-        "SET",
-        "BT",
-        "A",
-        "M",
-        "P",
-        "S",
-        "<<",
-        ">>",
-        "-",
-        "+",
-        "SH",
-        "REC",
-        "RUN",
-        "TY",
-        "WEB",
-        "APP",
-        "TXT",
-        "CMD",
-        "F1",
-        "OK"
-    )
-}
-
 private fun defaultButtons(): List<DeckButton> {
     val colors = defaultDeckColors()
 
@@ -1513,7 +1588,7 @@ private fun defaultButtons(): List<DeckButton> {
         DeckButton(10, "Record", "Clip", "REC", "", DeckDisplayMode.IconAndText, DeckActionType.Hotkey, "WIN+ALT+R", colors[2]),
         DeckButton(11, "Run", "Path", "RUN", "", DeckDisplayMode.IconAndText, DeckActionType.RunCommand, "C:\\", colors[3]),
         DeckButton(12, "Thanks", "Chat", "TY", "", DeckDisplayMode.IconAndText, DeckActionType.Text, "Thanks checking now", colors[2])
-    )
+    ).mapIndexed { index, button -> button.copy(position = index) }
 }
 
 private fun loadDeckButtons(context: Context): List<DeckButton> {
@@ -1521,7 +1596,7 @@ private fun loadDeckButtons(context: Context): List<DeckButton> {
     return runCatching {
         val array = JSONArray(raw)
         List(array.length()) { index ->
-            decodeDeckButton(array.getJSONObject(index))
+            decodeDeckButton(array.getJSONObject(index), index)
         }
     }.map { normalizeDeckButtons(it) }.getOrDefault(defaultButtons())
 }
@@ -1529,18 +1604,7 @@ private fun loadDeckButtons(context: Context): List<DeckButton> {
 private fun saveDeckButtons(context: Context, buttons: List<DeckButton>) {
     val array = JSONArray()
     buttons.forEach { button ->
-        array.put(
-            JSONObject()
-                .put("id", button.id)
-                .put("title", button.title)
-                .put("subtitle", button.subtitle)
-                .put("icon", button.icon)
-                .put("iconImageUri", button.iconImageUri)
-                .put("displayMode", button.displayMode.name)
-                .put("actionType", button.actionType.name)
-                .put("payload", button.payload)
-                .put("color", button.color.toArgb())
-        )
+        array.put(encodeDeckButton(button))
     }
     context.deckPrefs().edit().putString(PREF_BUTTONS, array.toString()).apply()
 }
@@ -1558,7 +1622,7 @@ private fun loadDeckPages(context: Context): List<DeckPageConfig> {
                 name = item.optString("name", "Page ${index + 1}"),
                 buttons = normalizeDeckButtons(
                     List(buttons.length()) { buttonIndex ->
-                        decodeDeckButton(buttons.getJSONObject(buttonIndex))
+                        decodeDeckButton(buttons.getJSONObject(buttonIndex), buttonIndex)
                     }
                 )
             )
@@ -1596,9 +1660,10 @@ private fun encodeDeckButton(button: DeckButton): JSONObject {
         .put("actionType", button.actionType.name)
         .put("payload", button.payload)
         .put("color", button.color.toArgb())
+        .put("position", button.position)
 }
 
-private fun decodeDeckButton(item: JSONObject): DeckButton {
+private fun decodeDeckButton(item: JSONObject, fallbackPosition: Int): DeckButton {
     return DeckButton(
         id = item.getInt("id"),
         title = item.getString("title"),
@@ -1612,7 +1677,8 @@ private fun decodeDeckButton(item: JSONObject): DeckButton {
             DeckActionType.valueOf(item.getString("actionType"))
         }.getOrDefault(DeckActionType.Hotkey),
         payload = item.getString("payload"),
-        color = Color(item.getInt("color"))
+        color = Color(item.getInt("color")),
+        position = item.optInt("position", fallbackPosition)
     )
 }
 
@@ -1628,7 +1694,8 @@ private fun normalizeDeckButtons(buttons: List<DeckButton>): List<DeckButton> {
         displayMode = DeckDisplayMode.IconAndText,
         actionType = DeckActionType.Settings,
         payload = "",
-        color = colors[4]
+        color = colors[4],
+        position = nextOpenPosition(buttons, DEFAULT_COLUMNS * DEFAULT_ROWS)
     )
     return listOf(settingsButton) + buttons
 }
@@ -1669,6 +1736,11 @@ private fun nextDeckPageId(pages: List<DeckPageConfig>): Int {
     return (pages.maxOfOrNull { it.id } ?: 0) + 1
 }
 
+private fun nextOpenPosition(buttons: List<DeckButton>, capacity: Int): Int {
+    val occupied = buttons.map { it.position }.toSet()
+    return (0 until capacity).firstOrNull { it !in occupied } ?: capacity
+}
+
 private fun updateDeckPage(
     pages: List<DeckPageConfig>,
     pageId: Int,
@@ -1693,12 +1765,15 @@ private fun moveDeckButton(
     id: Int,
     delta: Int
 ): List<DeckButton> {
-    val from = buttons.indexOfFirst { it.id == id }
-    if (from < 0) return buttons
-    val to = (from + delta).coerceIn(buttons.indices)
-    if (from == to) return buttons
-    return buttons.toMutableList().apply {
-        add(to, removeAt(from))
+    val button = buttons.firstOrNull { it.id == id } ?: return buttons
+    val targetPosition = (button.position + delta).coerceAtLeast(0)
+    val targetButton = buttons.firstOrNull { it.position == targetPosition }
+    return buttons.map { existing ->
+        when (existing.id) {
+            button.id -> existing.copy(position = targetPosition)
+            targetButton?.id -> existing.copy(position = button.position)
+            else -> existing
+        }
     }
 }
 
