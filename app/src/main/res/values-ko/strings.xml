@@ -36,6 +36,9 @@
     <string name="confirm_delete_page">이 페이지를 삭제할까요? 되돌릴 수 없습니다.</string>
     <string name="confirm_reset_first_page">첫 페이지를 초기화할까요? 설정 키와 타이틀 영역은 남습니다.</string>
     <string name="edit_key">키 편집</string>
+    <string name="key_content">내용</string>
+    <string name="key_appearance">표시</string>
+    <string name="key_action">동작</string>
     <string name="title">제목</string>
     <string name="subtitle">부제목</string>
     <string name="icon">아이콘</string>

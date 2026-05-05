@@ -36,6 +36,9 @@
     <string name="confirm_delete_page">Delete this page? This cannot be undone.</string>
     <string name="confirm_reset_first_page">Reset the first page? Settings and the title area will remain.</string>
     <string name="edit_key">Edit key</string>
+    <string name="key_content">Content</string>
+    <string name="key_appearance">Appearance</string>
+    <string name="key_action">Action</string>
     <string name="title">Title</string>
     <string name="subtitle">Subtitle</string>
     <string name="icon">Icon</string>

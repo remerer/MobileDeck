@@ -52,6 +52,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -1536,7 +1537,7 @@ private fun TitleDeckSlot(
                 modifier = Modifier
                     .padding(top = 6.dp)
                     .size(8.dp)
-                    .clip(RoundedCornerShape(50))
+                    .clip(CircleShape)
                     .background(statusDotColor(status.state))
             )
         }
@@ -1648,9 +1649,11 @@ private fun DeckKey(
         tonalElevation = 2.dp,
         color = containerColor
     ) {
+        val showText = cellSize >= 96.dp
+        val showSubtitle = cellSize >= 124.dp
         Column(
             modifier = Modifier.padding(8.dp),
-            verticalArrangement = if (button.displayMode != DeckDisplayMode.IconAndText) {
+            verticalArrangement = if (button.displayMode != DeckDisplayMode.IconAndText || !showText) {
                 Arrangement.Center
             } else {
                 Arrangement.SpaceBetween
@@ -1658,14 +1661,14 @@ private fun DeckKey(
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                if (button.displayMode != DeckDisplayMode.KeywordOnly) {
+                if (button.displayMode != DeckDisplayMode.KeywordOnly || !showText) {
                     DeckButtonIcon(
                         button = button,
                         tint = contentColor,
-                        large = button.displayMode == DeckDisplayMode.IconOnly
+                        large = button.displayMode == DeckDisplayMode.IconOnly || !showText
                     )
                 }
-                if (button.displayMode == DeckDisplayMode.IconAndText) {
+                if (button.displayMode == DeckDisplayMode.IconAndText && showText) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(5.dp)
@@ -1674,7 +1677,7 @@ private fun DeckKey(
                             Box(
                                 modifier = Modifier
                                     .size(8.dp)
-                                    .clip(RoundedCornerShape(50))
+                                    .clip(CircleShape)
                                     .background(statusDotColor(status.state))
                             )
                         }
@@ -1687,7 +1690,7 @@ private fun DeckKey(
                             overflow = TextOverflow.Ellipsis
                         )
                     }
-                } else if (button.displayMode == DeckDisplayMode.KeywordOnly) {
+                } else if (button.displayMode == DeckDisplayMode.KeywordOnly && showText) {
                     Text(
                         text = button.title,
                         style = MaterialTheme.typography.titleMedium,
@@ -1696,16 +1699,18 @@ private fun DeckKey(
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis
                     )
-                    Text(
-                        text = buttonSubtitle(button, status),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = contentColor.copy(alpha = 0.82f),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
+                    if (showSubtitle) {
+                        Text(
+                            text = buttonSubtitle(button, status),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = contentColor.copy(alpha = 0.82f),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
                 }
             }
-            if (button.displayMode == DeckDisplayMode.IconAndText) {
+            if (button.displayMode == DeckDisplayMode.IconAndText && showText && showSubtitle) {
                 Column {
                     Text(
                         text = buttonSubtitle(button, status),
@@ -2027,29 +2032,41 @@ private fun EditButtonDialog(
         title = { Text(stringResource(R.string.edit_key)) },
         text = {
             LazyColumn(
-                modifier = Modifier.height(360.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+                modifier = Modifier.height(430.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 item {
-                    OutlinedTextField(
-                        modifier = Modifier.fillMaxWidth(),
-                        value = title,
-                        onValueChange = { title = it },
-                        label = { Text(stringResource(R.string.title)) },
-                        singleLine = true
-                    )
-                }
-                item {
-                    OutlinedTextField(
-                        modifier = Modifier.fillMaxWidth(),
-                        value = subtitle,
-                        onValueChange = { subtitle = it },
-                        label = { Text(stringResource(R.string.subtitle)) },
-                        singleLine = true
-                    )
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            text = stringResource(R.string.key_content),
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedTextField(
+                                modifier = Modifier.weight(1f),
+                                value = title,
+                                onValueChange = { title = it },
+                                label = { Text(stringResource(R.string.title)) },
+                                singleLine = true
+                            )
+                            OutlinedTextField(
+                                modifier = Modifier.weight(1f),
+                                value = subtitle,
+                                onValueChange = { subtitle = it },
+                                label = { Text(stringResource(R.string.subtitle)) },
+                                singleLine = true
+                            )
+                        }
+                    }
                 }
                 item {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            text = stringResource(R.string.key_appearance),
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold
+                        )
                         ExposedDropdownMenuBox(
                             expanded = iconMenuExpanded,
                             onExpandedChange = { iconMenuExpanded = !iconMenuExpanded }
@@ -2109,74 +2126,83 @@ private fun EditButtonDialog(
                     }
                 }
                 item {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton(
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(8.dp),
-                            onClick = { imagePicker.launch(arrayOf("image/*")) }
-                        ) {
-                            Text(stringResource(if (iconImageUri.isBlank()) R.string.pick_image else R.string.change_image))
-                        }
-                        OutlinedButton(
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(8.dp),
-                            enabled = iconImageUri.isNotBlank(),
-                            onClick = { iconImageUri = "" }
-                        ) {
-                            Text(stringResource(R.string.clear_image))
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedButton(
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(8.dp),
+                                onClick = { imagePicker.launch(arrayOf("image/*")) }
+                            ) {
+                                Text(stringResource(if (iconImageUri.isBlank()) R.string.pick_image else R.string.change_image))
+                            }
+                            OutlinedButton(
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(8.dp),
+                                enabled = iconImageUri.isNotBlank(),
+                                onClick = { iconImageUri = "" }
+                            ) {
+                                Text(stringResource(R.string.clear_image))
+                            }
                         }
                     }
                 }
                 item {
-                    if (actionLocked) {
-                        OutlinedTextField(
-                            modifier = Modifier.fillMaxWidth(),
-                            value = stringResource(actionType.labelRes),
-                            onValueChange = {},
-                            readOnly = true,
-                            label = { Text(stringResource(R.string.action)) },
-                            singleLine = true
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            text = stringResource(R.string.key_action),
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold
                         )
-                    } else {
-                        ExposedDropdownMenuBox(
-                            expanded = menuExpanded,
-                            onExpandedChange = { menuExpanded = !menuExpanded }
-                        ) {
+                        if (actionLocked) {
                             OutlinedTextField(
-                                modifier = Modifier
-                                    .menuAnchor()
-                                    .fillMaxWidth(),
+                                modifier = Modifier.fillMaxWidth(),
                                 value = stringResource(actionType.labelRes),
                                 onValueChange = {},
                                 readOnly = true,
                                 label = { Text(stringResource(R.string.action)) },
-                                trailingIcon = {
-                                    ExposedDropdownMenuDefaults.TrailingIcon(expanded = menuExpanded)
-                                }
+                                singleLine = true
                             )
-                            ExposedDropdownMenu(
+                        } else {
+                            ExposedDropdownMenuBox(
                                 expanded = menuExpanded,
-                                onDismissRequest = { menuExpanded = false }
+                                onExpandedChange = { menuExpanded = !menuExpanded }
                             ) {
-                                DeckActionType.values()
-                                    .filterNot { it in appCommandActions }
-                                    .forEach { item ->
-                                        DropdownMenuItem(
-                                            text = { Text(stringResource(item.labelRes)) },
-                                            onClick = {
-                                                actionType = item
-                                                if (item == DeckActionType.MediaKey && mediaKeyChoice(payload) == null) {
-                                                    payload = MEDIA_MUTE
-                                                    icon = ICON_AUTO
-                                                } else if (item == DeckActionType.AppCommand && appCommandAction(payload) == null) {
-                                                    payload = DeckActionType.BluetoothStatus.name
-                                                } else if (!payloadRequired(item)) {
-                                                    payload = ""
-                                                }
-                                                menuExpanded = false
-                                            }
-                                        )
+                                OutlinedTextField(
+                                    modifier = Modifier
+                                        .menuAnchor()
+                                        .fillMaxWidth(),
+                                    value = stringResource(actionType.labelRes),
+                                    onValueChange = {},
+                                    readOnly = true,
+                                    label = { Text(stringResource(R.string.action)) },
+                                    trailingIcon = {
+                                        ExposedDropdownMenuDefaults.TrailingIcon(expanded = menuExpanded)
                                     }
+                                )
+                                ExposedDropdownMenu(
+                                    expanded = menuExpanded,
+                                    onDismissRequest = { menuExpanded = false }
+                                ) {
+                                    DeckActionType.values()
+                                        .filterNot { it in appCommandActions }
+                                        .forEach { item ->
+                                            DropdownMenuItem(
+                                                text = { Text(stringResource(item.labelRes)) },
+                                                onClick = {
+                                                    actionType = item
+                                                    if (item == DeckActionType.MediaKey && mediaKeyChoice(payload) == null) {
+                                                        payload = MEDIA_MUTE
+                                                        icon = ICON_AUTO
+                                                    } else if (item == DeckActionType.AppCommand && appCommandAction(payload) == null) {
+                                                        payload = DeckActionType.BluetoothStatus.name
+                                                    } else if (!payloadRequired(item)) {
+                                                        payload = ""
+                                                    }
+                                                    menuExpanded = false
+                                                }
+                                            )
+                                        }
+                                }
                             }
                         }
                     }
