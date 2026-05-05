@@ -615,8 +615,10 @@ private fun SettingsPage(
             )
         }
 
-        item {
-            DiagnosticsPanel(logs = logs)
+        if (BuildConfig.DEBUG) {
+            item {
+                DiagnosticsPanel(logs = logs)
+            }
         }
     }
 }
@@ -933,7 +935,7 @@ private fun LayoutEditorPage(
             )
             VerticalLayoutSlider(
                 modifier = Modifier
-                    .width(64.dp)
+                    .width(46.dp)
                     .fillMaxHeight(),
                 label = "Rows",
                 value = rows,
@@ -952,13 +954,19 @@ private fun LayoutSlider(
     range: IntRange,
     onValueChange: (Int) -> Unit
 ) {
-    Column(modifier = modifier) {
+    Row(
+        modifier = modifier,
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
         Text(
             text = "$label $value",
             style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1
         )
         Slider(
+            modifier = Modifier.weight(1f),
             value = value.toFloat(),
             onValueChange = { next ->
                 onValueChange(next.roundToInt().coerceIn(range.first, range.last))
@@ -996,7 +1004,7 @@ private fun VerticalLayoutSlider(
         ) {
             Slider(
                 modifier = Modifier
-                    .width(220.dp)
+                    .width(320.dp)
                     .graphicsLayer(rotationZ = -90f),
                 value = value.toFloat(),
                 onValueChange = { next ->
