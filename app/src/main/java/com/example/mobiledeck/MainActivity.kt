@@ -187,6 +187,16 @@ private data class ActivityLog(
     val note: String
 )
 
+private data class IconChoice(
+    val key: String,
+    @StringRes val labelRes: Int
+)
+
+private data class MediaKeyChoice(
+    val payload: String,
+    @StringRes val labelRes: Int
+)
+
 private data class PageAnimationTarget(
     val pageId: Int,
     val delta: Int,
@@ -256,7 +266,7 @@ private fun MobileDeckApp() {
 
     fun addDeckButton(position: Int? = null, editAfterCreate: Boolean = false) {
         val colors = defaultDeckColors()
-        val buttonCapacity = deckColumns * deckRows - 1
+        val buttonCapacity = pageButtonCapacity(activeDeckPage.id, deckPages, deckColumns, deckRows)
         val targetPosition = position ?: nextOpenPosition(deckButtons, buttonCapacity)
         val newButton = DeckButton(
             id = nextDeckButtonId(deckPages.flatMap { it.buttons }),
@@ -304,12 +314,26 @@ private fun MobileDeckApp() {
     }
 
     fun deleteActiveDeckPage() {
-        if (deckPages.size <= 1) return
+        if (deckPages.size <= 1 || activeDeckPage.id == deckPages.first().id) return
         val currentIndex = deckPages.indexOfFirst { it.id == activeDeckPage.id }.coerceAtLeast(0)
         val updatedPages = deckPages.filterNot { it.id == activeDeckPage.id }
         val nextIndex = currentIndex.coerceAtMost(updatedPages.lastIndex)
         deckPages = updatedPages
         activeDeckPageId = updatedPages[nextIndex].id
+        saveDeckPages(context, updatedPages)
+    }
+
+    fun resetFirstDeckPage() {
+        val firstPage = deckPages.firstOrNull() ?: return
+        val settingsButtons = firstPage.buttons
+            .filter { buttonAppAction(it) == DeckActionType.Settings }
+            .ifEmpty { normalizeDeckButtons(emptyList()) }
+            .mapIndexed { index, button -> button.copy(position = index) }
+        val updatedPages = deckPages.map { page ->
+            if (page.id == firstPage.id) page.copy(buttons = settingsButtons) else page
+        }
+        deckPages = updatedPages
+        activeDeckPageId = firstPage.id
         saveDeckPages(context, updatedPages)
     }
 
@@ -397,7 +421,7 @@ private fun MobileDeckApp() {
     }
 
     fun moveDeckButtonToSlot(button: DeckButton, targetPosition: Int) {
-        val pageCapacity = deckColumns * deckRows - 1
+        val pageCapacity = pageButtonCapacity(activeDeckPage.id, deckPages, deckColumns, deckRows)
         if (targetPosition !in 0 until pageCapacity || button.position == targetPosition) return
         val targetButton = deckButtons.firstOrNull { it.position == targetPosition }
         val updatedPages = updateDeckPage(deckPages, activeDeckPage.id) { deckPage ->
@@ -487,6 +511,7 @@ private fun MobileDeckApp() {
                 onPageSwipe = ::switchDeckPage,
                 onAddPage = ::addDeckPage,
                 onDeletePage = ::deleteActiveDeckPage,
+                onResetPage = ::resetFirstDeckPage,
                 onButtonEdit = { editingButton = it },
                 onButtonMoved = ::moveDeckButtonToSlot,
                 onEmptySlotPressed = { slot -> addDeckButton(slot, editAfterCreate = true) }
@@ -953,10 +978,37 @@ private fun LayoutEditorPage(
     onPageSwipe: (Int) -> Unit,
     onAddPage: () -> Unit,
     onDeletePage: () -> Unit,
+    onResetPage: () -> Unit,
     onButtonEdit: (DeckButton) -> Unit,
     onButtonMoved: (DeckButton, Int) -> Unit,
     onEmptySlotPressed: (Int) -> Unit
 ) {
+    var confirmPageAction by remember { mutableStateOf(false) }
+    val isFirstPage = activePageId == deckPages.firstOrNull()?.id
+
+    if (confirmPageAction) {
+        AlertDialog(
+            onDismissRequest = { confirmPageAction = false },
+            title = { Text(stringResource(if (isFirstPage) R.string.reset_first_page else R.string.delete_current_page)) },
+            text = { Text(stringResource(if (isFirstPage) R.string.confirm_reset_first_page else R.string.confirm_delete_page)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        if (isFirstPage) onResetPage() else onDeletePage()
+                        confirmPageAction = false
+                    }
+                ) {
+                    Text(stringResource(if (isFirstPage) R.string.reset else R.string.delete))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmPageAction = false }) {
+                    Text(stringResource(R.string.cancel))
+                }
+            }
+        )
+    }
+
     Column(
         modifier = modifier,
         verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -981,10 +1033,10 @@ private fun LayoutEditorPage(
             )
             OutlinedButton(
                 shape = RoundedCornerShape(8.dp),
-                enabled = deckPages.size > 1,
-                onClick = onDeletePage
+                enabled = isFirstPage || deckPages.size > 1,
+                onClick = { confirmPageAction = true }
             ) {
-                Text(stringResource(R.string.delete_current_page))
+                Text(stringResource(if (isFirstPage) R.string.reset_first_page else R.string.delete_current_page))
             }
         }
 
@@ -1234,6 +1286,7 @@ private fun DeckPage(
                     spacing = spacing,
                     status = status,
                     previewMode = previewMode,
+                    showTitle = target.pageId == deckPages.firstOrNull()?.id,
                     onButtonPressed = onButtonPressed,
                     onButtonEdit = onButtonEdit,
                     onButtonMoved = onButtonMoved,
@@ -1374,6 +1427,8 @@ private fun Int.signOrOne(): Int = if (this < 0) -1 else 1
 
 private fun wrapIndex(value: Int, size: Int): Int = ((value % size) + size) % size
 
+private fun slotToButtonPosition(slot: Int, showTitle: Boolean): Int = if (showTitle) slot - 1 else slot
+
 @Composable
 private fun ButtonGrid(
     modifier: Modifier = Modifier,
@@ -1385,6 +1440,7 @@ private fun ButtonGrid(
     spacing: Dp,
     status: HidStatus,
     previewMode: Boolean,
+    showTitle: Boolean,
     onButtonPressed: (DeckButton) -> Unit,
     onButtonEdit: (DeckButton) -> Unit,
     onButtonMoved: (DeckButton, Int) -> Unit,
@@ -1393,7 +1449,7 @@ private fun ButtonGrid(
     val safeColumns = columns.coerceAtLeast(1)
     val slotCount = safeColumns * rows.coerceAtLeast(1)
     val slots = List(slotCount) { slot ->
-        if (slot == 0) null else buttons.firstOrNull { it.position == slot - 1 }
+        if (showTitle && slot == 0) null else buttons.firstOrNull { it.position == slotToButtonPosition(slot, showTitle) }
     }
     Box(
         modifier = modifier.padding(contentPadding),
@@ -1404,7 +1460,7 @@ private fun ButtonGrid(
                 Row(horizontalArrangement = Arrangement.spacedBy(spacing)) {
                     rowButtons.forEachIndexed { columnIndex, button ->
                         val slot = rowIndex * safeColumns + columnIndex
-                        if (slot == 0) {
+                        if (showTitle && slot == 0) {
                             TitleDeckSlot(
                                 modifier = Modifier.size(cellSize),
                                 status = status
@@ -1414,9 +1470,11 @@ private fun ButtonGrid(
                             modifier = Modifier.size(cellSize),
                             showAddIcon = previewMode,
                             createOnClick = previewMode,
-                            onCreate = { onEmptySlotPressed(slot - 1) }
+                            onCreate = { onEmptySlotPressed(slotToButtonPosition(slot, showTitle)) }
                         )
                         } else {
+                            val buttonPosition = slotToButtonPosition(slot, showTitle)
+                            val maxButtonPosition = slotCount - if (showTitle) 2 else 1
                             DeckKey(
                                 modifier = Modifier.size(cellSize),
                                 button = button,
@@ -1424,12 +1482,12 @@ private fun ButtonGrid(
                                 enabled = true,
                                 previewMode = previewMode,
                                 columns = safeColumns,
-                                slot = slot - 1,
+                                slot = buttonPosition,
                                 cellSize = cellSize,
                                 spacing = spacing,
                                 onPressed = { onButtonPressed(button) },
                                 onEdit = { onButtonEdit(button) },
-                                onMove = { targetSlot -> onButtonMoved(button, targetSlot.coerceIn(0, slotCount - 2)) }
+                                onMove = { targetSlot -> onButtonMoved(button, targetSlot.coerceIn(0, maxButtonPosition)) }
                             )
                         }
                     }
@@ -1599,7 +1657,7 @@ private fun DeckKey(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(5.dp)
                     ) {
-                        if (button.actionType == DeckActionType.BluetoothStatus) {
+                        if (buttonAppAction(button) == DeckActionType.BluetoothStatus) {
                             Box(
                                 modifier = Modifier
                                     .size(8.dp)
@@ -1643,13 +1701,15 @@ private fun DeckKey(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
-                    Text(
-                    text = stringResource(button.actionType.labelRes),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = contentColor.copy(alpha = 0.72f),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
+                    if (buttonAppAction(button) != DeckActionType.BluetoothStatus) {
+                        Text(
+                            text = stringResource(button.actionType.labelRes),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = contentColor.copy(alpha = 0.72f),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
                 }
             }
         }
@@ -1723,21 +1783,13 @@ private fun rememberImageBitmap(uriString: String): ImageBitmap? {
 }
 
 private fun materialIconFor(button: DeckButton): ImageVector? {
+    iconVectorForKey(button.icon)?.let { return it }
     return when (buttonAppAction(button) ?: button.actionType) {
         DeckActionType.Settings -> Icons.Filled.Settings
         DeckActionType.BluetoothStatus -> Icons.Filled.Bluetooth
         DeckActionType.PreviousPage -> Icons.Filled.SkipPrevious
         DeckActionType.NextPage -> Icons.Filled.SkipNext
-        DeckActionType.MediaKey -> when (button.payload.uppercase()) {
-            "MUTE" -> Icons.Filled.VolumeOff
-            "VOLUME_UP", "VOLUMEUP" -> Icons.Filled.VolumeUp
-            "VOLUME_DOWN", "VOLUMEDOWN" -> Icons.Filled.VolumeDown
-            "PLAY_PAUSE", "PLAYPAUSE", "PLAY", "PAUSE" -> Icons.Filled.PlayArrow
-            "STOP" -> Icons.Filled.Stop
-            "NEXT", "NEXT_TRACK" -> Icons.Filled.SkipNext
-            "PREVIOUS", "PREV", "PREVIOUS_TRACK" -> Icons.Filled.SkipPrevious
-            else -> null
-        }
+        DeckActionType.MediaKey -> mediaIconForPayload(button.payload)
         DeckActionType.Hotkey -> when (button.icon.uppercase()) {
             "REC" -> Icons.Filled.Videocam
             else -> Icons.Filled.Keyboard
@@ -1746,6 +1798,90 @@ private fun materialIconFor(button: DeckButton): ImageVector? {
         DeckActionType.RunCommand -> Icons.Filled.Apps
         DeckActionType.AppCommand -> Icons.Filled.Code
     }
+}
+
+private fun mediaIconForPayload(payload: String): ImageVector? {
+    return when (payload.uppercase()) {
+        MEDIA_MUTE -> Icons.Filled.VolumeOff
+        MEDIA_VOLUME_UP, "VOLUMEUP" -> Icons.Filled.VolumeUp
+        MEDIA_VOLUME_DOWN, "VOLUMEDOWN" -> Icons.Filled.VolumeDown
+        MEDIA_PLAY_PAUSE, "PLAYPAUSE", "PLAY", "PAUSE" -> Icons.Filled.PlayArrow
+        MEDIA_STOP -> Icons.Filled.Stop
+        MEDIA_NEXT, "NEXT_TRACK" -> Icons.Filled.SkipNext
+        MEDIA_PREVIOUS, "PREV", "PREVIOUS_TRACK" -> Icons.Filled.SkipPrevious
+        else -> null
+    }
+}
+
+private fun iconVectorForKey(key: String): ImageVector? {
+    return when (key) {
+        ICON_SETTINGS -> Icons.Filled.Settings
+        ICON_BLUETOOTH -> Icons.Filled.Bluetooth
+        ICON_KEYBOARD -> Icons.Filled.Keyboard
+        ICON_APPS -> Icons.Filled.Apps
+        ICON_CODE -> Icons.Filled.Code
+        ICON_TEXT -> Icons.Filled.TextFields
+        ICON_PLAY -> Icons.Filled.PlayArrow
+        ICON_STOP -> Icons.Filled.Stop
+        ICON_PREVIOUS -> Icons.Filled.SkipPrevious
+        ICON_NEXT -> Icons.Filled.SkipNext
+        ICON_VOLUME_OFF -> Icons.Filled.VolumeOff
+        ICON_VOLUME_DOWN -> Icons.Filled.VolumeDown
+        ICON_VOLUME_UP -> Icons.Filled.VolumeUp
+        else -> null
+    }
+}
+
+private fun iconChoices(): List<IconChoice> {
+    return listOf(
+        IconChoice(ICON_AUTO, R.string.icon_auto),
+        IconChoice(ICON_SETTINGS, R.string.icon_settings),
+        IconChoice(ICON_BLUETOOTH, R.string.icon_bluetooth),
+        IconChoice(ICON_KEYBOARD, R.string.icon_keyboard),
+        IconChoice(ICON_APPS, R.string.icon_apps),
+        IconChoice(ICON_CODE, R.string.icon_code),
+        IconChoice(ICON_TEXT, R.string.icon_text_fields),
+        IconChoice(ICON_PLAY, R.string.icon_play),
+        IconChoice(ICON_STOP, R.string.icon_stop),
+        IconChoice(ICON_PREVIOUS, R.string.icon_previous),
+        IconChoice(ICON_NEXT, R.string.icon_next),
+        IconChoice(ICON_VOLUME_OFF, R.string.icon_volume_off),
+        IconChoice(ICON_VOLUME_DOWN, R.string.icon_volume_down),
+        IconChoice(ICON_VOLUME_UP, R.string.icon_volume_up)
+    )
+}
+
+private fun selectedIconChoice(key: String): IconChoice {
+    return iconChoices().firstOrNull { it.key == key } ?: iconChoices().first()
+}
+
+private fun mediaKeyChoices(): List<MediaKeyChoice> {
+    return listOf(
+        MediaKeyChoice(MEDIA_MUTE, R.string.media_mute),
+        MediaKeyChoice(MEDIA_PLAY_PAUSE, R.string.media_play_pause),
+        MediaKeyChoice(MEDIA_STOP, R.string.media_stop),
+        MediaKeyChoice(MEDIA_PREVIOUS, R.string.media_previous),
+        MediaKeyChoice(MEDIA_NEXT, R.string.media_next),
+        MediaKeyChoice(MEDIA_VOLUME_DOWN, R.string.media_volume_down),
+        MediaKeyChoice(MEDIA_VOLUME_UP, R.string.media_volume_up)
+    )
+}
+
+private fun mediaKeyChoice(payload: String): MediaKeyChoice? {
+    val normalizedPayload = payload.uppercase()
+    val canonicalPayload = when (normalizedPayload) {
+        "VOLUMEUP" -> MEDIA_VOLUME_UP
+        "VOLUMEDOWN" -> MEDIA_VOLUME_DOWN
+        "PLAYPAUSE", "PLAY", "PAUSE" -> MEDIA_PLAY_PAUSE
+        "NEXT_TRACK" -> MEDIA_NEXT
+        "PREV", "PREVIOUS_TRACK" -> MEDIA_PREVIOUS
+        else -> normalizedPayload
+    }
+    return mediaKeyChoices().firstOrNull { it.payload == canonicalPayload }
+}
+
+private fun selectedMediaKeyChoice(payload: String): MediaKeyChoice {
+    return mediaKeyChoice(payload) ?: mediaKeyChoices().first()
 }
 
 private fun statusDotColor(state: HidConnectionState): Color {
@@ -1842,6 +1978,8 @@ private fun EditButtonDialog(
     var payload by remember(button.id) { mutableStateOf(button.payload) }
     var actionType by remember(button.id) { mutableStateOf(button.actionType) }
     var menuExpanded by remember { mutableStateOf(false) }
+    var iconMenuExpanded by remember { mutableStateOf(false) }
+    var mediaMenuExpanded by remember { mutableStateOf(false) }
     var appCommandMenuExpanded by remember { mutableStateOf(false) }
     val context = LocalContext.current
     val imagePicker = rememberLauncherForActivityResult(
@@ -1864,6 +2002,8 @@ private fun EditButtonDialog(
         DeckActionType.Settings
     )
     val selectedAppCommand = appCommandAction(payload) ?: DeckActionType.BluetoothStatus
+    val selectedIcon = selectedIconChoice(icon)
+    val selectedMedia = selectedMediaKeyChoice(payload)
     val canDelete = buttonAppAction(button) != DeckActionType.Settings
     val actionLocked = buttonAppAction(button) == DeckActionType.Settings
     val canSave = title.isNotBlank() && (!payloadRequired(actionType) || payload.isNotBlank())
@@ -1897,13 +2037,37 @@ private fun EditButtonDialog(
                 }
                 item {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedTextField(
-                            modifier = Modifier.fillMaxWidth(),
-                            value = icon,
-                            onValueChange = { icon = it.take(3) },
-                            label = { Text(stringResource(R.string.icon_text)) },
-                            singleLine = true
-                        )
+                        ExposedDropdownMenuBox(
+                            expanded = iconMenuExpanded,
+                            onExpandedChange = { iconMenuExpanded = !iconMenuExpanded }
+                        ) {
+                            OutlinedTextField(
+                                modifier = Modifier
+                                    .menuAnchor()
+                                    .fillMaxWidth(),
+                                value = stringResource(selectedIcon.labelRes),
+                                onValueChange = {},
+                                readOnly = true,
+                                label = { Text(stringResource(R.string.icon)) },
+                                trailingIcon = {
+                                    ExposedDropdownMenuDefaults.TrailingIcon(expanded = iconMenuExpanded)
+                                }
+                            )
+                            ExposedDropdownMenu(
+                                expanded = iconMenuExpanded,
+                                onDismissRequest = { iconMenuExpanded = false }
+                            ) {
+                                iconChoices().forEach { item ->
+                                    DropdownMenuItem(
+                                        text = { Text(stringResource(item.labelRes)) },
+                                        onClick = {
+                                            icon = item.key
+                                            iconMenuExpanded = false
+                                        }
+                                    )
+                                }
+                            }
+                        }
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             DeckDisplayMode.values().forEach { mode ->
                                 OutlinedButton(
@@ -1974,7 +2138,10 @@ private fun EditButtonDialog(
                                             text = { Text(stringResource(item.labelRes)) },
                                             onClick = {
                                                 actionType = item
-                                                if (item == DeckActionType.AppCommand && appCommandAction(payload) == null) {
+                                                if (item == DeckActionType.MediaKey && mediaKeyChoice(payload) == null) {
+                                                    payload = MEDIA_MUTE
+                                                    icon = ICON_AUTO
+                                                } else if (item == DeckActionType.AppCommand && appCommandAction(payload) == null) {
                                                     payload = DeckActionType.BluetoothStatus.name
                                                 } else if (!payloadRequired(item)) {
                                                     payload = ""
@@ -1983,6 +2150,42 @@ private fun EditButtonDialog(
                                             }
                                         )
                                     }
+                            }
+                        }
+                    }
+                }
+                if (actionType == DeckActionType.MediaKey) {
+                    item {
+                        ExposedDropdownMenuBox(
+                            expanded = mediaMenuExpanded,
+                            onExpandedChange = { mediaMenuExpanded = !mediaMenuExpanded }
+                        ) {
+                            OutlinedTextField(
+                                modifier = Modifier
+                                    .menuAnchor()
+                                    .fillMaxWidth(),
+                                value = stringResource(selectedMedia.labelRes),
+                                onValueChange = {},
+                                readOnly = true,
+                                label = { Text(stringResource(R.string.media_key_target)) },
+                                trailingIcon = {
+                                    ExposedDropdownMenuDefaults.TrailingIcon(expanded = mediaMenuExpanded)
+                                }
+                            )
+                            ExposedDropdownMenu(
+                                expanded = mediaMenuExpanded,
+                                onDismissRequest = { mediaMenuExpanded = false }
+                            ) {
+                                mediaKeyChoices().forEach { item ->
+                                    DropdownMenuItem(
+                                        text = { Text(stringResource(item.labelRes)) },
+                                        onClick = {
+                                            payload = item.payload
+                                            icon = ICON_AUTO
+                                            mediaMenuExpanded = false
+                                        }
+                                    )
+                                }
                             }
                         }
                     }
@@ -2043,7 +2246,7 @@ private fun EditButtonDialog(
                     }
                 }
                 item {
-                    if (actionType != DeckActionType.AppCommand) {
+                    if (actionType != DeckActionType.AppCommand && actionType != DeckActionType.MediaKey) {
                         OutlinedTextField(
                             modifier = Modifier.fillMaxWidth(),
                             value = payload,
@@ -2070,6 +2273,8 @@ private fun EditButtonDialog(
                             actionType = actionType,
                             payload = if (actionType == DeckActionType.AppCommand) {
                                 selectedAppCommand.name
+                            } else if (actionType == DeckActionType.MediaKey) {
+                                selectedMedia.payload
                             } else if (payloadRequired(actionType)) {
                                 payload.trim()
                             } else {
@@ -2243,10 +2448,10 @@ private fun payloadRequired(actionType: DeckActionType): Boolean {
         DeckActionType.BluetoothStatus,
         DeckActionType.PreviousPage,
         DeckActionType.NextPage -> false
-        DeckActionType.MediaKey,
         DeckActionType.Hotkey,
         DeckActionType.Text,
         DeckActionType.RunCommand -> true
+        DeckActionType.MediaKey,
         DeckActionType.AppCommand -> false
     }
 }
@@ -2340,6 +2545,11 @@ private fun nextOpenPosition(buttons: List<DeckButton>, capacity: Int): Int {
     return (0 until capacity).firstOrNull { it !in occupied } ?: capacity
 }
 
+private fun pageButtonCapacity(pageId: Int, pages: List<DeckPageConfig>, columns: Int, rows: Int): Int {
+    val slotCount = columns * rows
+    return if (pageId == pages.firstOrNull()?.id) slotCount - 1 else slotCount
+}
+
 private fun updateDeckPage(
     pages: List<DeckPageConfig>,
     pageId: Int,
@@ -2377,6 +2587,27 @@ private const val DEFAULT_COLUMNS = 6
 private const val MIN_ROWS = 2
 private const val MAX_ROWS = 4
 private const val DEFAULT_ROWS = 2
+private const val ICON_AUTO = "AUTO"
+private const val ICON_SETTINGS = "ICON_SETTINGS"
+private const val ICON_BLUETOOTH = "ICON_BLUETOOTH"
+private const val ICON_KEYBOARD = "ICON_KEYBOARD"
+private const val ICON_APPS = "ICON_APPS"
+private const val ICON_CODE = "ICON_CODE"
+private const val ICON_TEXT = "ICON_TEXT"
+private const val ICON_PLAY = "ICON_PLAY"
+private const val ICON_STOP = "ICON_STOP"
+private const val ICON_PREVIOUS = "ICON_PREVIOUS"
+private const val ICON_NEXT = "ICON_NEXT"
+private const val ICON_VOLUME_OFF = "ICON_VOLUME_OFF"
+private const val ICON_VOLUME_DOWN = "ICON_VOLUME_DOWN"
+private const val ICON_VOLUME_UP = "ICON_VOLUME_UP"
+private const val MEDIA_MUTE = "MUTE"
+private const val MEDIA_PLAY_PAUSE = "PLAY_PAUSE"
+private const val MEDIA_STOP = "STOP"
+private const val MEDIA_PREVIOUS = "PREVIOUS"
+private const val MEDIA_NEXT = "NEXT"
+private const val MEDIA_VOLUME_DOWN = "VOLUME_DOWN"
+private const val MEDIA_VOLUME_UP = "VOLUME_UP"
 
 @Preview(showBackground = true)
 @Composable

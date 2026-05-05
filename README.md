@@ -17,6 +17,7 @@ MobileDeck turns an Android phone into a Bluetooth HID macro deck for a Windows 
 - Optional looped page swiping at the first and last page
 - Layout editor for rows, columns, key editing, and drag movement
 - Display modes for icon, icon + keyword, or keyword-only keys
+- Icon picker and media-key target picker in key editing
 
 ## Install
 
@@ -44,7 +45,9 @@ If Windows keeps an old HID descriptor cached after an update, remove the paired
 - Long-press an empty slot to create a new key and immediately configure it.
 - Use the columns slider and vertical rows slider to resize the grid.
 - Delete the current page from Layout editor.
+- Reset the first page from Layout editor while keeping the title area and Settings key.
 - In key editing, choose `App command` to assign Settings, Bluetooth status, Previous page, or Next page.
+- In key editing, choose `Media key` to pick the exact media function from a dropdown.
 - Choose whether a key shows only an icon, an icon with keyword text, or keyword text only.
 
 ## Page Controls
