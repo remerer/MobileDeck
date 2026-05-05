@@ -30,6 +30,7 @@
     <string name="connect_host">Connect %1$s</string>
     <string name="columns">Columns</string>
     <string name="rows">Rows</string>
+    <string name="spacing">Spacing</string>
     <string name="diagnostics">Diagnostics</string>
     <string name="no_actions_yet">No actions yet.</string>
     <string name="reset_first_page">Reset first page</string>

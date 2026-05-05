@@ -256,6 +256,7 @@ private fun MobileDeckApp() {
     var activeDeckPageId by remember { mutableStateOf(deckPages.first().id) }
     var deckColumns by remember { mutableStateOf(loadDeckColumns(context)) }
     var deckRows by remember { mutableStateOf(loadDeckRows(context)) }
+    var deckSpacing by remember { mutableStateOf(loadDeckSpacing(context)) }
     var pageSwipeAxis by remember { mutableStateOf(loadPageSwipeAxis(context)) }
     var multiTouchPageSwipe by remember { mutableStateOf(loadMultiTouchPageSwipe(context)) }
     var pageSwipeAnimation by remember { mutableStateOf(loadPageSwipeAnimation(context)) }
@@ -482,6 +483,7 @@ private fun MobileDeckApp() {
                 activePageId = activeDeckPage.id,
                 columns = deckColumns,
                 rows = deckRows,
+                spacing = deckSpacing.dp,
                 status = hidStatus,
                 previewMode = false,
                 pageSwipeAxis = pageSwipeAxis,
@@ -507,6 +509,7 @@ private fun MobileDeckApp() {
                 activePageId = activeDeckPage.id,
                 columns = deckColumns,
                 rows = deckRows,
+                spacing = deckSpacing.dp,
                 status = hidStatus,
                 pageSwipeAxis = pageSwipeAxis,
                 multiTouchPageSwipe = multiTouchPageSwipe,
@@ -521,6 +524,10 @@ private fun MobileDeckApp() {
                 onRowsChange = { rows ->
                     deckRows = rows
                     saveDeckRows(context, rows)
+                },
+                onSpacingChange = { spacing ->
+                    deckSpacing = spacing
+                    saveDeckSpacing(context, spacing)
                 },
                 onPageSwipe = ::switchDeckPage,
                 onAddPage = ::addDeckPage,
@@ -980,6 +987,7 @@ private fun LayoutEditorPage(
     activePageId: Int,
     columns: Int,
     rows: Int,
+    spacing: Dp,
     status: HidStatus,
     pageSwipeAxis: PageSwipeAxis,
     multiTouchPageSwipe: Boolean,
@@ -989,6 +997,7 @@ private fun LayoutEditorPage(
     onBack: () -> Unit,
     onColumnsChange: (Int) -> Unit,
     onRowsChange: (Int) -> Unit,
+    onSpacingChange: (Int) -> Unit,
     onPageSwipe: (Int) -> Unit,
     onAddPage: () -> Unit,
     onDeletePage: () -> Unit,
@@ -1045,6 +1054,13 @@ private fun LayoutEditorPage(
                 range = MIN_COLUMNS..MAX_COLUMNS,
                 onValueChange = onColumnsChange
             )
+            LayoutSlider(
+                modifier = Modifier.weight(1f),
+                label = stringResource(R.string.spacing),
+                value = spacing.value.roundToInt(),
+                range = MIN_SPACING_DP..MAX_SPACING_DP,
+                onValueChange = onSpacingChange
+            )
             OutlinedButton(
                 shape = RoundedCornerShape(8.dp),
                 enabled = isFirstPage || deckPages.size > 1,
@@ -1069,6 +1085,7 @@ private fun LayoutEditorPage(
                 activePageId = activePageId,
                 columns = columns,
                 rows = rows,
+                spacing = spacing,
                 status = status,
                 previewMode = true,
                 pageSwipeAxis = pageSwipeAxis,
@@ -1231,6 +1248,7 @@ private fun DeckPage(
     activePageId: Int,
     columns: Int,
     rows: Int,
+    spacing: Dp = DEFAULT_SPACING_DP.dp,
     status: HidStatus,
     previewMode: Boolean,
     pageSwipeAxis: PageSwipeAxis,
@@ -1249,7 +1267,7 @@ private fun DeckPage(
         val safeColumns = columns.coerceIn(MIN_COLUMNS, MAX_COLUMNS)
         val safeRows = rows.coerceIn(MIN_ROWS, MAX_ROWS)
         val density = LocalDensity.current
-        val spacing = 8.dp
+        val spacing = spacing.coerceIn(MIN_SPACING_DP.dp, MAX_SPACING_DP.dp)
         val indicatorPadding = PaddingValues(
             start = if (pageSwipeAxis == PageSwipeAxis.Vertical) 12.dp else 0.dp,
             bottom = if (pageSwipeAxis == PageSwipeAxis.Horizontal) 12.dp else 0.dp
@@ -2558,6 +2576,14 @@ private fun saveDeckRows(context: Context, rows: Int) {
     context.deckPrefs().edit().putInt(PREF_ROWS, rows.coerceIn(MIN_ROWS, MAX_ROWS)).apply()
 }
 
+private fun loadDeckSpacing(context: Context): Int {
+    return context.deckPrefs().getInt(PREF_SPACING, DEFAULT_SPACING_DP).coerceIn(MIN_SPACING_DP, MAX_SPACING_DP)
+}
+
+private fun saveDeckSpacing(context: Context, spacing: Int) {
+    context.deckPrefs().edit().putInt(PREF_SPACING, spacing.coerceIn(MIN_SPACING_DP, MAX_SPACING_DP)).apply()
+}
+
 private fun loadPageSwipeAxis(context: Context): PageSwipeAxis {
     return runCatching {
         PageSwipeAxis.valueOf(context.deckPrefs().getString(PREF_PAGE_SWIPE_AXIS, null) ?: PageSwipeAxis.Horizontal.name)
@@ -2636,6 +2662,7 @@ private const val PREF_PAGES = "pages"
 private const val PREF_BUTTONS = "buttons"
 private const val PREF_COLUMNS = "columns"
 private const val PREF_ROWS = "rows"
+private const val PREF_SPACING = "spacing"
 private const val PREF_PAGE_SWIPE_AXIS = "page_swipe_axis"
 private const val PREF_MULTI_TOUCH_PAGE_SWIPE = "multi_touch_page_swipe"
 private const val PREF_PAGE_SWIPE_ANIMATION = "page_swipe_animation"
@@ -2647,6 +2674,9 @@ private const val DEFAULT_COLUMNS = 6
 private const val MIN_ROWS = 2
 private const val MAX_ROWS = 6
 private const val DEFAULT_ROWS = 3
+private const val MIN_SPACING_DP = 2
+private const val MAX_SPACING_DP = 16
+private const val DEFAULT_SPACING_DP = 8
 private const val ICON_AUTO = "AUTO"
 private const val ICON_SETTINGS = "ICON_SETTINGS"
 private const val ICON_BLUETOOTH = "ICON_BLUETOOTH"

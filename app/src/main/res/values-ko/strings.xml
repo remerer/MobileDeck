@@ -30,6 +30,7 @@
     <string name="connect_host">%1$s 연결</string>
     <string name="columns">가로</string>
     <string name="rows">세로</string>
+    <string name="spacing">간격</string>
     <string name="diagnostics">진단</string>
     <string name="no_actions_yet">아직 동작 기록이 없습니다.</string>
     <string name="reset_first_page">첫 페이지 초기화</string>
