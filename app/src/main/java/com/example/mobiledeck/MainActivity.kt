@@ -17,7 +17,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -78,6 +78,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.geometry.Offset
@@ -835,33 +836,42 @@ private fun LayoutEditorPage(
                 range = MIN_COLUMNS..MAX_COLUMNS,
                 onValueChange = onColumnsChange
             )
-            LayoutSlider(
-                modifier = Modifier.weight(1f),
+        }
+
+        Row(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            DeckPage(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight(),
+                buttons = buttons,
+                deckPages = deckPages,
+                activePageId = activePageId,
+                columns = columns,
+                rows = rows,
+                status = status,
+                previewMode = true,
+                onPageSelected = onPageSelected,
+                onAddPage = onAddPage,
+                onButtonPressed = onButtonEdit,
+                onButtonEdit = onButtonEdit,
+                onButtonMoved = onButtonMoved,
+                onEmptySlotLongPressed = onEmptySlotLongPressed
+            )
+            VerticalLayoutSlider(
+                modifier = Modifier
+                    .width(64.dp)
+                    .fillMaxHeight(),
                 label = "Rows",
                 value = rows,
                 range = MIN_ROWS..MAX_ROWS,
                 onValueChange = onRowsChange
             )
         }
-
-        DeckPage(
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth(),
-            buttons = buttons,
-            deckPages = deckPages,
-            activePageId = activePageId,
-            columns = columns,
-            rows = rows,
-            status = status,
-            previewMode = true,
-            onPageSelected = onPageSelected,
-            onAddPage = onAddPage,
-            onButtonPressed = onButtonEdit,
-            onButtonEdit = onButtonEdit,
-            onButtonMoved = onButtonMoved,
-            onEmptySlotLongPressed = onEmptySlotLongPressed
-        )
     }
 }
 
@@ -887,6 +897,46 @@ private fun LayoutSlider(
             valueRange = range.first.toFloat()..range.last.toFloat(),
             steps = (range.last - range.first - 1).coerceAtLeast(0)
         )
+    }
+}
+
+@Composable
+private fun VerticalLayoutSlider(
+    modifier: Modifier = Modifier,
+    label: String,
+    value: Int,
+    range: IntRange,
+    onValueChange: (Int) -> Unit
+) {
+    Column(
+        modifier = modifier,
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Text(
+            text = "$label $value",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1
+        )
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth(),
+            contentAlignment = Alignment.Center
+        ) {
+            Slider(
+                modifier = Modifier
+                    .width(220.dp)
+                    .graphicsLayer(rotationZ = -90f),
+                value = value.toFloat(),
+                onValueChange = { next ->
+                    onValueChange(next.roundToInt().coerceIn(range.first, range.last))
+                },
+                valueRange = range.first.toFloat()..range.last.toFloat(),
+                steps = (range.last - range.first - 1).coerceAtLeast(0)
+            )
+        }
     }
 }
 
@@ -1136,7 +1186,7 @@ private fun DeckKey(
     var dragOffset by remember(button.id) { mutableStateOf(Offset.Zero) }
     val dragModifier = if (previewMode) {
         Modifier.pointerInput(button.id, columns, slot, cellSize, spacing) {
-            detectDragGesturesAfterLongPress(
+            detectDragGestures(
                 onDragStart = { dragOffset = Offset.Zero },
                 onDrag = { change, dragAmount ->
                     change.consume()
