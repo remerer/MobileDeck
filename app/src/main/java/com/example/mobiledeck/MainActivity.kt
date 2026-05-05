@@ -7,6 +7,7 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.BitmapFactory
 import android.net.Uri
+import android.util.Log
 import android.view.WindowManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -151,7 +152,8 @@ private enum class DeckActionType(@StringRes val labelRes: Int) {
 
 private enum class DeckDisplayMode(@StringRes val labelRes: Int) {
     IconOnly(R.string.display_icon_only),
-    IconAndText(R.string.display_icon_and_text)
+    IconAndText(R.string.display_icon_and_text),
+    KeywordOnly(R.string.display_keyword_only)
 }
 
 private enum class PageSwipeAxis(@StringRes val labelRes: Int, @StringRes val shortLabelRes: Int) {
@@ -234,6 +236,7 @@ private fun MobileDeckApp() {
     var pageSwipeAxis by remember { mutableStateOf(loadPageSwipeAxis(context)) }
     var multiTouchPageSwipe by remember { mutableStateOf(loadMultiTouchPageSwipe(context)) }
     var pageSwipeAnimation by remember { mutableStateOf(loadPageSwipeAnimation(context)) }
+    var infinitePageSwipe by remember { mutableStateOf(loadInfinitePageSwipe(context)) }
     var lastPageDelta by remember { mutableStateOf(1) }
     var pageAnimationSequence by remember { mutableStateOf(0) }
     var editingButton by remember { mutableStateOf<DeckButton?>(null) }
@@ -286,25 +289,6 @@ private fun MobileDeckApp() {
         }
     }
 
-    fun addBluetoothStatusButton() {
-        val colors = defaultDeckColors()
-        val newButton = DeckButton(
-            id = nextDeckButtonId(deckPages.flatMap { it.buttons }),
-            title = "Bluetooth",
-            subtitle = "Status",
-            icon = "BT",
-            iconImageUri = "",
-            displayMode = DeckDisplayMode.IconAndText,
-            actionType = DeckActionType.BluetoothStatus,
-            payload = "",
-            color = colors[deckButtons.size % colors.size],
-            position = nextOpenPosition(deckButtons, deckColumns * deckRows - 1)
-        )
-        val updatedPages = updateDeckPage(deckPages, activeDeckPage.id) { it.buttons + newButton }
-        deckPages = updatedPages
-        saveDeckPages(context, updatedPages)
-    }
-
     fun addDeckPage() {
         if (deckPages.size >= MAX_PAGES) return
         val nextPageNumber = deckPages.size + 1
@@ -330,13 +314,24 @@ private fun MobileDeckApp() {
     }
 
     fun switchDeckPage(delta: Int) {
-        val currentIndex = deckPages.indexOfFirst { it.id == activeDeckPage.id }
-        val target = (currentIndex + delta).coerceIn(deckPages.indices)
+        if (deckPages.isEmpty()) return
+        val currentIndex = deckPages.indexOfFirst { it.id == activeDeckPageId }.let { index ->
+            if (index >= 0) index else 0
+        }
+        val target = if (infinitePageSwipe) {
+            wrapIndex(currentIndex + delta, deckPages.size)
+        } else {
+            (currentIndex + delta).coerceIn(deckPages.indices)
+        }
+        Log.d(
+            "MobileDeckGesture",
+            "switchPage current=$currentIndex target=$target delta=$delta activeId=$activeDeckPageId targetId=${deckPages[target].id} pages=${deckPages.size}"
+        )
         if (target != currentIndex) {
             lastPageDelta = delta
             pageAnimationSequence += 1
+            activeDeckPageId = deckPages[target].id
         }
-        activeDeckPageId = deckPages[target].id
     }
 
     fun pressDeckButton(button: DeckButton) {
@@ -361,13 +356,31 @@ private fun MobileDeckApp() {
             DeckActionType.Hotkey -> hidManager.sendHotkey(button.payload)
             DeckActionType.Text -> hidManager.sendText(button.payload)
             DeckActionType.RunCommand -> hidManager.runWindowsCommand(button.payload)
-            DeckActionType.AppCommand -> false
+            DeckActionType.AppCommand -> when (appCommandAction(button.payload)) {
+                DeckActionType.Settings -> {
+                    page = AppPage.Settings
+                    true
+                }
+                DeckActionType.BluetoothStatus -> {
+                    page = AppPage.Settings
+                    true
+                }
+                DeckActionType.PreviousPage -> {
+                    switchDeckPage(-1)
+                    true
+                }
+                DeckActionType.NextPage -> {
+                    switchDeckPage(1)
+                    true
+                }
+                else -> false
+            }
         }
         val note = when {
-            button.actionType == DeckActionType.Settings -> "opened settings"
-            button.actionType == DeckActionType.BluetoothStatus -> "opened connection"
-            button.actionType == DeckActionType.PreviousPage -> "previous page"
-            button.actionType == DeckActionType.NextPage -> "next page"
+            buttonAppAction(button) == DeckActionType.Settings -> "opened settings"
+            buttonAppAction(button) == DeckActionType.BluetoothStatus -> "opened connection"
+            buttonAppAction(button) == DeckActionType.PreviousPage -> "previous page"
+            buttonAppAction(button) == DeckActionType.NextPage -> "next page"
             delivered -> "sent"
             button.actionType == DeckActionType.AppCommand -> "not supported by keyboard HID"
             hidStatus.state != HidConnectionState.Connected -> "no connected PC"
@@ -473,6 +486,7 @@ private fun MobileDeckApp() {
                 },
                 onPageSwipe = ::switchDeckPage,
                 onAddPage = ::addDeckPage,
+                onDeletePage = ::deleteActiveDeckPage,
                 onButtonEdit = { editingButton = it },
                 onButtonMoved = ::moveDeckButtonToSlot,
                 onEmptySlotPressed = { slot -> addDeckButton(slot, editAfterCreate = true) }
@@ -495,6 +509,7 @@ private fun MobileDeckApp() {
                 pageSwipeAxis = pageSwipeAxis,
                 multiTouchPageSwipe = multiTouchPageSwipe,
                 pageSwipeAnimation = pageSwipeAnimation,
+                infinitePageSwipe = infinitePageSwipe,
                 onLayoutEditor = { page = AppPage.LayoutEditor },
                 onPageSwipeAxisChange = { axis ->
                     pageSwipeAxis = axis
@@ -507,6 +522,10 @@ private fun MobileDeckApp() {
                 onPageSwipeAnimationChange = { enabled ->
                     pageSwipeAnimation = enabled
                     savePageSwipeAnimation(context, enabled)
+                },
+                onInfinitePageSwipeChange = { enabled ->
+                    infinitePageSwipe = enabled
+                    saveInfinitePageSwipe(context, enabled)
                 },
                 onStart = ::startHid,
                 onStop = { hidManager.stop() },
@@ -528,10 +547,7 @@ private fun MobileDeckApp() {
                     saveDeckRows(context, rows)
                 },
                 onAddButton = { addDeckButton() },
-                canAddBluetoothStatus = deckPages.none { page -> page.buttons.any { it.actionType == DeckActionType.BluetoothStatus } },
-                onAddBluetoothStatus = ::addBluetoothStatusButton,
                 onAddPage = ::addDeckPage,
-                onDeletePage = ::deleteActiveDeckPage
             )
         }
     }
@@ -556,22 +572,6 @@ private fun MobileDeckApp() {
                     saveDeckPages(context, updatedPages)
                 }
                 editingButton = null
-            },
-            onMoveEarlier = {
-                val updatedPages = updateDeckPage(deckPages, activeDeckPage.id) {
-                    moveDeckButton(it.buttons, button.id, -1)
-                }
-                deckPages = updatedPages
-                saveDeckPages(context, updatedPages)
-                editingButton = null
-            },
-            onMoveLater = {
-                val updatedPages = updateDeckPage(deckPages, activeDeckPage.id) {
-                    moveDeckButton(it.buttons, button.id, 1)
-                }
-                deckPages = updatedPages
-                saveDeckPages(context, updatedPages)
-                editingButton = null
             }
         )
     }
@@ -589,6 +589,7 @@ private fun SettingsPage(
     pageSwipeAxis: PageSwipeAxis,
     multiTouchPageSwipe: Boolean,
     pageSwipeAnimation: Boolean,
+    infinitePageSwipe: Boolean,
     pageName: String,
     pageCount: Int,
     pairedHosts: List<PairedHidHost>,
@@ -597,6 +598,7 @@ private fun SettingsPage(
     onPageSwipeAxisChange: (PageSwipeAxis) -> Unit,
     onMultiTouchPageSwipeChange: (Boolean) -> Unit,
     onPageSwipeAnimationChange: (Boolean) -> Unit,
+    onInfinitePageSwipeChange: (Boolean) -> Unit,
     onStart: () -> Unit,
     onStop: () -> Unit,
     onMakeDiscoverable: () -> Unit,
@@ -605,10 +607,7 @@ private fun SettingsPage(
     onColumnsChange: (Int) -> Unit,
     onRowsChange: (Int) -> Unit,
     onAddButton: () -> Unit,
-    canAddBluetoothStatus: Boolean,
-    onAddBluetoothStatus: () -> Unit,
-    onAddPage: () -> Unit,
-    onDeletePage: () -> Unit
+    onAddPage: () -> Unit
 ) {
     LazyColumn(
         modifier = modifier,
@@ -667,15 +666,14 @@ private fun SettingsPage(
                 pageSwipeAxis = pageSwipeAxis,
                 multiTouchPageSwipe = multiTouchPageSwipe,
                 pageSwipeAnimation = pageSwipeAnimation,
+                infinitePageSwipe = infinitePageSwipe,
                 pageName = pageName,
                 pageCount = pageCount,
                 onPageSwipeAxisChange = onPageSwipeAxisChange,
                 onMultiTouchPageSwipeChange = onMultiTouchPageSwipeChange,
                 onPageSwipeAnimationChange = onPageSwipeAnimationChange,
-                canAddBluetoothStatus = canAddBluetoothStatus,
-                onAddBluetoothStatus = onAddBluetoothStatus,
+                onInfinitePageSwipeChange = onInfinitePageSwipeChange,
                 onAddPage = onAddPage,
-                onDeletePage = onDeletePage
             )
         }
 
@@ -687,6 +685,7 @@ private fun SettingsPage(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun DeckSettingsPanel(
     deckPages: List<DeckPageConfig>,
@@ -694,19 +693,18 @@ private fun DeckSettingsPanel(
     pageSwipeAxis: PageSwipeAxis,
     multiTouchPageSwipe: Boolean,
     pageSwipeAnimation: Boolean,
+    infinitePageSwipe: Boolean,
     pageName: String,
     pageCount: Int,
     onPageSwipeAxisChange: (PageSwipeAxis) -> Unit,
     onMultiTouchPageSwipeChange: (Boolean) -> Unit,
     onPageSwipeAnimationChange: (Boolean) -> Unit,
-    canAddBluetoothStatus: Boolean,
-    onAddBluetoothStatus: () -> Unit,
-    onAddPage: () -> Unit,
-    onDeletePage: () -> Unit
+    onInfinitePageSwipeChange: (Boolean) -> Unit,
+    onAddPage: () -> Unit
 ) {
     Card(
         shape = RoundedCornerShape(8.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f))
     ) {
         Column(
             modifier = Modifier
@@ -716,7 +714,7 @@ private fun DeckSettingsPanel(
         ) {
             Text(
                 text = stringResource(R.string.deck_layout),
-                style = MaterialTheme.typography.titleMedium,
+                style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.SemiBold
             )
             Text(
@@ -755,6 +753,13 @@ private fun DeckSettingsPanel(
             OutlinedButton(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(8.dp),
+                onClick = { onInfinitePageSwipeChange(!infinitePageSwipe) }
+            ) {
+                Text(stringResource(if (infinitePageSwipe) R.string.page_wrap_on else R.string.page_wrap_off))
+            }
+            OutlinedButton(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(8.dp),
                 onClick = { onPageSwipeAnimationChange(!pageSwipeAnimation) }
             ) {
                 Text(stringResource(if (pageSwipeAnimation) R.string.page_swipe_animation_on else R.string.page_swipe_animation_off))
@@ -766,23 +771,6 @@ private fun DeckSettingsPanel(
                 onClick = onAddPage
             ) {
                 Text(stringResource(R.string.add_page_count, pageCount, MAX_PAGES))
-            }
-            OutlinedButton(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(8.dp),
-                enabled = pageCount > 1,
-                onClick = onDeletePage
-            ) {
-                Text(stringResource(R.string.delete_current_page))
-            }
-            if (canAddBluetoothStatus) {
-                OutlinedButton(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(8.dp),
-                    onClick = onAddBluetoothStatus
-                ) {
-                    Text(stringResource(R.string.add_bluetooth_status_key))
-                }
             }
         }
     }
@@ -964,6 +952,7 @@ private fun LayoutEditorPage(
     onRowsChange: (Int) -> Unit,
     onPageSwipe: (Int) -> Unit,
     onAddPage: () -> Unit,
+    onDeletePage: () -> Unit,
     onButtonEdit: (DeckButton) -> Unit,
     onButtonMoved: (DeckButton, Int) -> Unit,
     onEmptySlotPressed: (Int) -> Unit
@@ -990,6 +979,13 @@ private fun LayoutEditorPage(
                 range = MIN_COLUMNS..MAX_COLUMNS,
                 onValueChange = onColumnsChange
             )
+            OutlinedButton(
+                shape = RoundedCornerShape(8.dp),
+                enabled = deckPages.size > 1,
+                onClick = onDeletePage
+            ) {
+                Text(stringResource(R.string.delete_current_page))
+            }
         }
 
         Row(
@@ -1318,12 +1314,15 @@ private fun Modifier.multiTouchPageSwipe(
             var previousCentroid: Offset? = null
             var totalDrag = Offset.Zero
             var maxPointerCount = 0
+            var multiTouchActive = false
 
             while (true) {
                 val event = awaitPointerEvent(PointerEventPass.Initial)
                 val pressed = event.changes.filter { it.pressed }
                 if (pressed.isNotEmpty()) {
-                    if (pressed.size >= 2) {
+                    maxPointerCount = maxOf(maxPointerCount, pressed.size)
+                    if (pressed.size >= 2 || multiTouchActive) {
+                        multiTouchActive = true
                         event.changes.forEach { if (it.pressed) it.consume() }
                     }
                     val centroid = pressed
@@ -1333,33 +1332,38 @@ private fun Modifier.multiTouchPageSwipe(
                         tracking = true
                         previousCentroid = centroid
                         totalDrag = Offset.Zero
-                        maxPointerCount = pressed.size
                     } else {
                         previousCentroid?.let { totalDrag += centroid - it }
                         previousCentroid = centroid
-                        maxPointerCount = maxOf(maxPointerCount, pressed.size)
                     }
                 } else if (tracking) {
-                    if (maxPointerCount in 2..3) {
+                    if (multiTouchActive && maxPointerCount in 2..3) {
                         event.changes.forEach { it.consume() }
                         val threshold = 80f
+                        var pageDelta = 0
                         when (axis) {
                             PageSwipeAxis.Horizontal -> {
                                 if (abs(totalDrag.x) > threshold && abs(totalDrag.x) > abs(totalDrag.y)) {
-                                    onPageSwipe(if (totalDrag.x < 0f) 1 else -1)
+                                    pageDelta = if (totalDrag.x < 0f) 1 else -1
                                 }
                             }
                             PageSwipeAxis.Vertical -> {
                                 if (abs(totalDrag.y) > threshold && abs(totalDrag.y) > abs(totalDrag.x)) {
-                                    onPageSwipe(if (totalDrag.y < 0f) 1 else -1)
+                                    pageDelta = if (totalDrag.y < 0f) 1 else -1
                                 }
                             }
                         }
+                        Log.d(
+                            "MobileDeckGesture",
+                            "pageSwipe axis=$axis pointers=$maxPointerCount drag=${totalDrag.x},${totalDrag.y} delta=$pageDelta"
+                        )
+                        if (pageDelta != 0) onPageSwipe(pageDelta)
                     }
                     tracking = false
                     previousCentroid = null
                     totalDrag = Offset.Zero
                     maxPointerCount = 0
+                    multiTouchActive = false
                 }
             }
         }
@@ -1367,6 +1371,8 @@ private fun Modifier.multiTouchPageSwipe(
 }
 
 private fun Int.signOrOne(): Int = if (this < 0) -1 else 1
+
+private fun wrapIndex(value: Int, size: Int): Int = ((value % size) + size) % size
 
 @Composable
 private fun ButtonGrid(
@@ -1573,7 +1579,7 @@ private fun DeckKey(
     ) {
         Column(
             modifier = Modifier.padding(8.dp),
-            verticalArrangement = if (button.displayMode == DeckDisplayMode.IconOnly) {
+            verticalArrangement = if (button.displayMode != DeckDisplayMode.IconAndText) {
                 Arrangement.Center
             } else {
                 Arrangement.SpaceBetween
@@ -1581,11 +1587,13 @@ private fun DeckKey(
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                DeckButtonIcon(
-                    button = button,
-                    tint = contentColor,
-                    large = button.displayMode == DeckDisplayMode.IconOnly
-                )
+                if (button.displayMode != DeckDisplayMode.KeywordOnly) {
+                    DeckButtonIcon(
+                        button = button,
+                        tint = contentColor,
+                        large = button.displayMode == DeckDisplayMode.IconOnly
+                    )
+                }
                 if (button.displayMode == DeckDisplayMode.IconAndText) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
@@ -1608,6 +1616,22 @@ private fun DeckKey(
                             overflow = TextOverflow.Ellipsis
                         )
                     }
+                } else if (button.displayMode == DeckDisplayMode.KeywordOnly) {
+                    Text(
+                        text = button.title,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = contentColor,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = buttonSubtitle(button, status),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = contentColor.copy(alpha = 0.82f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
                 }
             }
             if (button.displayMode == DeckDisplayMode.IconAndText) {
@@ -1634,7 +1658,7 @@ private fun DeckKey(
 
 @Composable
 private fun buttonSubtitle(button: DeckButton, status: HidStatus): String {
-    return if (button.actionType == DeckActionType.BluetoothStatus) {
+    return if (buttonAppAction(button) == DeckActionType.BluetoothStatus) {
         stringResource(status.state.labelRes())
     } else {
         button.subtitle
@@ -1699,7 +1723,7 @@ private fun rememberImageBitmap(uriString: String): ImageBitmap? {
 }
 
 private fun materialIconFor(button: DeckButton): ImageVector? {
-    return when (button.actionType) {
+    return when (buttonAppAction(button) ?: button.actionType) {
         DeckActionType.Settings -> Icons.Filled.Settings
         DeckActionType.BluetoothStatus -> Icons.Filled.Bluetooth
         DeckActionType.PreviousPage -> Icons.Filled.SkipPrevious
@@ -1808,9 +1832,7 @@ private fun EditButtonDialog(
     status: HidStatus,
     onDismiss: () -> Unit,
     onSave: (DeckButton) -> Unit,
-    onDelete: () -> Unit,
-    onMoveEarlier: () -> Unit,
-    onMoveLater: () -> Unit
+    onDelete: () -> Unit
 ) {
     var title by remember(button.id) { mutableStateOf(button.title) }
     var subtitle by remember(button.id) { mutableStateOf(button.subtitle) }
@@ -1820,6 +1842,7 @@ private fun EditButtonDialog(
     var payload by remember(button.id) { mutableStateOf(button.payload) }
     var actionType by remember(button.id) { mutableStateOf(button.actionType) }
     var menuExpanded by remember { mutableStateOf(false) }
+    var appCommandMenuExpanded by remember { mutableStateOf(false) }
     val context = LocalContext.current
     val imagePicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
@@ -1834,8 +1857,15 @@ private fun EditButtonDialog(
             iconImageUri = uri.toString()
         }
     }
-    val canDelete = button.actionType != DeckActionType.Settings
-    val actionLocked = button.actionType == DeckActionType.Settings
+    val appCommandActions = listOf(
+        DeckActionType.BluetoothStatus,
+        DeckActionType.PreviousPage,
+        DeckActionType.NextPage,
+        DeckActionType.Settings
+    )
+    val selectedAppCommand = appCommandAction(payload) ?: DeckActionType.BluetoothStatus
+    val canDelete = buttonAppAction(button) != DeckActionType.Settings
+    val actionLocked = buttonAppAction(button) == DeckActionType.Settings
     val canSave = title.isNotBlank() && (!payloadRequired(actionType) || payload.isNotBlank())
 
     AlertDialog(
@@ -1866,26 +1896,24 @@ private fun EditButtonDialog(
                     )
                 }
                 item {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         OutlinedTextField(
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier.fillMaxWidth(),
                             value = icon,
                             onValueChange = { icon = it.take(3) },
                             label = { Text(stringResource(R.string.icon_text)) },
                             singleLine = true
                         )
-                        OutlinedButton(
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(8.dp),
-                            onClick = {
-                                displayMode = if (displayMode == DeckDisplayMode.IconOnly) {
-                                    DeckDisplayMode.IconAndText
-                                } else {
-                                    DeckDisplayMode.IconOnly
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            DeckDisplayMode.values().forEach { mode ->
+                                OutlinedButton(
+                                    modifier = Modifier.weight(1f),
+                                    shape = RoundedCornerShape(8.dp),
+                                    onClick = { displayMode = mode }
+                                ) {
+                                    Text(stringResource(mode.labelRes))
                                 }
                             }
-                        ) {
-                            Text(stringResource(displayMode.labelRes))
                         }
                     }
                 }
@@ -1940,12 +1968,17 @@ private fun EditButtonDialog(
                                 onDismissRequest = { menuExpanded = false }
                             ) {
                                 DeckActionType.values()
-                                    .filterNot { it == DeckActionType.Settings }
+                                    .filterNot { it in appCommandActions }
                                     .forEach { item ->
                                         DropdownMenuItem(
                                             text = { Text(stringResource(item.labelRes)) },
                                             onClick = {
                                                 actionType = item
+                                                if (item == DeckActionType.AppCommand && appCommandAction(payload) == null) {
+                                                    payload = DeckActionType.BluetoothStatus.name
+                                                } else if (!payloadRequired(item)) {
+                                                    payload = ""
+                                                }
                                                 menuExpanded = false
                                             }
                                         )
@@ -1954,7 +1987,42 @@ private fun EditButtonDialog(
                         }
                     }
                 }
-                if (actionType == DeckActionType.BluetoothStatus) {
+                if (actionType == DeckActionType.AppCommand) {
+                    item {
+                        ExposedDropdownMenuBox(
+                            expanded = appCommandMenuExpanded,
+                            onExpandedChange = { appCommandMenuExpanded = !appCommandMenuExpanded }
+                        ) {
+                            OutlinedTextField(
+                                modifier = Modifier
+                                    .menuAnchor()
+                                    .fillMaxWidth(),
+                                value = stringResource(selectedAppCommand.labelRes),
+                                onValueChange = {},
+                                readOnly = true,
+                                label = { Text(stringResource(R.string.app_command_target)) },
+                                trailingIcon = {
+                                    ExposedDropdownMenuDefaults.TrailingIcon(expanded = appCommandMenuExpanded)
+                                }
+                            )
+                            ExposedDropdownMenu(
+                                expanded = appCommandMenuExpanded,
+                                onDismissRequest = { appCommandMenuExpanded = false }
+                            ) {
+                                appCommandActions.forEach { item ->
+                                    DropdownMenuItem(
+                                        text = { Text(stringResource(item.labelRes)) },
+                                        onClick = {
+                                            payload = item.name
+                                            appCommandMenuExpanded = false
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+                if (buttonAppAction(actionType, payload) == DeckActionType.BluetoothStatus) {
                     item {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
@@ -1975,34 +2043,15 @@ private fun EditButtonDialog(
                     }
                 }
                 item {
-                    OutlinedTextField(
-                        modifier = Modifier.fillMaxWidth(),
-                        value = payload,
-                        onValueChange = { payload = it },
-                        label = { Text(stringResource(R.string.payload)) },
-                        enabled = payloadRequired(actionType),
-                        singleLine = true
-                    )
-                }
-                item {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        OutlinedButton(
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(8.dp),
-                            onClick = onMoveEarlier
-                        ) {
-                            Text(stringResource(R.string.earlier))
-                        }
-                        OutlinedButton(
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(8.dp),
-                            onClick = onMoveLater
-                        ) {
-                            Text(stringResource(R.string.later))
-                        }
+                    if (actionType != DeckActionType.AppCommand) {
+                        OutlinedTextField(
+                            modifier = Modifier.fillMaxWidth(),
+                            value = payload,
+                            onValueChange = { payload = it },
+                            label = { Text(stringResource(R.string.payload)) },
+                            enabled = payloadRequired(actionType),
+                            singleLine = true
+                        )
                     }
                 }
             }
@@ -2019,7 +2068,13 @@ private fun EditButtonDialog(
                             iconImageUri = iconImageUri,
                             displayMode = displayMode,
                             actionType = actionType,
-                            payload = if (payloadRequired(actionType)) payload.trim() else ""
+                            payload = if (actionType == DeckActionType.AppCommand) {
+                                selectedAppCommand.name
+                            } else if (payloadRequired(actionType)) {
+                                payload.trim()
+                            } else {
+                                ""
+                            }
                         )
                     )
                 }
@@ -2191,8 +2246,34 @@ private fun payloadRequired(actionType: DeckActionType): Boolean {
         DeckActionType.MediaKey,
         DeckActionType.Hotkey,
         DeckActionType.Text,
-        DeckActionType.RunCommand,
-        DeckActionType.AppCommand -> true
+        DeckActionType.RunCommand -> true
+        DeckActionType.AppCommand -> false
+    }
+}
+
+private fun appCommandAction(payload: String): DeckActionType? {
+    return runCatching {
+        DeckActionType.valueOf(payload)
+    }.getOrNull()?.takeIf {
+        it == DeckActionType.Settings ||
+            it == DeckActionType.BluetoothStatus ||
+            it == DeckActionType.PreviousPage ||
+            it == DeckActionType.NextPage
+    }
+}
+
+private fun buttonAppAction(button: DeckButton): DeckActionType? {
+    return buttonAppAction(button.actionType, button.payload)
+}
+
+private fun buttonAppAction(actionType: DeckActionType, payload: String): DeckActionType? {
+    return when (actionType) {
+        DeckActionType.Settings,
+        DeckActionType.BluetoothStatus,
+        DeckActionType.PreviousPage,
+        DeckActionType.NextPage -> actionType
+        DeckActionType.AppCommand -> appCommandAction(payload)
+        else -> null
     }
 }
 
@@ -2238,6 +2319,14 @@ private fun savePageSwipeAnimation(context: Context, enabled: Boolean) {
     context.deckPrefs().edit().putBoolean(PREF_PAGE_SWIPE_ANIMATION, enabled).apply()
 }
 
+private fun loadInfinitePageSwipe(context: Context): Boolean {
+    return context.deckPrefs().getBoolean(PREF_INFINITE_PAGE_SWIPE, true)
+}
+
+private fun saveInfinitePageSwipe(context: Context, enabled: Boolean) {
+    context.deckPrefs().edit().putBoolean(PREF_INFINITE_PAGE_SWIPE, enabled).apply()
+}
+
 private fun nextDeckButtonId(buttons: List<DeckButton>): Int {
     return (buttons.maxOfOrNull { it.id } ?: 0) + 1
 }
@@ -2270,23 +2359,6 @@ private fun updateDeckButton(
     }
 }
 
-private fun moveDeckButton(
-    buttons: List<DeckButton>,
-    id: Int,
-    delta: Int
-): List<DeckButton> {
-    val button = buttons.firstOrNull { it.id == id } ?: return buttons
-    val targetPosition = (button.position + delta).coerceAtLeast(0)
-    val targetButton = buttons.firstOrNull { it.position == targetPosition }
-    return buttons.map { existing ->
-        when (existing.id) {
-            button.id -> existing.copy(position = targetPosition)
-            targetButton?.id -> existing.copy(position = button.position)
-            else -> existing
-        }
-    }
-}
-
 private fun Context.deckPrefs() = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
 private const val PREFS_NAME = "mobile_deck"
@@ -2297,6 +2369,7 @@ private const val PREF_ROWS = "rows"
 private const val PREF_PAGE_SWIPE_AXIS = "page_swipe_axis"
 private const val PREF_MULTI_TOUCH_PAGE_SWIPE = "multi_touch_page_swipe"
 private const val PREF_PAGE_SWIPE_ANIMATION = "page_swipe_animation"
+private const val PREF_INFINITE_PAGE_SWIPE = "infinite_page_swipe"
 private const val MAX_PAGES = 5
 private const val MIN_COLUMNS = 4
 private const val MAX_COLUMNS = 6
