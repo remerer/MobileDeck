@@ -43,7 +43,7 @@ If Windows keeps an old HID descriptor cached after an update, remove the paired
 - In Layout editor, tap a key to edit it.
 - Drag a key in Layout editor to move it to another slot.
 - Long-press an empty slot to create a new key and immediately configure it.
-- Use the columns slider and vertical rows slider to resize the grid.
+- Use the columns slider plus vertical rows and spacing sliders to resize the grid.
 - Delete the current page from Layout editor.
 - Reset the first page from Layout editor while keeping the title area and Settings key.
 - In key editing, choose `App command` to assign Settings, Bluetooth status, Previous page, or Next page.
@@ -62,4 +62,4 @@ If Windows keeps an old HID descriptor cached after an update, remove the paired
 
 - Text input through Bluetooth HID depends on the current Windows keyboard layout and IME state.
 - Reliable exact text input, clipboard paste, direct app launching, and Windows icon extraction are planned as future Windows Companion features.
-- Diagnostics are shown only in debug builds.
+- Diagnostics are available from Settings.

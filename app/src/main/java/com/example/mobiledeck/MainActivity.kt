@@ -723,10 +723,8 @@ private fun SettingsPage(
             )
         }
 
-        if (BuildConfig.DEBUG) {
-            item {
-                DiagnosticsPanel(logs = logs)
-            }
+        item {
+            DiagnosticsPanel(logs = logs)
         }
     }
 }
@@ -925,7 +923,7 @@ private fun Header(
                     )
                 } else {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        pairedHosts.take(3).forEach { host ->
+                        pairedHosts.forEach { host ->
                             OutlinedButton(
                                 modifier = Modifier.fillMaxWidth(),
                                 shape = RoundedCornerShape(8.dp),
@@ -1054,13 +1052,6 @@ private fun LayoutEditorPage(
                 range = MIN_COLUMNS..MAX_COLUMNS,
                 onValueChange = onColumnsChange
             )
-            LayoutSlider(
-                modifier = Modifier.weight(1f),
-                label = stringResource(R.string.spacing),
-                value = spacing.value.roundToInt(),
-                range = MIN_SPACING_DP..MAX_SPACING_DP,
-                onValueChange = onSpacingChange
-            )
             OutlinedButton(
                 shape = RoundedCornerShape(8.dp),
                 enabled = isFirstPage || deckPages.size > 1,
@@ -1100,15 +1091,29 @@ private fun LayoutEditorPage(
                 onButtonMoved = onButtonMoved,
                 onEmptySlotPressed = onEmptySlotPressed
             )
-            VerticalLayoutSlider(
-                modifier = Modifier
-                    .width(34.dp)
-                    .fillMaxHeight(),
-                label = stringResource(R.string.rows),
-                value = rows,
-                range = MIN_ROWS..MAX_ROWS,
-                onValueChange = onRowsChange
-            )
+            Row(
+                modifier = Modifier.fillMaxHeight(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                VerticalLayoutSlider(
+                    modifier = Modifier
+                        .width(34.dp)
+                        .fillMaxHeight(),
+                    label = stringResource(R.string.rows),
+                    value = rows,
+                    range = MIN_ROWS..MAX_ROWS,
+                    onValueChange = onRowsChange
+                )
+                VerticalLayoutSlider(
+                    modifier = Modifier
+                        .width(34.dp)
+                        .fillMaxHeight(),
+                    label = stringResource(R.string.spacing),
+                    value = spacing.value.roundToInt(),
+                    range = MIN_SPACING_DP..MAX_SPACING_DP,
+                    onValueChange = onSpacingChange
+                )
+            }
         }
     }
 }
@@ -1668,7 +1673,7 @@ private fun DeckKey(
         color = containerColor
     ) {
         val showText = cellSize >= 96.dp
-        val showSubtitle = cellSize >= 124.dp
+        val showSubtitle = showText
         Column(
             modifier = Modifier.padding(8.dp),
             verticalArrangement = if (button.displayMode != DeckDisplayMode.IconAndText || !showText) {
