@@ -30,7 +30,9 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -62,7 +64,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -89,6 +90,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -97,6 +99,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
@@ -108,6 +111,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.IntSize
 import com.example.mobiledeck.ui.theme.MobileDeckTheme
 import org.json.JSONArray
 import org.json.JSONObject
@@ -982,7 +986,7 @@ private fun LayoutEditorPage(
             )
             VerticalLayoutSlider(
                 modifier = Modifier
-                    .width(46.dp)
+                    .width(34.dp)
                     .fillMaxHeight(),
                 label = stringResource(R.string.rows),
                 value = rows,
@@ -1012,14 +1016,13 @@ private fun LayoutSlider(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             maxLines = 1
         )
-        Slider(
+        CompactSlider(
             modifier = Modifier.weight(1f),
             value = value.toFloat(),
             onValueChange = { next ->
                 onValueChange(next.roundToInt().coerceIn(range.first, range.last))
             },
-            valueRange = range.first.toFloat()..range.last.toFloat(),
-            steps = (range.last - range.first - 1).coerceAtLeast(0)
+            valueRange = range.first.toFloat()..range.last.toFloat()
         )
     }
 }
@@ -1043,23 +1046,80 @@ private fun VerticalLayoutSlider(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             maxLines = 1
         )
-        Box(
+        CompactSlider(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth(),
-            contentAlignment = Alignment.Center
-        ) {
-            Slider(
-                modifier = Modifier
-                    .width(320.dp)
-                    .graphicsLayer(rotationZ = -90f),
-                value = value.toFloat(),
-                onValueChange = { next ->
-                    onValueChange(next.roundToInt().coerceIn(range.first, range.last))
-                },
-                valueRange = range.first.toFloat()..range.last.toFloat(),
-                steps = (range.last - range.first - 1).coerceAtLeast(0)
-            )
+            value = value.toFloat(),
+            onValueChange = { next ->
+                onValueChange(next.roundToInt().coerceIn(range.first, range.last))
+            },
+            valueRange = range.first.toFloat()..range.last.toFloat(),
+            vertical = true
+        )
+    }
+}
+
+@Composable
+private fun CompactSlider(
+    modifier: Modifier = Modifier,
+    value: Float,
+    onValueChange: (Float) -> Unit,
+    valueRange: ClosedFloatingPointRange<Float>,
+    vertical: Boolean = false
+) {
+    val activeColor = MaterialTheme.colorScheme.primary
+    val inactiveColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.28f)
+    var size by remember { mutableStateOf(IntSize.Zero) }
+    val fraction = ((value - valueRange.start) / (valueRange.endInclusive - valueRange.start))
+        .coerceIn(0f, 1f)
+
+    fun updateFromPosition(position: Offset) {
+        val nextFraction = if (vertical) {
+            1f - (position.y / size.height.coerceAtLeast(1)).coerceIn(0f, 1f)
+        } else {
+            (position.x / size.width.coerceAtLeast(1)).coerceIn(0f, 1f)
+        }
+        val nextValue = valueRange.start + nextFraction * (valueRange.endInclusive - valueRange.start)
+        onValueChange(nextValue)
+    }
+
+    Canvas(
+        modifier = modifier
+            .onSizeChanged { size = it }
+            .pointerInput(valueRange, vertical, size) {
+                detectTapGestures(
+                    onPress = { offset ->
+                        updateFromPosition(offset)
+                        tryAwaitRelease()
+                    }
+                )
+            }
+            .pointerInput(valueRange, vertical, size) {
+                detectDragGestures { change, _ ->
+                    change.consume()
+                    updateFromPosition(change.position)
+                }
+            }
+    ) {
+        val trackStroke = 4.dp.toPx()
+        val thumbRadius = 7.dp.toPx()
+        if (vertical) {
+            val x = this.size.width / 2f
+            val top = thumbRadius
+            val bottom = this.size.height - thumbRadius
+            val y = bottom - (bottom - top) * fraction
+            drawLine(inactiveColor, Offset(x, top), Offset(x, bottom), trackStroke, StrokeCap.Round)
+            drawLine(activeColor, Offset(x, y), Offset(x, bottom), trackStroke, StrokeCap.Round)
+            drawCircle(activeColor, thumbRadius, Offset(x, y))
+        } else {
+            val y = this.size.height / 2f
+            val start = thumbRadius
+            val end = this.size.width - thumbRadius
+            val x = start + (end - start) * fraction
+            drawLine(inactiveColor, Offset(start, y), Offset(end, y), trackStroke, StrokeCap.Round)
+            drawLine(activeColor, Offset(start, y), Offset(x, y), trackStroke, StrokeCap.Round)
+            drawCircle(activeColor, thumbRadius, Offset(x, y))
         }
     }
 }
@@ -1090,6 +1150,10 @@ private fun DeckPage(
         val safeRows = rows.coerceIn(MIN_ROWS, MAX_ROWS)
         val density = LocalDensity.current
         val spacing = 8.dp
+        val indicatorPadding = PaddingValues(
+            start = if (pageSwipeAxis == PageSwipeAxis.Vertical) 12.dp else 0.dp,
+            bottom = if (pageSwipeAxis == PageSwipeAxis.Horizontal) 12.dp else 0.dp
+        )
         val swipeModifier = Modifier.multiTouchPageSwipe(
             enabled = multiTouchPageSwipe,
             axis = pageSwipeAxis,
@@ -1097,8 +1161,10 @@ private fun DeckPage(
         )
         val cellSize = with(density) {
             val spacingPx = spacing.toPx()
-            val maxCellWidth = (constraints.maxWidth - spacingPx * (safeColumns - 1)) / safeColumns
-            val maxCellHeight = (constraints.maxHeight - spacingPx * (safeRows - 1)) / safeRows
+            val reservedWidth = if (pageSwipeAxis == PageSwipeAxis.Vertical) 12.dp.toPx() else 0f
+            val reservedHeight = if (pageSwipeAxis == PageSwipeAxis.Horizontal) 12.dp.toPx() else 0f
+            val maxCellWidth = (constraints.maxWidth - reservedWidth - spacingPx * (safeColumns - 1)) / safeColumns
+            val maxCellHeight = (constraints.maxHeight - reservedHeight - spacingPx * (safeRows - 1)) / safeRows
             minOf(maxCellWidth, maxCellHeight).toDp()
         }
 
@@ -1125,10 +1191,7 @@ private fun DeckPage(
             ) {
                 ButtonGrid(
                     modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(
-                        start = if (pageSwipeAxis == PageSwipeAxis.Vertical) 12.dp else 0.dp,
-                        bottom = if (pageSwipeAxis == PageSwipeAxis.Horizontal) 12.dp else 0.dp
-                    ),
+                    contentPadding = indicatorPadding,
                     buttons = buttons,
                     columns = safeColumns,
                     rows = safeRows,
