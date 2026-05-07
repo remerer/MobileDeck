@@ -41,7 +41,13 @@ class HidKeyboardManager(
     private val context: Context,
     private val onStatusChanged: (HidStatus) -> Unit
 ) {
-    private val adapter: BluetoothAdapter? = BluetoothAdapter.getDefaultAdapter()
+    private val adapter: BluetoothAdapter? by lazy {
+        try {
+            BluetoothAdapter.getDefaultAdapter()
+        } catch (e: Throwable) {
+            null
+        }
+    }
     private val executor = Executors.newSingleThreadExecutor()
     private val mainHandler = Handler(Looper.getMainLooper())
     private var hidDevice: BluetoothHidDevice? = null
@@ -96,36 +102,38 @@ class HidKeyboardManager(
         0xC0
     ).map { it.toByte() }.toByteArray()
 
-    private val callback = object : BluetoothHidDevice.Callback() {
-        override fun onAppStatusChanged(pluggedDevice: BluetoothDevice?, registered: Boolean) {
-            Log.d(TAG, "onAppStatusChanged registered=$registered plugged=${pluggedDevice?.safeName()}")
-            if (registered) {
-                host = pluggedDevice
-                publish(
-                    HidConnectionState.Registered,
-                    "Registered as Android HID Keyboard. Pair this phone from the PC Bluetooth settings."
-                )
-            } else {
-                host = null
-                publish(HidConnectionState.Disconnected, "Bluetooth HID keyboard unregistered")
+    private val callback by lazy {
+        object : BluetoothHidDevice.Callback() {
+            override fun onAppStatusChanged(pluggedDevice: BluetoothDevice?, registered: Boolean) {
+                Log.d(TAG, "onAppStatusChanged registered=$registered plugged=${pluggedDevice?.safeName()}")
+                if (registered) {
+                    host = pluggedDevice
+                    publish(
+                        HidConnectionState.Registered,
+                        "Registered as Android HID Keyboard. Pair this phone from the PC Bluetooth settings."
+                    )
+                } else {
+                    host = null
+                    publish(HidConnectionState.Disconnected, "Bluetooth HID keyboard unregistered")
+                }
             }
-        }
 
-        override fun onConnectionStateChanged(device: BluetoothDevice, state: Int) {
-            Log.d(TAG, "onConnectionStateChanged device=${device.safeName()} state=$state")
-            when (state) {
-                BluetoothProfile.STATE_CONNECTED -> {
-                    host = device
-                    publish(HidConnectionState.Connected, "Connected to ${device.safeName()}")
-                }
+            override fun onConnectionStateChanged(device: BluetoothDevice, state: Int) {
+                Log.d(TAG, "onConnectionStateChanged device=${device.safeName()} state=$state")
+                when (state) {
+                    BluetoothProfile.STATE_CONNECTED -> {
+                        host = device
+                        publish(HidConnectionState.Connected, "Connected to ${device.safeName()}")
+                    }
 
-                BluetoothProfile.STATE_CONNECTING -> {
-                    publish(HidConnectionState.Registering, "Connecting to ${device.safeName()}")
-                }
+                    BluetoothProfile.STATE_CONNECTING -> {
+                        publish(HidConnectionState.Registering, "Connecting to ${device.safeName()}")
+                    }
 
-                else -> {
-                    if (host == device) host = null
-                    publish(HidConnectionState.Registered, "Registered. Waiting for PC connection.")
+                    else -> {
+                        if (host == device) host = null
+                        publish(HidConnectionState.Registered, "Registered. Waiting for PC connection.")
+                    }
                 }
             }
         }
@@ -133,6 +141,7 @@ class HidKeyboardManager(
 
     @SuppressLint("MissingPermission")
     fun start() {
+        val adapter = adapter
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
             Log.w(TAG, "HID Device unsupported: sdk=${Build.VERSION.SDK_INT}")
             publish(HidConnectionState.Unsupported, "Bluetooth HID Device requires Android 9 or newer")
@@ -204,6 +213,7 @@ class HidKeyboardManager(
 
     @SuppressLint("MissingPermission")
     fun pairedHosts(): List<PairedHidHost> {
+        val adapter = adapter
         if (adapter == null || !hasRequiredPermissions()) return emptyList()
         return adapter.bondedDevices
             .map { device ->
@@ -298,6 +308,7 @@ class HidKeyboardManager(
 
     @SuppressLint("MissingPermission")
     private fun renameAdapterForPairing() {
+        val adapter = adapter
         if (adapter == null || !hasRequiredPermissions()) return
         val currentName = adapter.name
         if (currentName != DEVICE_NAME) {
@@ -310,6 +321,7 @@ class HidKeyboardManager(
     @SuppressLint("MissingPermission")
     private fun restoreAdapterName() {
         val oldName = previousAdapterName ?: return
+        val adapter = adapter
         if (adapter != null && hasRequiredPermissions()) {
             val restored = adapter.setName(oldName)
             Log.d(TAG, "restoreName($oldName) returned $restored")
