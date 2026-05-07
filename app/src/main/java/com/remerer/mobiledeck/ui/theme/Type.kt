@@ -1,4 +1,4 @@
-package com.example.mobiledeck.ui.theme
+package com.remerer.mobiledeck.ui.theme
 
 import androidx.compose.material3.Typography
 import androidx.compose.ui.text.TextStyle

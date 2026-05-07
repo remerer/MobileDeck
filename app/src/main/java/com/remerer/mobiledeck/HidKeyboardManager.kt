@@ -1,4 +1,4 @@
-package com.example.mobiledeck
+package com.remerer.mobiledeck
 
 import android.Manifest
 import android.annotation.SuppressLint
@@ -157,6 +157,10 @@ class HidKeyboardManager(
             publish(HidConnectionState.PermissionMissing, "Bluetooth permission approval is required")
             return
         }
+
+        hidDevice?.unregisterApp()
+        hidDevice = null
+        host = null
 
         renameAdapterForPairing()
         Log.d(TAG, "Requesting HID_DEVICE profile proxy")

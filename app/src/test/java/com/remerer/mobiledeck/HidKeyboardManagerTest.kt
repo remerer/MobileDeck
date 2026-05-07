@@ -1,4 +1,4 @@
-package com.example.mobiledeck
+package com.remerer.mobiledeck
 
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals

@@ -1,4 +1,4 @@
-package com.example.mobiledeck
+package com.remerer.mobiledeck
 
 import android.os.Build
 import android.os.Bundle
@@ -116,7 +116,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.IntSize
-import com.example.mobiledeck.ui.theme.MobileDeckTheme
+import com.remerer.mobiledeck.ui.theme.MobileDeckTheme
 import org.json.JSONArray
 import org.json.JSONObject
 import kotlin.math.abs

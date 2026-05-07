@@ -1,4 +1,4 @@
-package com.example.mobiledeck.ui.theme
+package com.remerer.mobiledeck.ui.theme
 
 import android.app.Activity
 import android.os.Build
