@@ -50,6 +50,9 @@
     <string name="payload">입력값</string>
     <string name="app_command_target">앱 동작</string>
     <string name="media_key_target">미디어 키</string>
+    <string name="utility_target">편의 기능</string>
+    <string name="span_columns">너비</string>
+    <string name="span_rows">높이</string>
     <string name="save">저장</string>
     <string name="delete">삭제</string>
     <string name="reset">초기화</string>
@@ -62,6 +65,7 @@
     <string name="action_hotkey">단축키</string>
     <string name="action_text">텍스트</string>
     <string name="action_run_command">실행 명령</string>
+    <string name="action_utility">편의 기능</string>
     <string name="action_app_command">앱 명령</string>
     <string name="display_icon_only">아이콘</string>
     <string name="display_icon_and_text">아이콘 + 키워드</string>
@@ -87,6 +91,8 @@
     <string name="media_next">다음 트랙</string>
     <string name="media_volume_down">볼륨 낮춤</string>
     <string name="media_volume_up">볼륨 높임</string>
+    <string name="utility_time">안드로이드 시간</string>
+    <string name="utility_weather">날씨</string>
     <string name="status_disconnected">연결 안 됨</string>
     <string name="status_registering">등록 중</string>
     <string name="status_registered">등록됨</string>

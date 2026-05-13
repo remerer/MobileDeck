@@ -47,6 +47,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -117,8 +118,12 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.IntSize
 import com.remerer.mobiledeck.ui.theme.MobileDeckTheme
+import kotlinx.coroutines.delay
 import org.json.JSONArray
 import org.json.JSONObject
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
@@ -160,6 +165,7 @@ private enum class DeckActionType(@StringRes val labelRes: Int) {
     Hotkey(R.string.action_hotkey),
     Text(R.string.action_text),
     RunCommand(R.string.action_run_command),
+    Utility(R.string.action_utility),
     AppCommand(R.string.action_app_command)
 }
 
@@ -184,7 +190,14 @@ private data class DeckButton(
     val actionType: DeckActionType,
     val payload: String,
     val color: Color,
-    val position: Int = 0
+    val position: Int = 0,
+    val spanColumns: Int = 1,
+    val spanRows: Int = 1
+)
+
+private data class UtilityChoice(
+    val payload: String,
+    @StringRes val labelRes: Int
 )
 
 private data class DeckPageConfig(
@@ -281,7 +294,8 @@ private fun MobileDeckApp() {
     fun addDeckButton(position: Int? = null, editAfterCreate: Boolean = false) {
         val colors = defaultDeckColors()
         val buttonCapacity = pageButtonCapacity(activeDeckPage.id, deckPages, deckColumns, deckRows)
-        val targetPosition = position ?: nextOpenPosition(deckButtons, buttonCapacity)
+        val showTitle = activeDeckPage.id == deckPages.firstOrNull()?.id
+        val targetPosition = position ?: nextOpenPosition(deckButtons, deckColumns, deckRows, showTitle)
         val newButton = DeckButton(
             id = nextDeckButtonId(deckPages.flatMap { it.buttons }),
             title = "New key",
@@ -294,8 +308,8 @@ private fun MobileDeckApp() {
             color = colors[deckButtons.size % colors.size],
             position = targetPosition
         )
-        if (position == null && deckButtons.size >= buttonCapacity && deckPages.size >= MAX_PAGES) return
-        val updatedPages = if (position == null && deckButtons.size >= buttonCapacity) {
+        if (position == null && targetPosition >= buttonCapacity && deckPages.size >= MAX_PAGES) return
+        val updatedPages = if (position == null && targetPosition >= buttonCapacity) {
             val newPage = DeckPageConfig(
                 id = nextDeckPageId(deckPages),
                 name = "Page ${deckPages.size + 1}",
@@ -394,6 +408,7 @@ private fun MobileDeckApp() {
             DeckActionType.Hotkey -> hidManager.sendHotkey(button.payload)
             DeckActionType.Text -> hidManager.sendText(button.payload)
             DeckActionType.RunCommand -> hidManager.runWindowsCommand(button.payload)
+            DeckActionType.Utility -> runUtilityAction(context, button.payload)
             DeckActionType.AppCommand -> when (appCommandAction(button.payload)) {
                 DeckActionType.Settings -> {
                     page = AppPage.Settings
@@ -421,6 +436,7 @@ private fun MobileDeckApp() {
             buttonAppAction(button) == DeckActionType.NextPage -> "next page"
             delivered -> "sent"
             button.actionType == DeckActionType.AppCommand -> "not supported by keyboard HID"
+            button.actionType == DeckActionType.Utility -> "utility unavailable"
             hidStatus.state != HidConnectionState.Connected -> "no connected PC"
             else -> "unsupported payload"
         }
@@ -437,14 +453,14 @@ private fun MobileDeckApp() {
     fun moveDeckButtonToSlot(button: DeckButton, targetPosition: Int) {
         val pageCapacity = pageButtonCapacity(activeDeckPage.id, deckPages, deckColumns, deckRows)
         if (targetPosition !in 0 until pageCapacity || button.position == targetPosition) return
-        val targetButton = deckButtons.firstOrNull { it.position == targetPosition }
+        val movedButton = button.copy(position = targetPosition)
+        val showTitle = activeDeckPage.id == deckPages.firstOrNull()?.id
+        if (!canPlaceButton(movedButton, deckButtons.filterNot { it.id == button.id }, deckColumns, deckRows, showTitle)) {
+            return
+        }
         val updatedPages = updateDeckPage(deckPages, activeDeckPage.id) { deckPage ->
             deckPage.buttons.map { existing ->
-                when (existing.id) {
-                    button.id -> existing.copy(position = targetPosition)
-                    targetButton?.id -> existing.copy(position = button.position)
-                    else -> existing
-                }
+                if (existing.id == button.id) movedButton else existing
             }
         }
         deckPages = updatedPages
@@ -604,7 +620,15 @@ private fun MobileDeckApp() {
             status = hidStatus,
             onDismiss = { editingButton = null },
             onSave = { updated ->
-                val updatedPages = updateDeckButton(deckPages, updated)
+                val showTitle = activeDeckPage.id == deckPages.firstOrNull()?.id
+                val adjustedButton = shrinkButtonToAvailable(
+                    updated,
+                    activeDeckPage.buttons.filterNot { it.id == updated.id },
+                    deckColumns,
+                    deckRows,
+                    showTitle
+                )
+                val updatedPages = updateDeckButton(deckPages, adjustedButton)
                 deckPages = updatedPages
                 saveDeckPages(context, updatedPages)
                 editingButton = null
@@ -1466,6 +1490,46 @@ private fun wrapIndex(value: Int, size: Int): Int = ((value % size) + size) % si
 
 private fun slotToButtonPosition(slot: Int, showTitle: Boolean): Int = if (showTitle) slot - 1 else slot
 
+private fun buttonToSlot(button: DeckButton, showTitle: Boolean): Int {
+    return if (showTitle) button.position + 1 else button.position
+}
+
+private fun DeckButton.effectiveSpanColumns(columns: Int, showTitle: Boolean): Int {
+    val column = buttonToSlot(this, showTitle).floorMod(columns.coerceAtLeast(1))
+    return spanColumns.coerceIn(1, minOf(MAX_BUTTON_SPAN_COLUMNS, columns - column).coerceAtLeast(1))
+}
+
+private fun DeckButton.effectiveSpanRows(columns: Int, rows: Int, showTitle: Boolean): Int {
+    val slot = buttonToSlot(this, showTitle)
+    val row = slot / columns.coerceAtLeast(1)
+    return spanRows.coerceIn(1, minOf(MAX_BUTTON_SPAN_ROWS, rows - row).coerceAtLeast(1))
+}
+
+private fun occupiedSlotsForButton(
+    button: DeckButton,
+    columns: Int,
+    rows: Int,
+    showTitle: Boolean
+): List<Int> {
+    val safeColumns = columns.coerceAtLeast(1)
+    val safeRows = rows.coerceAtLeast(1)
+    val anchorSlot = buttonToSlot(button, showTitle)
+    if (anchorSlot !in 0 until safeColumns * safeRows) return emptyList()
+    val anchorColumn = anchorSlot % safeColumns
+    val anchorRow = anchorSlot / safeColumns
+    val spanColumns = button.effectiveSpanColumns(safeColumns, showTitle)
+    val spanRows = button.effectiveSpanRows(safeColumns, safeRows, showTitle)
+    return buildList {
+        repeat(spanRows) { rowOffset ->
+            repeat(spanColumns) { columnOffset ->
+                add((anchorRow + rowOffset) * safeColumns + anchorColumn + columnOffset)
+            }
+        }
+    }
+}
+
+private fun Int.floorMod(divisor: Int): Int = ((this % divisor) + divisor) % divisor
+
 @Composable
 private fun ButtonGrid(
     modifier: Modifier = Modifier,
@@ -1484,50 +1548,60 @@ private fun ButtonGrid(
     onEmptySlotPressed: (Int) -> Unit
 ) {
     val safeColumns = columns.coerceAtLeast(1)
-    val slotCount = safeColumns * rows.coerceAtLeast(1)
-    val slots = List(slotCount) { slot ->
-        if (showTitle && slot == 0) null else buttons.firstOrNull { it.position == slotToButtonPosition(slot, showTitle) }
-    }
+    val safeRows = rows.coerceAtLeast(1)
+    val slotCount = safeColumns * safeRows
+    val buttonSlots = buttons.associateBy { buttonToSlot(it, showTitle) }
+    val occupiedSlots = buttons.flatMap { occupiedSlotsForButton(it, safeColumns, safeRows, showTitle) }.toSet()
+    val gridWidth = cellSize * safeColumns.toFloat() + spacing * (safeColumns - 1).coerceAtLeast(0).toFloat()
+    val gridHeight = cellSize * safeRows.toFloat() + spacing * (safeRows - 1).coerceAtLeast(0).toFloat()
+
     Box(
         modifier = modifier.padding(contentPadding),
         contentAlignment = Alignment.Center
     ) {
-        Column(verticalArrangement = Arrangement.spacedBy(spacing)) {
-            slots.chunked(safeColumns).forEachIndexed { rowIndex, rowButtons ->
-                Row(horizontalArrangement = Arrangement.spacedBy(spacing)) {
-                    rowButtons.forEachIndexed { columnIndex, button ->
-                        val slot = rowIndex * safeColumns + columnIndex
-                        if (showTitle && slot == 0) {
-                            TitleDeckSlot(
-                                modifier = Modifier.size(cellSize),
-                                status = status
-                            )
-                        } else if (button == null) {
+        Box(modifier = Modifier.size(gridWidth, gridHeight)) {
+            repeat(slotCount) { slot ->
+                val columnIndex = slot % safeColumns
+                val rowIndex = slot / safeColumns
+                val slotModifier = Modifier
+                    .offset(
+                        x = (cellSize + spacing) * columnIndex.toFloat(),
+                        y = (cellSize + spacing) * rowIndex.toFloat()
+                    )
+                val button = buttonSlots[slot]
+                if (showTitle && slot == 0) {
+                    TitleDeckSlot(
+                        modifier = slotModifier.size(cellSize),
+                        status = status
+                    )
+                } else if (button != null) {
+                    val buttonPosition = slotToButtonPosition(slot, showTitle)
+                    val maxButtonPosition = slotCount - if (showTitle) 2 else 1
+                    val spanColumns = button.effectiveSpanColumns(safeColumns, showTitle)
+                    val spanRows = button.effectiveSpanRows(safeColumns, safeRows, showTitle)
+                    val buttonWidth = cellSize * spanColumns.toFloat() + spacing * (spanColumns - 1).coerceAtLeast(0).toFloat()
+                    val buttonHeight = cellSize * spanRows.toFloat() + spacing * (spanRows - 1).coerceAtLeast(0).toFloat()
+                    DeckKey(
+                        modifier = slotModifier.size(buttonWidth, buttonHeight),
+                        button = button,
+                        status = status,
+                        enabled = true,
+                        previewMode = previewMode,
+                        columns = safeColumns,
+                        slot = buttonPosition,
+                        cellSize = cellSize,
+                        spacing = spacing,
+                        onPressed = { onButtonPressed(button) },
+                        onEdit = { onButtonEdit(button) },
+                        onMove = { targetSlot -> onButtonMoved(button, targetSlot.coerceIn(0, maxButtonPosition)) }
+                    )
+                } else if (slot !in occupiedSlots) {
                         EmptyDeckSlot(
-                            modifier = Modifier.size(cellSize),
+                            modifier = slotModifier.size(cellSize),
                             showAddIcon = previewMode,
                             createOnClick = previewMode,
                             onCreate = { onEmptySlotPressed(slotToButtonPosition(slot, showTitle)) }
                         )
-                        } else {
-                            val buttonPosition = slotToButtonPosition(slot, showTitle)
-                            val maxButtonPosition = slotCount - if (showTitle) 2 else 1
-                            DeckKey(
-                                modifier = Modifier.size(cellSize),
-                                button = button,
-                                status = status,
-                                enabled = true,
-                                previewMode = previewMode,
-                                columns = safeColumns,
-                                slot = buttonPosition,
-                                cellSize = cellSize,
-                                spacing = spacing,
-                                onPressed = { onButtonPressed(button) },
-                                onEdit = { onButtonEdit(button) },
-                                onMove = { targetSlot -> onButtonMoved(button, targetSlot.coerceIn(0, maxButtonPosition)) }
-                            )
-                        }
-                    }
                 }
             }
         }
@@ -1633,6 +1707,7 @@ private fun DeckKey(
         animationSpec = tween(durationMillis = 120),
         label = "keyDragScale"
     )
+    val displayTitle = buttonDisplayTitle(button)
     val dragModifier = if (previewMode) {
         Modifier.pointerInput(button.id, columns, slot, cellSize, spacing) {
             detectDragGestures(
@@ -1705,7 +1780,7 @@ private fun DeckKey(
                             )
                         }
                         Text(
-                            text = button.title,
+                            text = displayTitle,
                             style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.Bold,
                             color = contentColor,
@@ -1715,7 +1790,7 @@ private fun DeckKey(
                     }
                 } else if (button.displayMode == DeckDisplayMode.KeywordOnly && showText) {
                     Text(
-                        text = button.title,
+                        text = displayTitle,
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
                         color = contentColor,
@@ -1758,12 +1833,47 @@ private fun DeckKey(
 }
 
 @Composable
-private fun buttonSubtitle(button: DeckButton, status: HidStatus): String {
-    return if (buttonAppAction(button) == DeckActionType.BluetoothStatus) {
-        stringResource(status.state.labelRes())
-    } else {
-        button.subtitle
+private fun buttonDisplayTitle(button: DeckButton): String {
+    return when (button.actionType) {
+        DeckActionType.Utility -> when (button.payload) {
+            UTILITY_TIME -> currentTimeText()
+            else -> button.title
+        }
+        else -> button.title
     }
+}
+
+@Composable
+private fun buttonSubtitle(button: DeckButton, status: HidStatus): String {
+    return when {
+        buttonAppAction(button) == DeckActionType.BluetoothStatus -> stringResource(status.state.labelRes())
+        button.actionType == DeckActionType.Utility && button.payload == UTILITY_TIME -> currentDateText()
+        else -> button.subtitle
+    }
+}
+
+@Composable
+private fun currentTimeText(): String {
+    var now by remember { mutableStateOf(Date()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            now = Date()
+            delay(1000)
+        }
+    }
+    return remember(now) { SimpleDateFormat("HH:mm", Locale.getDefault()).format(now) }
+}
+
+@Composable
+private fun currentDateText(): String {
+    var now by remember { mutableStateOf(Date()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            now = Date()
+            delay(60_000)
+        }
+    }
+    return remember(now) { SimpleDateFormat("EEE, MMM d", Locale.getDefault()).format(now) }
 }
 
 @Composable
@@ -1837,6 +1947,7 @@ private fun materialIconFor(button: DeckButton): ImageVector? {
         }
         DeckActionType.Text -> Icons.Filled.TextFields
         DeckActionType.RunCommand -> Icons.Filled.Apps
+        DeckActionType.Utility -> Icons.Filled.Apps
         DeckActionType.AppCommand -> Icons.Filled.Code
     }
 }
@@ -1923,6 +2034,36 @@ private fun mediaKeyChoice(payload: String): MediaKeyChoice? {
 
 private fun selectedMediaKeyChoice(payload: String): MediaKeyChoice {
     return mediaKeyChoice(payload) ?: mediaKeyChoices().first()
+}
+
+private fun utilityChoices(): List<UtilityChoice> {
+    return listOf(
+        UtilityChoice(UTILITY_TIME, R.string.utility_time),
+        UtilityChoice(UTILITY_WEATHER, R.string.utility_weather)
+    )
+}
+
+private fun utilityChoice(payload: String): UtilityChoice? {
+    return utilityChoices().firstOrNull { it.payload == payload }
+}
+
+private fun selectedUtilityChoice(payload: String): UtilityChoice {
+    return utilityChoice(payload) ?: utilityChoices().first()
+}
+
+private fun runUtilityAction(context: Context, payload: String): Boolean {
+    return when (payload) {
+        UTILITY_TIME -> true
+        UTILITY_WEATHER -> runCatching {
+            context.startActivity(
+                Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com/search?q=weather")).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+            )
+            true
+        }.getOrDefault(false)
+        else -> false
+    }
 }
 
 private fun statusDotColor(state: HidConnectionState): Color {
@@ -2018,10 +2159,13 @@ private fun EditButtonDialog(
     var displayMode by remember(button.id) { mutableStateOf(button.displayMode) }
     var payload by remember(button.id) { mutableStateOf(button.payload) }
     var actionType by remember(button.id) { mutableStateOf(button.actionType) }
+    var spanColumns by remember(button.id) { mutableStateOf(button.spanColumns) }
+    var spanRows by remember(button.id) { mutableStateOf(button.spanRows) }
     var menuExpanded by remember { mutableStateOf(false) }
     var iconMenuExpanded by remember { mutableStateOf(false) }
     var mediaMenuExpanded by remember { mutableStateOf(false) }
     var appCommandMenuExpanded by remember { mutableStateOf(false) }
+    var utilityMenuExpanded by remember { mutableStateOf(false) }
     val context = LocalContext.current
     val imagePicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
@@ -2045,6 +2189,7 @@ private fun EditButtonDialog(
     val selectedAppCommand = appCommandAction(payload) ?: DeckActionType.BluetoothStatus
     val selectedIcon = selectedIconChoice(icon)
     val selectedMedia = selectedMediaKeyChoice(payload)
+    val selectedUtility = selectedUtilityChoice(payload)
     val canDelete = buttonAppAction(button) != DeckActionType.Settings
     val actionLocked = buttonAppAction(button) == DeckActionType.Settings
     val canSave = title.isNotBlank() && (!payloadRequired(actionType) || payload.isNotBlank())
@@ -2146,6 +2291,22 @@ private fun EditButtonDialog(
                                 }
                             }
                         }
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            SpanStepper(
+                                modifier = Modifier.weight(1f),
+                                label = stringResource(R.string.span_columns),
+                                value = spanColumns,
+                                range = 1..MAX_BUTTON_SPAN_COLUMNS,
+                                onValueChange = { spanColumns = it }
+                            )
+                            SpanStepper(
+                                modifier = Modifier.weight(1f),
+                                label = stringResource(R.string.span_rows),
+                                value = spanRows,
+                                range = 1..MAX_BUTTON_SPAN_ROWS,
+                                onValueChange = { spanRows = it }
+                            )
+                        }
                     }
                 }
                 item {
@@ -2216,6 +2377,9 @@ private fun EditButtonDialog(
                                                     if (item == DeckActionType.MediaKey && mediaKeyChoice(payload) == null) {
                                                         payload = MEDIA_MUTE
                                                         icon = ICON_AUTO
+                                                    } else if (item == DeckActionType.Utility && utilityChoice(payload) == null) {
+                                                        payload = UTILITY_TIME
+                                                        icon = ICON_AUTO
                                                     } else if (item == DeckActionType.AppCommand && appCommandAction(payload) == null) {
                                                         payload = DeckActionType.BluetoothStatus.name
                                                     } else if (!payloadRequired(item)) {
@@ -2259,6 +2423,42 @@ private fun EditButtonDialog(
                                             payload = item.payload
                                             icon = ICON_AUTO
                                             mediaMenuExpanded = false
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+                if (actionType == DeckActionType.Utility) {
+                    item {
+                        ExposedDropdownMenuBox(
+                            expanded = utilityMenuExpanded,
+                            onExpandedChange = { utilityMenuExpanded = !utilityMenuExpanded }
+                        ) {
+                            OutlinedTextField(
+                                modifier = Modifier
+                                    .menuAnchor()
+                                    .fillMaxWidth(),
+                                value = stringResource(selectedUtility.labelRes),
+                                onValueChange = {},
+                                readOnly = true,
+                                label = { Text(stringResource(R.string.utility_target)) },
+                                trailingIcon = {
+                                    ExposedDropdownMenuDefaults.TrailingIcon(expanded = utilityMenuExpanded)
+                                }
+                            )
+                            ExposedDropdownMenu(
+                                expanded = utilityMenuExpanded,
+                                onDismissRequest = { utilityMenuExpanded = false }
+                            ) {
+                                utilityChoices().forEach { item ->
+                                    DropdownMenuItem(
+                                        text = { Text(stringResource(item.labelRes)) },
+                                        onClick = {
+                                            payload = item.payload
+                                            icon = ICON_AUTO
+                                            utilityMenuExpanded = false
                                         }
                                     )
                                 }
@@ -2322,7 +2522,10 @@ private fun EditButtonDialog(
                     }
                 }
                 item {
-                    if (actionType != DeckActionType.AppCommand && actionType != DeckActionType.MediaKey) {
+                    if (actionType != DeckActionType.AppCommand &&
+                        actionType != DeckActionType.MediaKey &&
+                        actionType != DeckActionType.Utility
+                    ) {
                         OutlinedTextField(
                             modifier = Modifier.fillMaxWidth(),
                             value = payload,
@@ -2351,11 +2554,15 @@ private fun EditButtonDialog(
                                 selectedAppCommand.name
                             } else if (actionType == DeckActionType.MediaKey) {
                                 selectedMedia.payload
+                            } else if (actionType == DeckActionType.Utility) {
+                                selectedUtility.payload
                             } else if (payloadRequired(actionType)) {
                                 payload.trim()
                             } else {
                                 ""
-                            }
+                            },
+                            spanColumns = spanColumns.coerceIn(1, MAX_BUTTON_SPAN_COLUMNS),
+                            spanRows = spanRows.coerceIn(1, MAX_BUTTON_SPAN_ROWS)
                         )
                     )
                 }
@@ -2377,6 +2584,43 @@ private fun EditButtonDialog(
             }
         }
     )
+}
+
+@Composable
+private fun SpanStepper(
+    modifier: Modifier = Modifier,
+    label: String,
+    value: Int,
+    range: IntRange,
+    onValueChange: (Int) -> Unit
+) {
+    Row(
+        modifier = modifier,
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Text(
+            text = "$label $value",
+            modifier = Modifier.weight(1f),
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1
+        )
+        OutlinedButton(
+            shape = RoundedCornerShape(8.dp),
+            enabled = value > range.first,
+            onClick = { onValueChange((value - 1).coerceIn(range)) }
+        ) {
+            Text("-")
+        }
+        OutlinedButton(
+            shape = RoundedCornerShape(8.dp),
+            enabled = value < range.last,
+            onClick = { onValueChange((value + 1).coerceIn(range)) }
+        ) {
+            Text("+")
+        }
+    }
 }
 
 private fun defaultDeckColors(): List<Color> {
@@ -2405,8 +2649,12 @@ private fun defaultButtons(): List<DeckButton> {
         DeckButton(9, "Desktop", "Win+D", "DES", "", DeckDisplayMode.IconAndText, DeckActionType.Hotkey, "WIN+D", colors[4]),
         DeckButton(10, "Explorer", "Win+E", "EXP", "", DeckDisplayMode.IconAndText, DeckActionType.Hotkey, "WIN+E", colors[2]),
         DeckButton(11, "Task View", "Win+Tab", "TAB", "", DeckDisplayMode.IconAndText, DeckActionType.Hotkey, "WIN+TAB", colors[1]),
-        DeckButton(12, "Run", "Win+R", "RUN", "", DeckDisplayMode.IconAndText, DeckActionType.Hotkey, "WIN+R", colors[3])
-    ).mapIndexed { index, button -> button.copy(position = index) }
+        DeckButton(12, "Run", "Win+R", "RUN", "", DeckDisplayMode.IconAndText, DeckActionType.Hotkey, "WIN+R", colors[3]),
+        DeckButton(13, "Time", "Android clock", "TIME", "", DeckDisplayMode.KeywordOnly, DeckActionType.Utility, UTILITY_TIME, colors[5], spanColumns = 2),
+        DeckButton(14, "Weather", "Open forecast", "WX", "", DeckDisplayMode.IconAndText, DeckActionType.Utility, UTILITY_WEATHER, colors[2], position = 14, spanColumns = 2)
+    ).mapIndexed { index, button ->
+        if (button.id == 14) button else button.copy(position = index)
+    }
 }
 
 private fun loadDeckButtons(context: Context): List<DeckButton> {
@@ -2486,6 +2734,8 @@ private fun encodeDeckButton(button: DeckButton): JSONObject {
         .put("payload", button.payload)
         .put("color", button.color.toArgb())
         .put("position", button.position)
+        .put("spanColumns", button.spanColumns)
+        .put("spanRows", button.spanRows)
 }
 
 private fun decodeDeckButton(item: JSONObject, fallbackPosition: Int): DeckButton {
@@ -2503,7 +2753,9 @@ private fun decodeDeckButton(item: JSONObject, fallbackPosition: Int): DeckButto
         }.getOrDefault(DeckActionType.Hotkey),
         payload = item.getString("payload"),
         color = Color(item.getInt("color")),
-        position = item.optInt("position", fallbackPosition)
+        position = item.optInt("position", fallbackPosition),
+        spanColumns = item.optInt("spanColumns", 1).coerceIn(1, MAX_BUTTON_SPAN_COLUMNS),
+        spanRows = item.optInt("spanRows", 1).coerceIn(1, MAX_BUTTON_SPAN_ROWS)
     )
 }
 
@@ -2535,6 +2787,7 @@ private fun payloadRequired(actionType: DeckActionType): Boolean {
         DeckActionType.Text,
         DeckActionType.RunCommand -> true
         DeckActionType.MediaKey,
+        DeckActionType.Utility,
         DeckActionType.AppCommand -> false
     }
 }
@@ -2636,6 +2889,60 @@ private fun nextOpenPosition(buttons: List<DeckButton>, capacity: Int): Int {
     return (0 until capacity).firstOrNull { it !in occupied } ?: capacity
 }
 
+private fun nextOpenPosition(
+    buttons: List<DeckButton>,
+    columns: Int,
+    rows: Int,
+    showTitle: Boolean
+): Int {
+    val capacity = columns * rows - if (showTitle) 1 else 0
+    val occupied = buttons.flatMap { occupiedSlotsForButton(it, columns, rows, showTitle) }.toSet()
+    return (0 until capacity).firstOrNull { position ->
+        val slot = if (showTitle) position + 1 else position
+        slot !in occupied
+    } ?: capacity
+}
+
+private fun canPlaceButton(
+    button: DeckButton,
+    otherButtons: List<DeckButton>,
+    columns: Int,
+    rows: Int,
+    showTitle: Boolean
+): Boolean {
+    val slots = occupiedSlotsForButton(button, columns, rows, showTitle).toSet()
+    if (slots.isEmpty() || (showTitle && 0 in slots)) return false
+    val otherSlots = otherButtons.flatMap { occupiedSlotsForButton(it, columns, rows, showTitle) }.toSet()
+    return slots.intersect(otherSlots).isEmpty()
+}
+
+private fun shrinkButtonToAvailable(
+    button: DeckButton,
+    otherButtons: List<DeckButton>,
+    columns: Int,
+    rows: Int,
+    showTitle: Boolean
+): DeckButton {
+    var candidate = button.copy(
+        spanColumns = button.spanColumns.coerceIn(1, MAX_BUTTON_SPAN_COLUMNS),
+        spanRows = button.spanRows.coerceIn(1, MAX_BUTTON_SPAN_ROWS)
+    )
+    candidate = candidate.copy(
+        spanColumns = candidate.effectiveSpanColumns(columns, showTitle),
+        spanRows = candidate.effectiveSpanRows(columns, rows, showTitle)
+    )
+    while (!canPlaceButton(candidate, otherButtons, columns, rows, showTitle) &&
+        (candidate.spanColumns > 1 || candidate.spanRows > 1)
+    ) {
+        candidate = if (candidate.spanColumns >= candidate.spanRows && candidate.spanColumns > 1) {
+            candidate.copy(spanColumns = candidate.spanColumns - 1)
+        } else {
+            candidate.copy(spanRows = candidate.spanRows - 1)
+        }
+    }
+    return candidate
+}
+
 private fun pageButtonCapacity(pageId: Int, pages: List<DeckPageConfig>, columns: Int, rows: Int): Int {
     val slotCount = columns * rows
     return if (pageId == pages.firstOrNull()?.id) slotCount - 1 else slotCount
@@ -2679,6 +2986,8 @@ private const val DEFAULT_COLUMNS = 6
 private const val MIN_ROWS = 2
 private const val MAX_ROWS = 6
 private const val DEFAULT_ROWS = 3
+private const val MAX_BUTTON_SPAN_COLUMNS = 3
+private const val MAX_BUTTON_SPAN_ROWS = 2
 private const val MIN_SPACING_DP = 2
 private const val MAX_SPACING_DP = 16
 private const val DEFAULT_SPACING_DP = 8
@@ -2703,6 +3012,8 @@ private const val MEDIA_PREVIOUS = "PREVIOUS"
 private const val MEDIA_NEXT = "NEXT"
 private const val MEDIA_VOLUME_DOWN = "VOLUME_DOWN"
 private const val MEDIA_VOLUME_UP = "VOLUME_UP"
+private const val UTILITY_TIME = "TIME"
+private const val UTILITY_WEATHER = "WEATHER"
 
 @Preview(showBackground = true)
 @Composable

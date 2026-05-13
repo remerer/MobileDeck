@@ -50,6 +50,9 @@
     <string name="payload">Payload</string>
     <string name="app_command_target">App command</string>
     <string name="media_key_target">Media key</string>
+    <string name="utility_target">Utility</string>
+    <string name="span_columns">Width</string>
+    <string name="span_rows">Height</string>
     <string name="save">Save</string>
     <string name="delete">Delete</string>
     <string name="reset">Reset</string>
@@ -62,6 +65,7 @@
     <string name="action_hotkey">Hotkey</string>
     <string name="action_text">Text</string>
     <string name="action_run_command">Run command</string>
+    <string name="action_utility">Utility</string>
     <string name="action_app_command">App command</string>
     <string name="display_icon_only">Icon</string>
     <string name="display_icon_and_text">Icon + keyword</string>
@@ -87,6 +91,8 @@
     <string name="media_next">Next track</string>
     <string name="media_volume_down">Volume down</string>
     <string name="media_volume_up">Volume up</string>
+    <string name="utility_time">Android time</string>
+    <string name="utility_weather">Weather</string>
     <string name="status_disconnected">Disconnected</string>
     <string name="status_registering">Registering</string>
     <string name="status_registered">Registered</string>
