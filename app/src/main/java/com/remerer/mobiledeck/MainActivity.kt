@@ -39,6 +39,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -47,6 +48,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -108,6 +110,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.platform.LocalContext
@@ -2048,23 +2051,22 @@ private fun EditButtonDialog(
     val canDelete = buttonAppAction(button) != DeckActionType.Settings
     val actionLocked = buttonAppAction(button) == DeckActionType.Settings
     val canSave = title.isNotBlank() && (!payloadRequired(actionType) || payload.isNotBlank())
+    val configuration = LocalConfiguration.current
+    val contentMaxHeight = (configuration.screenHeightDp.dp - 152.dp).coerceAtLeast(220.dp)
 
     AlertDialog(
-        modifier = Modifier.fillMaxWidth(0.86f),
+        modifier = Modifier.fillMaxWidth(0.94f),
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.edit_key)) },
         text = {
             LazyColumn(
-                modifier = Modifier.height(430.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = contentMaxHeight),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 item {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text(
-                            text = stringResource(R.string.key_content),
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.SemiBold
-                        )
+                    EditDialogSection(title = stringResource(R.string.key_content)) {
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             OutlinedTextField(
                                 modifier = Modifier.weight(1f),
@@ -2084,79 +2086,86 @@ private fun EditButtonDialog(
                     }
                 }
                 item {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text(
-                            text = stringResource(R.string.key_appearance),
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        ExposedDropdownMenuBox(
-                            expanded = iconMenuExpanded,
-                            onExpandedChange = { iconMenuExpanded = !iconMenuExpanded }
-                        ) {
-                            OutlinedTextField(
-                                modifier = Modifier
-                                    .menuAnchor()
-                                    .fillMaxWidth(),
-                                value = stringResource(selectedIcon.labelRes),
-                                onValueChange = {},
-                                readOnly = true,
-                                label = { Text(stringResource(R.string.icon)) },
-                                trailingIcon = {
-                                    ExposedDropdownMenuDefaults.TrailingIcon(expanded = iconMenuExpanded)
-                                }
-                            )
-                            ExposedDropdownMenu(
-                                expanded = iconMenuExpanded,
-                                onDismissRequest = { iconMenuExpanded = false }
-                            ) {
-                                iconChoices().forEach { item ->
-                                    DropdownMenuItem(
-                                        text = {
-                                            Row(
-                                                verticalAlignment = Alignment.CenterVertically,
-                                                horizontalArrangement = Arrangement.spacedBy(10.dp)
-                                            ) {
-                                                iconVectorForKey(item.key)?.let { vector ->
-                                                    Icon(
-                                                        imageVector = vector,
-                                                        contentDescription = null,
-                                                        modifier = Modifier.size(22.dp)
-                                                    )
-                                                } ?: Box(modifier = Modifier.size(22.dp))
-                                                Text(stringResource(item.labelRes))
-                                            }
-                                        },
-                                        onClick = {
-                                            icon = item.key
-                                            iconMenuExpanded = false
-                                        }
-                                    )
-                                }
-                            }
-                        }
+                    EditDialogSection(title = stringResource(R.string.key_appearance)) {
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            DeckDisplayMode.values().forEach { mode ->
-                                OutlinedButton(
-                                    modifier = Modifier.weight(1f),
-                                    shape = RoundedCornerShape(8.dp),
-                                    onClick = { displayMode = mode }
+                            ExposedDropdownMenuBox(
+                                expanded = iconMenuExpanded,
+                                onExpandedChange = { iconMenuExpanded = !iconMenuExpanded }
+                            ) {
+                                OutlinedTextField(
+                                    modifier = Modifier
+                                        .menuAnchor()
+                                        .weight(1f),
+                                    value = stringResource(selectedIcon.labelRes),
+                                    onValueChange = {},
+                                    readOnly = true,
+                                    label = { Text(stringResource(R.string.icon)) },
+                                    singleLine = true,
+                                    trailingIcon = {
+                                        ExposedDropdownMenuDefaults.TrailingIcon(expanded = iconMenuExpanded)
+                                    }
+                                )
+                                ExposedDropdownMenu(
+                                    expanded = iconMenuExpanded,
+                                    onDismissRequest = { iconMenuExpanded = false }
                                 ) {
-                                    Text(stringResource(mode.labelRes))
+                                    iconChoices().forEach { item ->
+                                        DropdownMenuItem(
+                                            text = {
+                                                Row(
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                                ) {
+                                                    iconVectorForKey(item.key)?.let { vector ->
+                                                        Icon(
+                                                            imageVector = vector,
+                                                            contentDescription = null,
+                                                            modifier = Modifier.size(22.dp)
+                                                        )
+                                                    } ?: Box(modifier = Modifier.size(22.dp))
+                                                    Text(stringResource(item.labelRes))
+                                                }
+                                            },
+                                            onClick = {
+                                                icon = item.key
+                                                iconMenuExpanded = false
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+
+                            Row(
+                                modifier = Modifier.weight(1.2f),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                DeckDisplayMode.values().forEach { mode ->
+                                    OutlinedButton(
+                                        modifier = Modifier.weight(1f),
+                                        shape = RoundedCornerShape(8.dp),
+                                        onClick = { displayMode = mode }
+                                    ) {
+                                        Text(
+                                            text = stringResource(mode.labelRes),
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
                                 }
                             }
                         }
-                    }
-                }
-                item {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             OutlinedButton(
                                 modifier = Modifier.weight(1f),
                                 shape = RoundedCornerShape(8.dp),
                                 onClick = { imagePicker.launch(arrayOf("image/*")) }
                             ) {
-                                Text(stringResource(if (iconImageUri.isBlank()) R.string.pick_image else R.string.change_image))
+                                Text(
+                                    text = stringResource(if (iconImageUri.isBlank()) R.string.pick_image else R.string.change_image),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
                             }
                             OutlinedButton(
                                 modifier = Modifier.weight(1f),
@@ -2164,173 +2173,173 @@ private fun EditButtonDialog(
                                 enabled = iconImageUri.isNotBlank(),
                                 onClick = { iconImageUri = "" }
                             ) {
-                                Text(stringResource(R.string.clear_image))
+                                Text(
+                                    text = stringResource(R.string.clear_image),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
                             }
                         }
                     }
                 }
                 item {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text(
-                            text = stringResource(R.string.key_action),
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        if (actionLocked) {
-                            OutlinedTextField(
-                                modifier = Modifier.fillMaxWidth(),
-                                value = stringResource(actionType.labelRes),
-                                onValueChange = {},
-                                readOnly = true,
-                                label = { Text(stringResource(R.string.action)) },
-                                singleLine = true
-                            )
-                        } else {
-                            ExposedDropdownMenuBox(
-                                expanded = menuExpanded,
-                                onExpandedChange = { menuExpanded = !menuExpanded }
-                            ) {
+                    EditDialogSection(title = stringResource(R.string.key_action)) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            if (actionLocked) {
                                 OutlinedTextField(
-                                    modifier = Modifier
-                                        .menuAnchor()
-                                        .fillMaxWidth(),
+                                    modifier = Modifier.weight(1f),
                                     value = stringResource(actionType.labelRes),
                                     onValueChange = {},
                                     readOnly = true,
                                     label = { Text(stringResource(R.string.action)) },
-                                    trailingIcon = {
-                                        ExposedDropdownMenuDefaults.TrailingIcon(expanded = menuExpanded)
-                                    }
+                                    singleLine = true
                                 )
-                                ExposedDropdownMenu(
+                            } else {
+                                ExposedDropdownMenuBox(
                                     expanded = menuExpanded,
-                                    onDismissRequest = { menuExpanded = false }
+                                    onExpandedChange = { menuExpanded = !menuExpanded }
                                 ) {
-                                    DeckActionType.values()
-                                        .filterNot { it in appCommandActions }
-                                        .forEach { item ->
+                                    OutlinedTextField(
+                                        modifier = Modifier
+                                            .menuAnchor()
+                                            .weight(1f),
+                                        value = stringResource(actionType.labelRes),
+                                        onValueChange = {},
+                                        readOnly = true,
+                                        label = { Text(stringResource(R.string.action)) },
+                                        singleLine = true,
+                                        trailingIcon = {
+                                            ExposedDropdownMenuDefaults.TrailingIcon(expanded = menuExpanded)
+                                        }
+                                    )
+                                    ExposedDropdownMenu(
+                                        expanded = menuExpanded,
+                                        onDismissRequest = { menuExpanded = false }
+                                    ) {
+                                        DeckActionType.values()
+                                            .filterNot { it in appCommandActions }
+                                            .forEach { item ->
+                                                DropdownMenuItem(
+                                                    text = { Text(stringResource(item.labelRes)) },
+                                                    onClick = {
+                                                        actionType = item
+                                                        if (item == DeckActionType.MediaKey && mediaKeyChoice(payload) == null) {
+                                                            payload = MEDIA_MUTE
+                                                            icon = ICON_AUTO
+                                                        } else if (item == DeckActionType.AppCommand && appCommandAction(payload) == null) {
+                                                            payload = DeckActionType.BluetoothStatus.name
+                                                        } else if (!payloadRequired(item)) {
+                                                            payload = ""
+                                                        }
+                                                        menuExpanded = false
+                                                    }
+                                                )
+                                            }
+                                    }
+                                }
+                            }
+
+                            if (actionType == DeckActionType.MediaKey) {
+                                ExposedDropdownMenuBox(
+                                    expanded = mediaMenuExpanded,
+                                    onExpandedChange = { mediaMenuExpanded = !mediaMenuExpanded }
+                                ) {
+                                    OutlinedTextField(
+                                        modifier = Modifier
+                                            .menuAnchor()
+                                            .weight(1f),
+                                        value = stringResource(selectedMedia.labelRes),
+                                        onValueChange = {},
+                                        readOnly = true,
+                                        label = { Text(stringResource(R.string.media_key_target)) },
+                                        singleLine = true,
+                                        trailingIcon = {
+                                            ExposedDropdownMenuDefaults.TrailingIcon(expanded = mediaMenuExpanded)
+                                        }
+                                    )
+                                    ExposedDropdownMenu(
+                                        expanded = mediaMenuExpanded,
+                                        onDismissRequest = { mediaMenuExpanded = false }
+                                    ) {
+                                        mediaKeyChoices().forEach { item ->
                                             DropdownMenuItem(
                                                 text = { Text(stringResource(item.labelRes)) },
                                                 onClick = {
-                                                    actionType = item
-                                                    if (item == DeckActionType.MediaKey && mediaKeyChoice(payload) == null) {
-                                                        payload = MEDIA_MUTE
-                                                        icon = ICON_AUTO
-                                                    } else if (item == DeckActionType.AppCommand && appCommandAction(payload) == null) {
-                                                        payload = DeckActionType.BluetoothStatus.name
-                                                    } else if (!payloadRequired(item)) {
-                                                        payload = ""
-                                                    }
-                                                    menuExpanded = false
+                                                    payload = item.payload
+                                                    icon = ICON_AUTO
+                                                    mediaMenuExpanded = false
                                                 }
                                             )
                                         }
+                                    }
                                 }
-                            }
-                        }
-                    }
-                }
-                if (actionType == DeckActionType.MediaKey) {
-                    item {
-                        ExposedDropdownMenuBox(
-                            expanded = mediaMenuExpanded,
-                            onExpandedChange = { mediaMenuExpanded = !mediaMenuExpanded }
-                        ) {
-                            OutlinedTextField(
-                                modifier = Modifier
-                                    .menuAnchor()
-                                    .fillMaxWidth(),
-                                value = stringResource(selectedMedia.labelRes),
-                                onValueChange = {},
-                                readOnly = true,
-                                label = { Text(stringResource(R.string.media_key_target)) },
-                                trailingIcon = {
-                                    ExposedDropdownMenuDefaults.TrailingIcon(expanded = mediaMenuExpanded)
-                                }
-                            )
-                            ExposedDropdownMenu(
-                                expanded = mediaMenuExpanded,
-                                onDismissRequest = { mediaMenuExpanded = false }
-                            ) {
-                                mediaKeyChoices().forEach { item ->
-                                    DropdownMenuItem(
-                                        text = { Text(stringResource(item.labelRes)) },
-                                        onClick = {
-                                            payload = item.payload
-                                            icon = ICON_AUTO
-                                            mediaMenuExpanded = false
+                            } else if (actionType == DeckActionType.AppCommand) {
+                                ExposedDropdownMenuBox(
+                                    expanded = appCommandMenuExpanded,
+                                    onExpandedChange = { appCommandMenuExpanded = !appCommandMenuExpanded }
+                                ) {
+                                    OutlinedTextField(
+                                        modifier = Modifier
+                                            .menuAnchor()
+                                            .weight(1f),
+                                        value = stringResource(selectedAppCommand.labelRes),
+                                        onValueChange = {},
+                                        readOnly = true,
+                                        label = { Text(stringResource(R.string.app_command_target)) },
+                                        singleLine = true,
+                                        trailingIcon = {
+                                            ExposedDropdownMenuDefaults.TrailingIcon(expanded = appCommandMenuExpanded)
                                         }
                                     )
-                                }
-                            }
-                        }
-                    }
-                }
-                if (actionType == DeckActionType.AppCommand) {
-                    item {
-                        ExposedDropdownMenuBox(
-                            expanded = appCommandMenuExpanded,
-                            onExpandedChange = { appCommandMenuExpanded = !appCommandMenuExpanded }
-                        ) {
-                            OutlinedTextField(
-                                modifier = Modifier
-                                    .menuAnchor()
-                                    .fillMaxWidth(),
-                                value = stringResource(selectedAppCommand.labelRes),
-                                onValueChange = {},
-                                readOnly = true,
-                                label = { Text(stringResource(R.string.app_command_target)) },
-                                trailingIcon = {
-                                    ExposedDropdownMenuDefaults.TrailingIcon(expanded = appCommandMenuExpanded)
-                                }
-                            )
-                            ExposedDropdownMenu(
-                                expanded = appCommandMenuExpanded,
-                                onDismissRequest = { appCommandMenuExpanded = false }
-                            ) {
-                                appCommandActions.forEach { item ->
-                                    DropdownMenuItem(
-                                        text = { Text(stringResource(item.labelRes)) },
-                                        onClick = {
-                                            payload = item.name
-                                            appCommandMenuExpanded = false
+                                    ExposedDropdownMenu(
+                                        expanded = appCommandMenuExpanded,
+                                        onDismissRequest = { appCommandMenuExpanded = false }
+                                    ) {
+                                        appCommandActions.forEach { item ->
+                                            DropdownMenuItem(
+                                                text = { Text(stringResource(item.labelRes)) },
+                                                onClick = {
+                                                    payload = item.name
+                                                    appCommandMenuExpanded = false
+                                                }
+                                            )
                                         }
-                                    )
+                                    }
                                 }
+                            } else if (actionType != DeckActionType.AppCommand && actionType != DeckActionType.MediaKey) {
+                                OutlinedTextField(
+                                    modifier = Modifier.weight(1f),
+                                    value = payload,
+                                    onValueChange = { payload = it },
+                                    label = { Text(stringResource(R.string.payload)) },
+                                    enabled = payloadRequired(actionType),
+                                    singleLine = true
+                                )
+                            } else {
+                                Spacer(Modifier.weight(1f))
                             }
                         }
-                    }
-                }
-                if (buttonAppAction(actionType, payload) == DeckActionType.BluetoothStatus) {
-                    item {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(10.dp)
-                                    .clip(RoundedCornerShape(50))
-                                    .background(statusDotColor(status.state))
-                            )
-                            Text(
-                                text = stringResource(status.state.labelRes()),
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+
+                        if (buttonAppAction(actionType, payload) == DeckActionType.BluetoothStatus) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(10.dp)
+                                        .clip(RoundedCornerShape(50))
+                                        .background(statusDotColor(status.state))
+                                )
+                                Text(
+                                    text = stringResource(status.state.labelRes()),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
                         }
-                    }
-                }
-                item {
-                    if (actionType != DeckActionType.AppCommand && actionType != DeckActionType.MediaKey) {
-                        OutlinedTextField(
-                            modifier = Modifier.fillMaxWidth(),
-                            value = payload,
-                            onValueChange = { payload = it },
-                            label = { Text(stringResource(R.string.payload)) },
-                            enabled = payloadRequired(actionType),
-                            singleLine = true
-                        )
                     }
                 }
             }
@@ -2377,6 +2386,24 @@ private fun EditButtonDialog(
             }
         }
     )
+}
+
+@Composable
+private fun EditDialogSection(
+    title: String,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold
+        )
+        content()
+    }
 }
 
 private fun defaultDeckColors(): List<Color> {
