@@ -18,6 +18,10 @@
     <string name="page_wrap_off">Loop page swipe off</string>
     <string name="page_swipe_animation_on">Page swipe animation on</string>
     <string name="page_swipe_animation_off">Page swipe animation off</string>
+    <string name="button_vibration_off">Button vibration off</string>
+    <string name="button_vibration_weak">Button vibration weak</string>
+    <string name="button_vibration_medium">Button vibration medium</string>
+    <string name="button_vibration_strong">Button vibration strong</string>
     <string name="add_page_count">Add page (%1$d/%2$d)</string>
     <string name="delete_current_page">Delete current page</string>
     <string name="register_hid">Register HID</string>

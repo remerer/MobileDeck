@@ -2,6 +2,9 @@ package com.remerer.mobiledeck
 
 import android.os.Build
 import android.os.Bundle
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
 import android.bluetooth.BluetoothAdapter
 import android.content.Context
 import android.content.Intent
@@ -235,6 +238,22 @@ private enum class AppPage {
     Settings
 }
 
+private enum class ButtonVibrationLevel(
+    @StringRes val labelRes: Int,
+    val durationMillis: Long,
+    val amplitude: Int
+) {
+    Off(R.string.button_vibration_off, 0L, 0),
+    Weak(R.string.button_vibration_weak, 18L, 70),
+    Medium(R.string.button_vibration_medium, 28L, 140),
+    Strong(R.string.button_vibration_strong, 42L, 255);
+
+    fun next(): ButtonVibrationLevel {
+        val values = values()
+        return values[(ordinal + 1) % values.size]
+    }
+}
+
 @Composable
 private fun MobileDeckApp() {
     val context = LocalContext.current
@@ -274,6 +293,7 @@ private fun MobileDeckApp() {
     var multiTouchPageSwipe by remember { mutableStateOf(loadMultiTouchPageSwipe(context)) }
     var pageSwipeAnimation by remember { mutableStateOf(loadPageSwipeAnimation(context)) }
     var infinitePageSwipe by remember { mutableStateOf(loadInfinitePageSwipe(context)) }
+    var buttonVibrationLevel by remember { mutableStateOf(loadButtonVibrationLevel(context)) }
     var lastPageDelta by remember { mutableStateOf(1) }
     var pageAnimationSequence by remember { mutableStateOf(0) }
     var editingButton by remember { mutableStateOf<DeckButton?>(null) }
@@ -429,6 +449,9 @@ private fun MobileDeckApp() {
                 else -> false
             }
         }
+        if (delivered) {
+            context.applicationContext.vibrateButtonPress(buttonVibrationLevel)
+        }
         val note = when {
             buttonAppAction(button) == DeckActionType.Settings -> "opened settings"
             buttonAppAction(button) == DeckActionType.BluetoothStatus -> "opened connection"
@@ -572,6 +595,7 @@ private fun MobileDeckApp() {
                 multiTouchPageSwipe = multiTouchPageSwipe,
                 pageSwipeAnimation = pageSwipeAnimation,
                 infinitePageSwipe = infinitePageSwipe,
+                buttonVibrationLevel = buttonVibrationLevel,
                 onLayoutEditor = { page = AppPage.LayoutEditor },
                 onPageSwipeAxisChange = { axis ->
                     pageSwipeAxis = axis
@@ -588,6 +612,10 @@ private fun MobileDeckApp() {
                 onInfinitePageSwipeChange = { enabled ->
                     infinitePageSwipe = enabled
                     saveInfinitePageSwipe(context, enabled)
+                },
+                onButtonVibrationLevelChange = { level ->
+                    buttonVibrationLevel = level
+                    saveButtonVibrationLevel(context, level)
                 },
                 onStart = ::startHid,
                 onStop = { hidManager.stop() },
@@ -660,6 +688,7 @@ private fun SettingsPage(
     multiTouchPageSwipe: Boolean,
     pageSwipeAnimation: Boolean,
     infinitePageSwipe: Boolean,
+    buttonVibrationLevel: ButtonVibrationLevel,
     pageName: String,
     pageCount: Int,
     pairedHosts: List<PairedHidHost>,
@@ -669,6 +698,7 @@ private fun SettingsPage(
     onMultiTouchPageSwipeChange: (Boolean) -> Unit,
     onPageSwipeAnimationChange: (Boolean) -> Unit,
     onInfinitePageSwipeChange: (Boolean) -> Unit,
+    onButtonVibrationLevelChange: (ButtonVibrationLevel) -> Unit,
     onStart: () -> Unit,
     onStop: () -> Unit,
     onMakeDiscoverable: () -> Unit,
@@ -737,12 +767,14 @@ private fun SettingsPage(
                 multiTouchPageSwipe = multiTouchPageSwipe,
                 pageSwipeAnimation = pageSwipeAnimation,
                 infinitePageSwipe = infinitePageSwipe,
+                buttonVibrationLevel = buttonVibrationLevel,
                 pageName = pageName,
                 pageCount = pageCount,
                 onPageSwipeAxisChange = onPageSwipeAxisChange,
                 onMultiTouchPageSwipeChange = onMultiTouchPageSwipeChange,
                 onPageSwipeAnimationChange = onPageSwipeAnimationChange,
                 onInfinitePageSwipeChange = onInfinitePageSwipeChange,
+                onButtonVibrationLevelChange = onButtonVibrationLevelChange,
                 onAddPage = onAddPage,
             )
         }
@@ -762,12 +794,14 @@ private fun DeckSettingsPanel(
     multiTouchPageSwipe: Boolean,
     pageSwipeAnimation: Boolean,
     infinitePageSwipe: Boolean,
+    buttonVibrationLevel: ButtonVibrationLevel,
     pageName: String,
     pageCount: Int,
     onPageSwipeAxisChange: (PageSwipeAxis) -> Unit,
     onMultiTouchPageSwipeChange: (Boolean) -> Unit,
     onPageSwipeAnimationChange: (Boolean) -> Unit,
     onInfinitePageSwipeChange: (Boolean) -> Unit,
+    onButtonVibrationLevelChange: (ButtonVibrationLevel) -> Unit,
     onAddPage: () -> Unit
 ) {
     Card(
@@ -831,6 +865,13 @@ private fun DeckSettingsPanel(
                 onClick = { onPageSwipeAnimationChange(!pageSwipeAnimation) }
             ) {
                 Text(stringResource(if (pageSwipeAnimation) R.string.page_swipe_animation_on else R.string.page_swipe_animation_off))
+            }
+            OutlinedButton(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(8.dp),
+                onClick = { onButtonVibrationLevelChange(buttonVibrationLevel.next()) }
+            ) {
+                Text(stringResource(buttonVibrationLevel.labelRes))
             }
             OutlinedButton(
                 modifier = Modifier.fillMaxWidth(),
@@ -2876,6 +2917,35 @@ private fun saveInfinitePageSwipe(context: Context, enabled: Boolean) {
     context.deckPrefs().edit().putBoolean(PREF_INFINITE_PAGE_SWIPE, enabled).apply()
 }
 
+private fun loadButtonVibrationLevel(context: Context): ButtonVibrationLevel {
+    return runCatching {
+        ButtonVibrationLevel.valueOf(
+            context.deckPrefs().getString(PREF_BUTTON_VIBRATION_LEVEL, null) ?: ButtonVibrationLevel.Off.name
+        )
+    }.getOrDefault(ButtonVibrationLevel.Off)
+}
+
+private fun saveButtonVibrationLevel(context: Context, level: ButtonVibrationLevel) {
+    context.deckPrefs().edit().putString(PREF_BUTTON_VIBRATION_LEVEL, level.name).apply()
+}
+
+private fun Context.vibrateButtonPress(level: ButtonVibrationLevel) {
+    if (level == ButtonVibrationLevel.Off) return
+    val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        getSystemService(VibratorManager::class.java)?.defaultVibrator
+    } else {
+        @Suppress("DEPRECATION")
+        getSystemService(Vibrator::class.java)
+    } ?: return
+    if (!vibrator.hasVibrator()) return
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        vibrator.vibrate(VibrationEffect.createOneShot(level.durationMillis, level.amplitude))
+    } else {
+        @Suppress("DEPRECATION")
+        vibrator.vibrate(level.durationMillis)
+    }
+}
+
 private fun nextDeckButtonId(buttons: List<DeckButton>): Int {
     return (buttons.maxOfOrNull { it.id } ?: 0) + 1
 }
@@ -2979,6 +3049,7 @@ private const val PREF_PAGE_SWIPE_AXIS = "page_swipe_axis"
 private const val PREF_MULTI_TOUCH_PAGE_SWIPE = "multi_touch_page_swipe"
 private const val PREF_PAGE_SWIPE_ANIMATION = "page_swipe_animation"
 private const val PREF_INFINITE_PAGE_SWIPE = "infinite_page_swipe"
+private const val PREF_BUTTON_VIBRATION_LEVEL = "button_vibration_level"
 private const val MAX_PAGES = 5
 private const val MIN_COLUMNS = 4
 private const val MAX_COLUMNS = 12
