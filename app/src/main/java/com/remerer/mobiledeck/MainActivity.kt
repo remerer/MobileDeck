@@ -1942,7 +1942,7 @@ private fun DeckKey(
     } else {
         Modifier
     }
-    val clickModifier = if (letWidgetHandleTouch) {
+    val clickModifier = if (hasWidget || letWidgetHandleTouch) {
         Modifier
     } else {
         Modifier
@@ -1967,9 +1967,9 @@ private fun DeckKey(
                 scaleY = animatedScale
             }
             .then(clickModifier),
-        shape = RoundedCornerShape(8.dp),
-        tonalElevation = 2.dp,
-        color = containerColor
+        shape = RoundedCornerShape(if (hasWidget) 2.dp else 8.dp),
+        tonalElevation = if (hasWidget) 0.dp else 2.dp,
+        color = if (hasWidget) Color.Transparent else containerColor
     ) {
         val showText = cellSize >= 96.dp
         val showSubtitle = showText
@@ -1982,25 +1982,29 @@ private fun DeckKey(
                     appWidgetId = button.appWidgetId
                 )
                 if (!button.appWidgetTouchable || previewMode) {
+                    val overlayActionModifier = if (previewMode) {
+                        Modifier.combinedClickable(onClick = onEdit, onLongClick = onEdit)
+                    } else {
+                        Modifier
+                            .pressReleaseFeedback(
+                                enabled = enabled,
+                                onPress = onPressFeedback,
+                                onRelease = onReleaseFeedback
+                            )
+                            .combinedClickable(onClick = onPressed)
+                    }
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
-                            .background(containerColor.copy(alpha = if (previewMode) 0.28f else 0.08f))
-                            .then(
-                                if (previewMode) {
-                                    Modifier.combinedClickable(onClick = onEdit, onLongClick = onEdit)
-                                } else {
-                                    Modifier
-                                }
-                            ),
+                            .then(overlayActionModifier),
                         contentAlignment = Alignment.BottomCenter
                     ) {
                         Text(
                             text = if (button.appWidgetTouchable) button.title else stringResource(R.string.widget_touch_disabled),
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .background(containerColor.copy(alpha = 0.78f))
-                                .padding(6.dp),
+                                .background(containerColor.copy(alpha = 0.36f))
+                                .padding(horizontal = 5.dp, vertical = 3.dp),
                             style = MaterialTheme.typography.labelSmall,
                             color = contentColor,
                             maxLines = 1,
