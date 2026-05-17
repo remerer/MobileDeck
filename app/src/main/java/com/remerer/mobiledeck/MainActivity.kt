@@ -36,8 +36,11 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -244,9 +247,9 @@ private enum class ButtonVibrationLevel(
     val amplitude: Int
 ) {
     Off(R.string.button_vibration_off, 0L, 0),
-    Weak(R.string.button_vibration_weak, 18L, 70),
-    Medium(R.string.button_vibration_medium, 28L, 140),
-    Strong(R.string.button_vibration_strong, 42L, 255);
+    Weak(R.string.button_vibration_weak, 10L, 55),
+    Medium(R.string.button_vibration_medium, 14L, 115),
+    Strong(R.string.button_vibration_strong, 18L, 190);
 
     fun next(): ButtonVibrationLevel {
         val values = values()
@@ -449,9 +452,6 @@ private fun MobileDeckApp() {
                 else -> false
             }
         }
-        if (delivered) {
-            context.applicationContext.vibrateButtonPress(buttonVibrationLevel)
-        }
         val note = when {
             buttonAppAction(button) == DeckActionType.Settings -> "opened settings"
             buttonAppAction(button) == DeckActionType.BluetoothStatus -> "opened connection"
@@ -533,6 +533,8 @@ private fun MobileDeckApp() {
                 onPageSwipe = ::switchDeckPage,
                 onAddPage = ::addDeckPage,
                 onButtonPressed = ::pressDeckButton,
+                onButtonTouchStarted = { context.applicationContext.vibrateButtonPress(buttonVibrationLevel) },
+                onButtonTouchEnded = { context.applicationContext.vibrateButtonPress(buttonVibrationLevel) },
                 onButtonEdit = {},
                 onButtonMoved = ::moveDeckButtonToSlot,
                 onEmptySlotPressed = { slot -> addDeckButton(slot, editAfterCreate = true) }
@@ -1329,6 +1331,8 @@ private fun DeckPage(
     onPageSwipe: (Int) -> Unit,
     onAddPage: () -> Unit,
     onButtonPressed: (DeckButton) -> Unit,
+    onButtonTouchStarted: () -> Unit = {},
+    onButtonTouchEnded: () -> Unit = {},
     onButtonEdit: (DeckButton) -> Unit,
     onButtonMoved: (DeckButton, Int) -> Unit,
     onEmptySlotPressed: (Int) -> Unit
@@ -1390,6 +1394,8 @@ private fun DeckPage(
                     previewMode = previewMode,
                     showTitle = target.pageId == deckPages.firstOrNull()?.id,
                     onButtonPressed = onButtonPressed,
+                    onButtonTouchStarted = onButtonTouchStarted,
+                    onButtonTouchEnded = onButtonTouchEnded,
                     onButtonEdit = onButtonEdit,
                     onButtonMoved = onButtonMoved,
                     onEmptySlotPressed = onEmptySlotPressed
@@ -1525,6 +1531,24 @@ private fun Modifier.multiTouchPageSwipe(
     }
 }
 
+private fun Modifier.pressReleaseFeedback(
+    enabled: Boolean,
+    onPress: () -> Unit,
+    onRelease: () -> Unit
+): Modifier {
+    if (!enabled) return this
+    return pointerInput(onPress, onRelease) {
+        awaitEachGesture {
+            awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+            onPress()
+            val up = waitForUpOrCancellation(pass = PointerEventPass.Initial)
+            if (up != null) {
+                onRelease()
+            }
+        }
+    }
+}
+
 private fun Int.signOrOne(): Int = if (this < 0) -1 else 1
 
 private fun wrapIndex(value: Int, size: Int): Int = ((value % size) + size) % size
@@ -1584,6 +1608,8 @@ private fun ButtonGrid(
     previewMode: Boolean,
     showTitle: Boolean,
     onButtonPressed: (DeckButton) -> Unit,
+    onButtonTouchStarted: () -> Unit,
+    onButtonTouchEnded: () -> Unit,
     onButtonEdit: (DeckButton) -> Unit,
     onButtonMoved: (DeckButton, Int) -> Unit,
     onEmptySlotPressed: (Int) -> Unit
@@ -1633,6 +1659,8 @@ private fun ButtonGrid(
                         cellSize = cellSize,
                         spacing = spacing,
                         onPressed = { onButtonPressed(button) },
+                        onPressFeedback = onButtonTouchStarted,
+                        onReleaseFeedback = onButtonTouchEnded,
                         onEdit = { onButtonEdit(button) },
                         onMove = { targetSlot -> onButtonMoved(button, targetSlot.coerceIn(0, maxButtonPosition)) }
                     )
@@ -1724,6 +1752,8 @@ private fun DeckKey(
     cellSize: Dp,
     spacing: Dp,
     onPressed: () -> Unit,
+    onPressFeedback: () -> Unit,
+    onReleaseFeedback: () -> Unit,
     onEdit: () -> Unit,
     onMove: (Int) -> Unit
 ) {
@@ -1780,6 +1810,11 @@ private fun DeckKey(
                 scaleX = animatedScale
                 scaleY = animatedScale
             }
+            .pressReleaseFeedback(
+                enabled = enabled && !previewMode,
+                onPress = onPressFeedback,
+                onRelease = onReleaseFeedback
+            )
             .combinedClickable(
                 onClick = onPressed,
                 onLongClick = if (previewMode) onEdit else null
