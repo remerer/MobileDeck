@@ -48,8 +48,17 @@
     <string name="subtitle">부제목</string>
     <string name="icon">아이콘</string>
     <string name="pick_image">이미지 선택</string>
+    <string name="pick_app_icon">앱 아이콘 선택</string>
     <string name="change_image">이미지 변경</string>
     <string name="clear_image">이미지 제거</string>
+    <string name="pick_widget">위젯 선택</string>
+    <string name="change_widget">위젯 변경</string>
+    <string name="clear_widget">위젯 제거</string>
+    <string name="widget_touch_on">위젯 터치 켜짐</string>
+    <string name="widget_touch_off">위젯 터치 꺼짐</string>
+    <string name="widget_touch_disabled">위젯 터치 꺼짐</string>
+    <string name="widget_unavailable">위젯을 사용할 수 없음</string>
+    <string name="no_apps_found">실행 가능한 앱이 없습니다.</string>
     <string name="action">동작</string>
     <string name="payload">입력값</string>
     <string name="app_command_target">앱 동작</string>

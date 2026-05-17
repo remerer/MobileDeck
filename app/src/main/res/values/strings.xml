@@ -48,8 +48,17 @@
     <string name="subtitle">Subtitle</string>
     <string name="icon">Icon</string>
     <string name="pick_image">Pick image</string>
+    <string name="pick_app_icon">Pick app icon</string>
     <string name="change_image">Change image</string>
     <string name="clear_image">Clear image</string>
+    <string name="pick_widget">Pick widget</string>
+    <string name="change_widget">Change widget</string>
+    <string name="clear_widget">Clear widget</string>
+    <string name="widget_touch_on">Widget touch on</string>
+    <string name="widget_touch_off">Widget touch off</string>
+    <string name="widget_touch_disabled">Widget touch disabled</string>
+    <string name="widget_unavailable">Widget unavailable</string>
+    <string name="no_apps_found">No launchable apps found.</string>
     <string name="action">Action</string>
     <string name="payload">Payload</string>
     <string name="app_command_target">App command</string>
