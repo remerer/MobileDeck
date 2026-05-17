@@ -1,5 +1,8 @@
 package com.remerer.mobiledeck
 
+import android.app.Activity
+import android.appwidget.AppWidgetHost
+import android.appwidget.AppWidgetManager
 import android.os.Build
 import android.os.Bundle
 import android.os.VibrationEffect
@@ -8,9 +11,13 @@ import android.os.VibratorManager
 import android.bluetooth.BluetoothAdapter
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.content.pm.ResolveInfo
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.util.Log
+import android.view.ViewGroup
+import android.widget.FrameLayout
 import android.view.WindowManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -21,6 +28,7 @@ import androidx.annotation.StringRes
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.core.graphics.drawable.toBitmap
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -45,6 +53,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -53,6 +62,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -115,6 +125,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.platform.LocalContext
@@ -123,6 +134,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.viewinterop.AndroidView
 import com.remerer.mobiledeck.ui.theme.MobileDeckTheme
 import kotlinx.coroutines.delay
 import org.json.JSONArray
@@ -198,7 +210,9 @@ private data class DeckButton(
     val color: Color,
     val position: Int = 0,
     val spanColumns: Int = 1,
-    val spanRows: Int = 1
+    val spanRows: Int = 1,
+    val appWidgetId: Int = INVALID_APP_WIDGET_ID,
+    val appWidgetTouchable: Boolean = true
 )
 
 private data class UtilityChoice(
@@ -222,6 +236,12 @@ private data class ActivityLog(
 private data class IconChoice(
     val key: String,
     @StringRes val labelRes: Int
+)
+
+private data class LaunchableAppChoice(
+    val label: String,
+    val packageName: String,
+    val icon: ImageBitmap?
 )
 
 private data class MediaKeyChoice(
@@ -260,6 +280,8 @@ private enum class ButtonVibrationLevel(
 @Composable
 private fun MobileDeckApp() {
     val context = LocalContext.current
+    val appWidgetManager = remember { AppWidgetManager.getInstance(context.applicationContext) }
+    val appWidgetHost = remember { AppWidgetHost(context.applicationContext, APP_WIDGET_HOST_ID) }
     var hidStatus by remember { mutableStateOf(HidStatus()) }
     val hidManager = remember {
         HidKeyboardManager(context.applicationContext) { status ->
@@ -300,10 +322,84 @@ private fun MobileDeckApp() {
     var lastPageDelta by remember { mutableStateOf(1) }
     var pageAnimationSequence by remember { mutableStateOf(0) }
     var editingButton by remember { mutableStateOf<DeckButton?>(null) }
+    var pendingWidgetButtonId by remember { mutableStateOf<Int?>(null) }
+    var pendingWidgetId by remember { mutableStateOf<Int?>(null) }
     var logs by remember { mutableStateOf(emptyList<ActivityLog>()) }
     var page by remember { mutableStateOf(AppPage.Deck) }
     val activeDeckPage = deckPages.firstOrNull { it.id == activeDeckPageId } ?: deckPages.first()
     val deckButtons = activeDeckPage.buttons
+
+    fun updateButtonEverywhere(button: DeckButton) {
+        val updatedPages = updateDeckButton(deckPages, button)
+        deckPages = updatedPages
+        saveDeckPages(context, updatedPages)
+    }
+
+    fun assignWidgetToButton(buttonId: Int, widgetId: Int) {
+        val info = appWidgetManager.getAppWidgetInfo(widgetId)
+        val updated = deckPages.flatMap { it.buttons }
+            .firstOrNull { it.id == buttonId }
+            ?.copy(
+                title = info?.label?.takeIf { label -> label.isNotBlank() } ?: "Widget",
+                subtitle = "Android widget",
+                icon = "W",
+                iconImageUri = "",
+                displayMode = DeckDisplayMode.IconOnly,
+                appWidgetId = widgetId,
+                appWidgetTouchable = true,
+                spanColumns = 2,
+                spanRows = 2
+            ) ?: return
+        updateButtonEverywhere(updated)
+    }
+
+    val configureWidgetLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val buttonId = pendingWidgetButtonId
+        val widgetId = pendingWidgetId
+        if (result.resultCode == Activity.RESULT_OK && buttonId != null && widgetId != null) {
+            assignWidgetToButton(buttonId, widgetId)
+        } else if (widgetId != null) {
+            appWidgetHost.deleteAppWidgetId(widgetId)
+        }
+        pendingWidgetButtonId = null
+        pendingWidgetId = null
+    }
+
+    val pickWidgetLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val buttonId = pendingWidgetButtonId
+        val widgetId = result.data?.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, pendingWidgetId ?: INVALID_APP_WIDGET_ID)
+            ?: pendingWidgetId
+        if (result.resultCode != Activity.RESULT_OK || buttonId == null || widgetId == null || widgetId == INVALID_APP_WIDGET_ID) {
+            if (widgetId != null && widgetId != INVALID_APP_WIDGET_ID) appWidgetHost.deleteAppWidgetId(widgetId)
+            pendingWidgetButtonId = null
+            pendingWidgetId = null
+            return@rememberLauncherForActivityResult
+        }
+
+        val info = appWidgetManager.getAppWidgetInfo(widgetId)
+        if (info?.configure != null) {
+            pendingWidgetId = widgetId
+            configureWidgetLauncher.launch(
+                Intent(AppWidgetManager.ACTION_APPWIDGET_CONFIGURE).apply {
+                    component = info.configure
+                    putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, widgetId)
+                }
+            )
+        } else {
+            assignWidgetToButton(buttonId, widgetId)
+            pendingWidgetButtonId = null
+            pendingWidgetId = null
+        }
+    }
+
+    DisposableEffect(appWidgetHost) {
+        appWidgetHost.startListening()
+        onDispose { appWidgetHost.stopListening() }
+    }
 
     fun startHid() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -386,6 +482,22 @@ private fun MobileDeckApp() {
         deckPages = updatedPages
         activeDeckPageId = firstPage.id
         saveDeckPages(context, updatedPages)
+    }
+
+    fun pickWidgetForButton(button: DeckButton) {
+        updateButtonEverywhere(button)
+        val oldWidgetId = button.appWidgetId
+        val widgetId = appWidgetHost.allocateAppWidgetId()
+        pendingWidgetButtonId = button.id
+        pendingWidgetId = widgetId
+        if (oldWidgetId != INVALID_APP_WIDGET_ID) {
+            appWidgetHost.deleteAppWidgetId(oldWidgetId)
+        }
+        pickWidgetLauncher.launch(
+            Intent(AppWidgetManager.ACTION_APPWIDGET_PICK).apply {
+                putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, widgetId)
+            }
+        )
     }
 
     fun switchDeckPage(delta: Int) {
@@ -524,6 +636,8 @@ private fun MobileDeckApp() {
                 rows = deckRows,
                 spacing = deckSpacing.dp,
                 status = hidStatus,
+                appWidgetHost = appWidgetHost,
+                appWidgetManager = appWidgetManager,
                 previewMode = false,
                 pageSwipeAxis = pageSwipeAxis,
                 multiTouchPageSwipe = multiTouchPageSwipe,
@@ -552,6 +666,8 @@ private fun MobileDeckApp() {
                 rows = deckRows,
                 spacing = deckSpacing.dp,
                 status = hidStatus,
+                appWidgetHost = appWidgetHost,
+                appWidgetManager = appWidgetManager,
                 pageSwipeAxis = pageSwipeAxis,
                 multiTouchPageSwipe = multiTouchPageSwipe,
                 pageSwipeAnimation = pageSwipeAnimation,
@@ -650,6 +766,9 @@ private fun MobileDeckApp() {
             status = hidStatus,
             onDismiss = { editingButton = null },
             onSave = { updated ->
+                if (button.appWidgetId != INVALID_APP_WIDGET_ID && button.appWidgetId != updated.appWidgetId) {
+                    appWidgetHost.deleteAppWidgetId(button.appWidgetId)
+                }
                 val showTitle = activeDeckPage.id == deckPages.firstOrNull()?.id
                 val adjustedButton = shrinkButtonToAvailable(
                     updated,
@@ -663,7 +782,14 @@ private fun MobileDeckApp() {
                 saveDeckPages(context, updatedPages)
                 editingButton = null
             },
+            onPickWidget = { updated ->
+                editingButton = null
+                pickWidgetForButton(updated)
+            },
             onDelete = {
+                if (button.appWidgetId != INVALID_APP_WIDGET_ID) {
+                    appWidgetHost.deleteAppWidgetId(button.appWidgetId)
+                }
                 if (button.actionType != DeckActionType.Settings) {
                     val updatedPages = updateDeckPage(deckPages, activeDeckPage.id) {
                         it.buttons.filterNot { existing -> existing.id == button.id }
@@ -1054,6 +1180,8 @@ private fun LayoutEditorPage(
     rows: Int,
     spacing: Dp,
     status: HidStatus,
+    appWidgetHost: AppWidgetHost,
+    appWidgetManager: AppWidgetManager,
     pageSwipeAxis: PageSwipeAxis,
     multiTouchPageSwipe: Boolean,
     pageSwipeAnimation: Boolean,
@@ -1145,6 +1273,8 @@ private fun LayoutEditorPage(
                 rows = rows,
                 spacing = spacing,
                 status = status,
+                appWidgetHost = appWidgetHost,
+                appWidgetManager = appWidgetManager,
                 previewMode = true,
                 pageSwipeAxis = pageSwipeAxis,
                 multiTouchPageSwipe = multiTouchPageSwipe,
@@ -1322,6 +1452,8 @@ private fun DeckPage(
     rows: Int,
     spacing: Dp = DEFAULT_SPACING_DP.dp,
     status: HidStatus,
+    appWidgetHost: AppWidgetHost,
+    appWidgetManager: AppWidgetManager,
     previewMode: Boolean,
     pageSwipeAxis: PageSwipeAxis,
     multiTouchPageSwipe: Boolean,
@@ -1391,6 +1523,8 @@ private fun DeckPage(
                     cellSize = cellSize,
                     spacing = spacing,
                     status = status,
+                    appWidgetHost = appWidgetHost,
+                    appWidgetManager = appWidgetManager,
                     previewMode = previewMode,
                     showTitle = target.pageId == deckPages.firstOrNull()?.id,
                     onButtonPressed = onButtonPressed,
@@ -1605,6 +1739,8 @@ private fun ButtonGrid(
     cellSize: Dp,
     spacing: Dp,
     status: HidStatus,
+    appWidgetHost: AppWidgetHost,
+    appWidgetManager: AppWidgetManager,
     previewMode: Boolean,
     showTitle: Boolean,
     onButtonPressed: (DeckButton) -> Unit,
@@ -1652,6 +1788,8 @@ private fun ButtonGrid(
                         modifier = slotModifier.size(buttonWidth, buttonHeight),
                         button = button,
                         status = status,
+                        appWidgetHost = appWidgetHost,
+                        appWidgetManager = appWidgetManager,
                         enabled = true,
                         previewMode = previewMode,
                         columns = safeColumns,
@@ -1745,6 +1883,8 @@ private fun DeckKey(
     modifier: Modifier = Modifier,
     button: DeckButton,
     status: HidStatus,
+    appWidgetHost: AppWidgetHost,
+    appWidgetManager: AppWidgetManager,
     enabled: Boolean,
     previewMode: Boolean,
     columns: Int,
@@ -1779,6 +1919,8 @@ private fun DeckKey(
         label = "keyDragScale"
     )
     val displayTitle = buttonDisplayTitle(button)
+    val hasWidget = button.appWidgetId != INVALID_APP_WIDGET_ID
+    val letWidgetHandleTouch = hasWidget && button.appWidgetTouchable && !previewMode
     val dragModifier = if (previewMode) {
         Modifier.pointerInput(button.id, columns, slot, cellSize, spacing) {
             detectDragGestures(
@@ -1800,6 +1942,20 @@ private fun DeckKey(
     } else {
         Modifier
     }
+    val clickModifier = if (hasWidget || letWidgetHandleTouch) {
+        Modifier
+    } else {
+        Modifier
+            .pressReleaseFeedback(
+                enabled = enabled && !previewMode,
+                onPress = onPressFeedback,
+                onRelease = onReleaseFeedback
+            )
+            .combinedClickable(
+                onClick = onPressed,
+                onLongClick = if (previewMode) onEdit else null
+            )
+    }
 
     Surface(
         modifier = modifier
@@ -1810,21 +1966,55 @@ private fun DeckKey(
                 scaleX = animatedScale
                 scaleY = animatedScale
             }
-            .pressReleaseFeedback(
-                enabled = enabled && !previewMode,
-                onPress = onPressFeedback,
-                onRelease = onReleaseFeedback
-            )
-            .combinedClickable(
-                onClick = onPressed,
-                onLongClick = if (previewMode) onEdit else null
-            ),
+            .then(clickModifier),
         shape = RoundedCornerShape(8.dp),
         tonalElevation = 2.dp,
         color = containerColor
     ) {
         val showText = cellSize >= 96.dp
         val showSubtitle = showText
+        if (hasWidget) {
+            Box(modifier = Modifier.fillMaxSize()) {
+                DeckWidgetHost(
+                    modifier = Modifier.fillMaxSize(),
+                    appWidgetHost = appWidgetHost,
+                    appWidgetManager = appWidgetManager,
+                    appWidgetId = button.appWidgetId
+                )
+                if (!button.appWidgetTouchable || previewMode) {
+                    val overlayActionModifier = if (previewMode) {
+                        Modifier.combinedClickable(onClick = onEdit, onLongClick = onEdit)
+                    } else {
+                        Modifier
+                            .pressReleaseFeedback(
+                                enabled = enabled,
+                                onPress = onPressFeedback,
+                                onRelease = onReleaseFeedback
+                            )
+                            .combinedClickable(onClick = onPressed)
+                    }
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .then(overlayActionModifier),
+                        contentAlignment = Alignment.BottomCenter
+                    ) {
+                        Text(
+                            text = if (button.appWidgetTouchable) button.title else stringResource(R.string.widget_touch_disabled),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(containerColor.copy(alpha = 0.36f))
+                                .padding(horizontal = 5.dp, vertical = 3.dp),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = contentColor,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+            }
+            return@Surface
+        }
         Column(
             modifier = Modifier.padding(8.dp),
             verticalArrangement = if (button.displayMode != DeckDisplayMode.IconAndText || !showText) {
@@ -1906,6 +2096,47 @@ private fun DeckKey(
             }
         }
     }
+}
+
+@Composable
+private fun DeckWidgetHost(
+    modifier: Modifier = Modifier,
+    appWidgetHost: AppWidgetHost,
+    appWidgetManager: AppWidgetManager,
+    appWidgetId: Int
+) {
+    val context = LocalContext.current
+    val providerInfo = remember(appWidgetId) { appWidgetManager.getAppWidgetInfo(appWidgetId) }
+    if (providerInfo == null) {
+        Box(
+            modifier = modifier,
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = stringResource(R.string.widget_unavailable),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+        return
+    }
+    AndroidView(
+        modifier = modifier,
+        factory = {
+            appWidgetHost.createView(context, appWidgetId, providerInfo).apply {
+                setAppWidget(appWidgetId, providerInfo)
+                layoutParams = FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT
+                )
+            }
+        },
+        update = { hostView ->
+            hostView.setAppWidget(appWidgetId, providerInfo)
+        }
+    )
 }
 
 @Composable
@@ -1998,6 +2229,11 @@ private fun rememberImageBitmap(uriString: String): ImageBitmap? {
     LaunchedEffect(uriString) {
         image = if (uriString.isBlank()) {
             null
+        } else if (uriString.startsWith(APP_ICON_URI_PREFIX)) {
+            val packageName = uriString.removePrefix(APP_ICON_URI_PREFIX)
+            runCatching {
+                context.packageManager.getApplicationIcon(packageName).toBitmap().asImageBitmap()
+            }.getOrNull()
         } else {
             runCatching {
                 context.contentResolver.openInputStream(Uri.parse(uriString))?.use { input ->
@@ -2081,6 +2317,28 @@ private fun iconChoices(): List<IconChoice> {
 
 private fun selectedIconChoice(key: String): IconChoice {
     return iconChoices().firstOrNull { it.key == key } ?: iconChoices().first()
+}
+
+private fun appIconUri(packageName: String): String = "$APP_ICON_URI_PREFIX$packageName"
+
+private fun loadLaunchableApps(context: Context): List<LaunchableAppChoice> {
+    val packageManager = context.packageManager
+    val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+    val resolveInfos: List<ResolveInfo> = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        packageManager.queryIntentActivities(intent, PackageManager.ResolveInfoFlags.of(0))
+    } else {
+        @Suppress("DEPRECATION")
+        packageManager.queryIntentActivities(intent, 0)
+    }
+    return resolveInfos
+        .mapNotNull { info ->
+            val packageName = info.activityInfo?.packageName ?: return@mapNotNull null
+            val label = info.loadLabel(packageManager)?.toString()?.takeIf { it.isNotBlank() } ?: packageName
+            val icon = runCatching { info.loadIcon(packageManager).toBitmap().asImageBitmap() }.getOrNull()
+            LaunchableAppChoice(label, packageName, icon)
+        }
+        .distinctBy { it.packageName }
+        .sortedBy { it.label.lowercase(Locale.getDefault()) }
 }
 
 private fun mediaKeyChoices(): List<MediaKeyChoice> {
@@ -2226,6 +2484,7 @@ private fun EditButtonDialog(
     status: HidStatus,
     onDismiss: () -> Unit,
     onSave: (DeckButton) -> Unit,
+    onPickWidget: (DeckButton) -> Unit,
     onDelete: () -> Unit
 ) {
     var title by remember(button.id) { mutableStateOf(button.title) }
@@ -2237,12 +2496,16 @@ private fun EditButtonDialog(
     var actionType by remember(button.id) { mutableStateOf(button.actionType) }
     var spanColumns by remember(button.id) { mutableStateOf(button.spanColumns) }
     var spanRows by remember(button.id) { mutableStateOf(button.spanRows) }
+    var appWidgetId by remember(button.id) { mutableStateOf(button.appWidgetId) }
+    var appWidgetTouchable by remember(button.id) { mutableStateOf(button.appWidgetTouchable) }
     var menuExpanded by remember { mutableStateOf(false) }
     var iconMenuExpanded by remember { mutableStateOf(false) }
     var mediaMenuExpanded by remember { mutableStateOf(false) }
     var appCommandMenuExpanded by remember { mutableStateOf(false) }
     var utilityMenuExpanded by remember { mutableStateOf(false) }
+    var appPickerVisible by remember { mutableStateOf(false) }
     val context = LocalContext.current
+    val launchableApps = remember { loadLaunchableApps(context) }
     val imagePicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri ->
@@ -2269,23 +2532,61 @@ private fun EditButtonDialog(
     val canDelete = buttonAppAction(button) != DeckActionType.Settings
     val actionLocked = buttonAppAction(button) == DeckActionType.Settings
     val canSave = title.isNotBlank() && (!payloadRequired(actionType) || payload.isNotBlank())
+    val configuration = LocalConfiguration.current
+    val contentMaxHeight = (configuration.screenHeightDp.dp - 152.dp).coerceAtLeast(220.dp)
+    fun editedButton(): DeckButton {
+        return button.copy(
+            title = title.trim(),
+            subtitle = subtitle.trim(),
+            icon = icon.trim(),
+            iconImageUri = iconImageUri,
+            displayMode = displayMode,
+            actionType = actionType,
+            payload = if (actionType == DeckActionType.AppCommand) {
+                selectedAppCommand.name
+            } else if (actionType == DeckActionType.MediaKey) {
+                selectedMedia.payload
+            } else if (actionType == DeckActionType.Utility) {
+                selectedUtility.payload
+            } else if (payloadRequired(actionType)) {
+                payload.trim()
+            } else {
+                ""
+            },
+            spanColumns = spanColumns.coerceIn(1, MAX_BUTTON_SPAN_COLUMNS),
+            spanRows = spanRows.coerceIn(1, MAX_BUTTON_SPAN_ROWS),
+            appWidgetId = appWidgetId,
+            appWidgetTouchable = appWidgetTouchable
+        )
+    }
+
+    if (appPickerVisible) {
+        AppIconPickerDialog(
+            apps = launchableApps,
+            onDismiss = { appPickerVisible = false },
+            onSelect = { app ->
+                title = app.label
+                subtitle = app.packageName
+                icon = ICON_APPS
+                iconImageUri = appIconUri(app.packageName)
+                appPickerVisible = false
+            }
+        )
+    }
 
     AlertDialog(
-        modifier = Modifier.fillMaxWidth(0.86f),
+        modifier = Modifier.fillMaxWidth(0.94f),
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.edit_key)) },
         text = {
             LazyColumn(
-                modifier = Modifier.height(430.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = contentMaxHeight),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 item {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text(
-                            text = stringResource(R.string.key_content),
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.SemiBold
-                        )
+                    EditDialogSection(title = stringResource(R.string.key_content)) {
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             OutlinedTextField(
                                 modifier = Modifier.weight(1f),
@@ -2305,68 +2606,75 @@ private fun EditButtonDialog(
                     }
                 }
                 item {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text(
-                            text = stringResource(R.string.key_appearance),
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        ExposedDropdownMenuBox(
-                            expanded = iconMenuExpanded,
-                            onExpandedChange = { iconMenuExpanded = !iconMenuExpanded }
-                        ) {
-                            OutlinedTextField(
-                                modifier = Modifier
-                                    .menuAnchor()
-                                    .fillMaxWidth(),
-                                value = stringResource(selectedIcon.labelRes),
-                                onValueChange = {},
-                                readOnly = true,
-                                label = { Text(stringResource(R.string.icon)) },
-                                trailingIcon = {
-                                    ExposedDropdownMenuDefaults.TrailingIcon(expanded = iconMenuExpanded)
-                                }
-                            )
-                            ExposedDropdownMenu(
-                                expanded = iconMenuExpanded,
-                                onDismissRequest = { iconMenuExpanded = false }
-                            ) {
-                                iconChoices().forEach { item ->
-                                    DropdownMenuItem(
-                                        text = {
-                                            Row(
-                                                verticalAlignment = Alignment.CenterVertically,
-                                                horizontalArrangement = Arrangement.spacedBy(10.dp)
-                                            ) {
-                                                iconVectorForKey(item.key)?.let { vector ->
-                                                    Icon(
-                                                        imageVector = vector,
-                                                        contentDescription = null,
-                                                        modifier = Modifier.size(22.dp)
-                                                    )
-                                                } ?: Box(modifier = Modifier.size(22.dp))
-                                                Text(stringResource(item.labelRes))
-                                            }
-                                        },
-                                        onClick = {
-                                            icon = item.key
-                                            iconMenuExpanded = false
-                                        }
-                                    )
-                                }
-                            }
-                        }
+                    EditDialogSection(title = stringResource(R.string.key_appearance)) {
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            DeckDisplayMode.values().forEach { mode ->
-                                OutlinedButton(
-                                    modifier = Modifier.weight(1f),
-                                    shape = RoundedCornerShape(8.dp),
-                                    onClick = { displayMode = mode }
+                            ExposedDropdownMenuBox(
+                                expanded = iconMenuExpanded,
+                                onExpandedChange = { iconMenuExpanded = !iconMenuExpanded }
+                            ) {
+                                OutlinedTextField(
+                                    modifier = Modifier
+                                        .menuAnchor()
+                                        .weight(1f),
+                                    value = stringResource(selectedIcon.labelRes),
+                                    onValueChange = {},
+                                    readOnly = true,
+                                    label = { Text(stringResource(R.string.icon)) },
+                                    singleLine = true,
+                                    trailingIcon = {
+                                        ExposedDropdownMenuDefaults.TrailingIcon(expanded = iconMenuExpanded)
+                                    }
+                                )
+                                ExposedDropdownMenu(
+                                    expanded = iconMenuExpanded,
+                                    onDismissRequest = { iconMenuExpanded = false }
                                 ) {
-                                    Text(stringResource(mode.labelRes))
+                                    iconChoices().forEach { item ->
+                                        DropdownMenuItem(
+                                            text = {
+                                                Row(
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                                ) {
+                                                    iconVectorForKey(item.key)?.let { vector ->
+                                                        Icon(
+                                                            imageVector = vector,
+                                                            contentDescription = null,
+                                                            modifier = Modifier.size(22.dp)
+                                                        )
+                                                    } ?: Box(modifier = Modifier.size(22.dp))
+                                                    Text(stringResource(item.labelRes))
+                                                }
+                                            },
+                                            onClick = {
+                                                icon = item.key
+                                                iconMenuExpanded = false
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+
+                            Row(
+                                modifier = Modifier.weight(1.2f),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                DeckDisplayMode.values().forEach { mode ->
+                                    OutlinedButton(
+                                        modifier = Modifier.weight(1f),
+                                        shape = RoundedCornerShape(8.dp),
+                                        onClick = { displayMode = mode }
+                                    ) {
+                                        Text(
+                                            text = stringResource(mode.labelRes),
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
                                 }
                             }
                         }
+
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             SpanStepper(
                                 modifier = Modifier.weight(1f),
@@ -2383,90 +2691,143 @@ private fun EditButtonDialog(
                                 onValueChange = { spanRows = it }
                             )
                         }
-                    }
-                }
-                item {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             OutlinedButton(
                                 modifier = Modifier.weight(1f),
                                 shape = RoundedCornerShape(8.dp),
                                 onClick = { imagePicker.launch(arrayOf("image/*")) }
                             ) {
-                                Text(stringResource(if (iconImageUri.isBlank()) R.string.pick_image else R.string.change_image))
+                                Text(
+                                    text = stringResource(if (iconImageUri.isBlank()) R.string.pick_image else R.string.change_image),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
                             }
+                            OutlinedButton(
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(8.dp),
+                                onClick = { appPickerVisible = true }
+                            ) {
+                                Text(
+                                    text = stringResource(R.string.pick_app_icon),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedButton(
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(8.dp),
+                                onClick = { onPickWidget(editedButton()) }
+                            ) {
+                                Text(
+                                    text = stringResource(if (appWidgetId == INVALID_APP_WIDGET_ID) R.string.pick_widget else R.string.change_widget),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                            OutlinedButton(
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(8.dp),
+                                enabled = appWidgetId != INVALID_APP_WIDGET_ID,
+                                onClick = { appWidgetId = INVALID_APP_WIDGET_ID }
+                            ) {
+                                Text(
+                                    text = stringResource(R.string.clear_widget),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             OutlinedButton(
                                 modifier = Modifier.weight(1f),
                                 shape = RoundedCornerShape(8.dp),
                                 enabled = iconImageUri.isNotBlank(),
                                 onClick = { iconImageUri = "" }
                             ) {
-                                Text(stringResource(R.string.clear_image))
+                                Text(
+                                    text = stringResource(R.string.clear_image),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                            OutlinedButton(
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(8.dp),
+                                enabled = appWidgetId != INVALID_APP_WIDGET_ID,
+                                onClick = { appWidgetTouchable = !appWidgetTouchable }
+                            ) {
+                                Text(
+                                    text = stringResource(if (appWidgetTouchable) R.string.widget_touch_on else R.string.widget_touch_off),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
                             }
                         }
                     }
                 }
                 item {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text(
-                            text = stringResource(R.string.key_action),
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        if (actionLocked) {
-                            OutlinedTextField(
-                                modifier = Modifier.fillMaxWidth(),
-                                value = stringResource(actionType.labelRes),
-                                onValueChange = {},
-                                readOnly = true,
-                                label = { Text(stringResource(R.string.action)) },
-                                singleLine = true
-                            )
-                        } else {
-                            ExposedDropdownMenuBox(
-                                expanded = menuExpanded,
-                                onExpandedChange = { menuExpanded = !menuExpanded }
-                            ) {
+                    EditDialogSection(title = stringResource(R.string.key_action)) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            if (actionLocked) {
                                 OutlinedTextField(
-                                    modifier = Modifier
-                                        .menuAnchor()
-                                        .fillMaxWidth(),
+                                    modifier = Modifier.weight(1f),
                                     value = stringResource(actionType.labelRes),
                                     onValueChange = {},
                                     readOnly = true,
                                     label = { Text(stringResource(R.string.action)) },
-                                    trailingIcon = {
-                                        ExposedDropdownMenuDefaults.TrailingIcon(expanded = menuExpanded)
-                                    }
+                                    singleLine = true
                                 )
-                                ExposedDropdownMenu(
+                            } else {
+                                ExposedDropdownMenuBox(
                                     expanded = menuExpanded,
-                                    onDismissRequest = { menuExpanded = false }
+                                    onExpandedChange = { menuExpanded = !menuExpanded }
                                 ) {
-                                    DeckActionType.values()
-                                        .filterNot { it in appCommandActions }
-                                        .forEach { item ->
-                                            DropdownMenuItem(
-                                                text = { Text(stringResource(item.labelRes)) },
-                                                onClick = {
-                                                    actionType = item
-                                                    if (item == DeckActionType.MediaKey && mediaKeyChoice(payload) == null) {
-                                                        payload = MEDIA_MUTE
-                                                        icon = ICON_AUTO
-                                                    } else if (item == DeckActionType.Utility && utilityChoice(payload) == null) {
-                                                        payload = UTILITY_TIME
-                                                        icon = ICON_AUTO
-                                                    } else if (item == DeckActionType.AppCommand && appCommandAction(payload) == null) {
-                                                        payload = DeckActionType.BluetoothStatus.name
-                                                    } else if (!payloadRequired(item)) {
-                                                        payload = ""
-                                                    }
-                                                    menuExpanded = false
-                                                }
-                                            )
+                                    OutlinedTextField(
+                                        modifier = Modifier
+                                            .menuAnchor()
+                                            .weight(1f),
+                                        value = stringResource(actionType.labelRes),
+                                        onValueChange = {},
+                                        readOnly = true,
+                                        label = { Text(stringResource(R.string.action)) },
+                                        singleLine = true,
+                                        trailingIcon = {
+                                            ExposedDropdownMenuDefaults.TrailingIcon(expanded = menuExpanded)
                                         }
+                                    )
+                                    ExposedDropdownMenu(
+                                        expanded = menuExpanded,
+                                        onDismissRequest = { menuExpanded = false }
+                                    ) {
+                                        DeckActionType.values()
+                                            .filterNot { it in appCommandActions }
+                                            .forEach { item ->
+                                                DropdownMenuItem(
+                                                    text = { Text(stringResource(item.labelRes)) },
+                                                    onClick = {
+                                                        actionType = item
+                                                        if (item == DeckActionType.MediaKey && mediaKeyChoice(payload) == null) {
+                                                            payload = MEDIA_MUTE
+                                                            icon = ICON_AUTO
+                                                        } else if (item == DeckActionType.Utility && utilityChoice(payload) == null) {
+                                                            payload = UTILITY_TIME
+                                                            icon = ICON_AUTO
+                                                        } else if (item == DeckActionType.AppCommand && appCommandAction(payload) == null) {
+                                                            payload = DeckActionType.BluetoothStatus.name
+                                                        } else if (!payloadRequired(item)) {
+                                                            payload = ""
+                                                        }
+                                                        menuExpanded = false
+                                                    }
+                                                )
+                                            }
+                                    }
                                 }
                             }
+
                         }
                     }
                 }
@@ -2592,7 +2953,9 @@ private fun EditButtonDialog(
                             Text(
                                 text = stringResource(status.state.labelRes()),
                                 style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
                     }
@@ -2618,29 +2981,7 @@ private fun EditButtonDialog(
             TextButton(
                 enabled = canSave,
                 onClick = {
-                    onSave(
-                        button.copy(
-                            title = title.trim(),
-                            subtitle = subtitle.trim(),
-                            icon = icon.trim(),
-                            iconImageUri = iconImageUri,
-                            displayMode = displayMode,
-                            actionType = actionType,
-                            payload = if (actionType == DeckActionType.AppCommand) {
-                                selectedAppCommand.name
-                            } else if (actionType == DeckActionType.MediaKey) {
-                                selectedMedia.payload
-                            } else if (actionType == DeckActionType.Utility) {
-                                selectedUtility.payload
-                            } else if (payloadRequired(actionType)) {
-                                payload.trim()
-                            } else {
-                                ""
-                            },
-                            spanColumns = spanColumns.coerceIn(1, MAX_BUTTON_SPAN_COLUMNS),
-                            spanRows = spanRows.coerceIn(1, MAX_BUTTON_SPAN_ROWS)
-                        )
-                    )
+                    onSave(editedButton())
                 }
             ) {
                 Text(stringResource(R.string.save))
@@ -2660,6 +3001,24 @@ private fun EditButtonDialog(
             }
         }
     )
+}
+
+@Composable
+private fun EditDialogSection(
+    title: String,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold
+        )
+        content()
+    }
 }
 
 @Composable
@@ -2697,6 +3056,75 @@ private fun SpanStepper(
             Text("+")
         }
     }
+}
+
+@Composable
+private fun AppIconPickerDialog(
+    apps: List<LaunchableAppChoice>,
+    onDismiss: () -> Unit,
+    onSelect: (LaunchableAppChoice) -> Unit
+) {
+    AlertDialog(
+        modifier = Modifier.fillMaxWidth(0.84f),
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.pick_app_icon)) },
+        text = {
+            LazyColumn(
+                modifier = Modifier.heightIn(max = 360.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                if (apps.isEmpty()) {
+                    item {
+                        Text(
+                            text = stringResource(R.string.no_apps_found),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                } else {
+                    items(apps) { app ->
+                        DropdownMenuItem(
+                            text = {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    if (app.icon != null) {
+                                        Image(
+                                            bitmap = app.icon,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(28.dp)
+                                        )
+                                    } else {
+                                        Box(modifier = Modifier.size(28.dp))
+                                    }
+                                    Column {
+                                        Text(
+                                            text = app.label,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        Text(
+                                            text = app.packageName,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                }
+                            },
+                            onClick = { onSelect(app) }
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.cancel))
+            }
+        }
+    )
 }
 
 private fun defaultDeckColors(): List<Color> {
@@ -2812,6 +3240,8 @@ private fun encodeDeckButton(button: DeckButton): JSONObject {
         .put("position", button.position)
         .put("spanColumns", button.spanColumns)
         .put("spanRows", button.spanRows)
+        .put("appWidgetId", button.appWidgetId)
+        .put("appWidgetTouchable", button.appWidgetTouchable)
 }
 
 private fun decodeDeckButton(item: JSONObject, fallbackPosition: Int): DeckButton {
@@ -2831,7 +3261,9 @@ private fun decodeDeckButton(item: JSONObject, fallbackPosition: Int): DeckButto
         color = Color(item.getInt("color")),
         position = item.optInt("position", fallbackPosition),
         spanColumns = item.optInt("spanColumns", 1).coerceIn(1, MAX_BUTTON_SPAN_COLUMNS),
-        spanRows = item.optInt("spanRows", 1).coerceIn(1, MAX_BUTTON_SPAN_ROWS)
+        spanRows = item.optInt("spanRows", 1).coerceIn(1, MAX_BUTTON_SPAN_ROWS),
+        appWidgetId = item.optInt("appWidgetId", INVALID_APP_WIDGET_ID),
+        appWidgetTouchable = item.optBoolean("appWidgetTouchable", true)
     )
 }
 
@@ -3085,6 +3517,9 @@ private const val PREF_MULTI_TOUCH_PAGE_SWIPE = "multi_touch_page_swipe"
 private const val PREF_PAGE_SWIPE_ANIMATION = "page_swipe_animation"
 private const val PREF_INFINITE_PAGE_SWIPE = "infinite_page_swipe"
 private const val PREF_BUTTON_VIBRATION_LEVEL = "button_vibration_level"
+private const val APP_WIDGET_HOST_ID = 4201
+private const val INVALID_APP_WIDGET_ID = -1
+private const val APP_ICON_URI_PREFIX = "app-icon:"
 private const val MAX_PAGES = 5
 private const val MIN_COLUMNS = 4
 private const val MAX_COLUMNS = 12
