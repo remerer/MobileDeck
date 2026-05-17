@@ -1967,9 +1967,9 @@ private fun DeckKey(
                 scaleY = animatedScale
             }
             .then(clickModifier),
-        shape = RoundedCornerShape(if (hasWidget) 2.dp else 8.dp),
-        tonalElevation = if (hasWidget) 0.dp else 2.dp,
-        color = if (hasWidget) Color.Transparent else containerColor
+        shape = RoundedCornerShape(8.dp),
+        tonalElevation = 2.dp,
+        color = containerColor
     ) {
         val showText = cellSize >= 96.dp
         val showSubtitle = showText
