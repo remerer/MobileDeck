@@ -217,6 +217,17 @@ private enum class PageSwipeAxis(@StringRes val labelRes: Int, @StringRes val sh
     Vertical(R.string.page_axis_vertical, R.string.page_axis_vertical_short)
 }
 
+private enum class PageSwipeMode(@StringRes val labelRes: Int) {
+    Disabled(R.string.page_swipe_mode_disabled),
+    SingleTouch(R.string.page_swipe_mode_single),
+    MultiTouch(R.string.page_swipe_mode_multi);
+
+    fun next(): PageSwipeMode {
+        val values = values()
+        return values[(ordinal + 1) % values.size]
+    }
+}
+
 private enum class DeckUiMode(@StringRes val labelRes: Int) {
     Classic(R.string.deck_ui_classic),
     Console(R.string.deck_ui_console)
@@ -344,7 +355,7 @@ private fun MobileDeckApp() {
     var deckRows by remember { mutableStateOf(loadDeckRows(context)) }
     var deckSpacing by remember { mutableStateOf(loadDeckSpacing(context)) }
     var pageSwipeAxis by remember { mutableStateOf(loadPageSwipeAxis(context)) }
-    var multiTouchPageSwipe by remember { mutableStateOf(loadMultiTouchPageSwipe(context)) }
+    var pageSwipeMode by remember { mutableStateOf(loadPageSwipeMode(context)) }
     var pageSwipeAnimation by remember { mutableStateOf(loadPageSwipeAnimation(context)) }
     var infinitePageSwipe by remember { mutableStateOf(loadInfinitePageSwipe(context)) }
     var buttonVibrationLevel by remember { mutableStateOf(loadButtonVibrationLevel(context)) }
@@ -674,7 +685,7 @@ private fun MobileDeckApp() {
                 consoleLayout = consoleLayout,
                 previewMode = false,
                 pageSwipeAxis = pageSwipeAxis,
-                multiTouchPageSwipe = multiTouchPageSwipe,
+                pageSwipeMode = pageSwipeMode,
                 pageSwipeAnimation = pageSwipeAnimation,
                 pageSwipeDelta = lastPageDelta,
                 pageAnimationSequence = pageAnimationSequence,
@@ -703,7 +714,7 @@ private fun MobileDeckApp() {
                 appWidgetHost = appWidgetHost,
                 appWidgetManager = appWidgetManager,
                 pageSwipeAxis = pageSwipeAxis,
-                multiTouchPageSwipe = multiTouchPageSwipe,
+                pageSwipeMode = pageSwipeMode,
                 pageSwipeAnimation = pageSwipeAnimation,
                 pageSwipeDelta = lastPageDelta,
                 pageAnimationSequence = pageAnimationSequence,
@@ -789,52 +800,80 @@ private fun MobileDeckApp() {
                 pageName = activeDeckPage.name,
                 pageCount = deckPages.size,
                 pairedHosts = pairedHosts,
-                onBack = { page = AppPage.Deck },
+                onBack = {
+                    context.applicationContext.vibrateButtonPress(buttonVibrationLevel)
+                    page = AppPage.Deck
+                },
                 deckPages = deckPages,
                 activePageId = activeDeckPage.id,
                 pageSwipeAxis = pageSwipeAxis,
-                multiTouchPageSwipe = multiTouchPageSwipe,
+                pageSwipeMode = pageSwipeMode,
                 pageSwipeAnimation = pageSwipeAnimation,
                 infinitePageSwipe = infinitePageSwipe,
                 buttonVibrationLevel = buttonVibrationLevel,
                 deckUiMode = deckUiMode,
-                onLayoutEditor = { page = AppPage.LayoutEditor },
-                onConsoleLayoutEditor = { page = AppPage.ConsoleLayoutEditor },
+                onLayoutEditor = {
+                    context.applicationContext.vibrateButtonPress(buttonVibrationLevel)
+                    page = AppPage.LayoutEditor
+                },
+                onConsoleLayoutEditor = {
+                    context.applicationContext.vibrateButtonPress(buttonVibrationLevel)
+                    page = AppPage.ConsoleLayoutEditor
+                },
                 onPageSwipeAxisChange = { axis ->
+                    context.applicationContext.vibrateButtonPress(buttonVibrationLevel)
                     pageSwipeAxis = axis
                     savePageSwipeAxis(context, axis)
                 },
-                onMultiTouchPageSwipeChange = { enabled ->
-                    multiTouchPageSwipe = enabled
-                    saveMultiTouchPageSwipe(context, enabled)
+                onPageSwipeModeChange = { mode ->
+                    context.applicationContext.vibrateButtonPress(buttonVibrationLevel)
+                    pageSwipeMode = mode
+                    savePageSwipeMode(context, mode)
                 },
                 onPageSwipeAnimationChange = { enabled ->
+                    context.applicationContext.vibrateButtonPress(buttonVibrationLevel)
                     pageSwipeAnimation = enabled
                     savePageSwipeAnimation(context, enabled)
                 },
                 onInfinitePageSwipeChange = { enabled ->
+                    context.applicationContext.vibrateButtonPress(buttonVibrationLevel)
                     infinitePageSwipe = enabled
                     saveInfinitePageSwipe(context, enabled)
                 },
                 onButtonVibrationLevelChange = { level ->
                     buttonVibrationLevel = level
                     saveButtonVibrationLevel(context, level)
+                    context.applicationContext.vibrateButtonPress(level)
                 },
                 onDeckUiModeChange = { mode ->
+                    context.applicationContext.vibrateButtonPress(buttonVibrationLevel)
                     deckUiMode = mode
                     saveDeckUiMode(context, mode)
                 },
-                onStart = ::startHid,
-                onStop = { hidManager.stop() },
+                onStart = {
+                    context.applicationContext.vibrateButtonPress(buttonVibrationLevel)
+                    startHid()
+                },
+                onStop = {
+                    context.applicationContext.vibrateButtonPress(buttonVibrationLevel)
+                    hidManager.stop()
+                },
                 onMakeDiscoverable = {
+                    context.applicationContext.vibrateButtonPress(buttonVibrationLevel)
                     discoverableLauncher.launch(
                         Intent(BluetoothAdapter.ACTION_REQUEST_DISCOVERABLE).apply {
                             putExtra(BluetoothAdapter.EXTRA_DISCOVERABLE_DURATION, 300)
                         }
                     )
                 },
-                onRefreshHosts = { pairedHosts = hidManager.pairedHosts() },
-                onConnectHost = connectHost,
+                onRefreshHosts = {
+                    context.applicationContext.vibrateButtonPress(buttonVibrationLevel)
+                    pairedHosts = hidManager.pairedHosts()
+                },
+                onConnectHost = { host ->
+                    context.applicationContext.vibrateButtonPress(buttonVibrationLevel)
+                    connectHost(host)
+                },
                 onColumnsChange = { columns ->
                     deckColumns = columns
                     saveDeckColumns(context, columns)
@@ -844,7 +883,10 @@ private fun MobileDeckApp() {
                     saveDeckRows(context, rows)
                 },
                 onAddButton = { addDeckButton() },
-                onAddPage = ::addDeckPage,
+                onAddPage = {
+                    context.applicationContext.vibrateButtonPress(buttonVibrationLevel)
+                    addDeckPage()
+                },
             )
         }
     }
@@ -922,7 +964,7 @@ private fun SettingsPage(
     deckPages: List<DeckPageConfig>,
     activePageId: Int,
     pageSwipeAxis: PageSwipeAxis,
-    multiTouchPageSwipe: Boolean,
+    pageSwipeMode: PageSwipeMode,
     pageSwipeAnimation: Boolean,
     infinitePageSwipe: Boolean,
     buttonVibrationLevel: ButtonVibrationLevel,
@@ -934,7 +976,7 @@ private fun SettingsPage(
     onLayoutEditor: () -> Unit,
     onConsoleLayoutEditor: () -> Unit,
     onPageSwipeAxisChange: (PageSwipeAxis) -> Unit,
-    onMultiTouchPageSwipeChange: (Boolean) -> Unit,
+    onPageSwipeModeChange: (PageSwipeMode) -> Unit,
     onPageSwipeAnimationChange: (Boolean) -> Unit,
     onInfinitePageSwipeChange: (Boolean) -> Unit,
     onButtonVibrationLevelChange: (ButtonVibrationLevel) -> Unit,
@@ -993,14 +1035,14 @@ private fun SettingsPage(
                 ConsoleSettingsContent(
                     deckPages = deckPages,
                     activePageId = activePageId,
-                    multiTouchPageSwipe = multiTouchPageSwipe,
+                    pageSwipeMode = pageSwipeMode,
                     pageSwipeAnimation = pageSwipeAnimation,
                     infinitePageSwipe = infinitePageSwipe,
                     buttonVibrationLevel = buttonVibrationLevel,
                     pageName = pageName,
                     pageCount = pageCount,
                     logs = logs,
-                    onMultiTouchPageSwipeChange = onMultiTouchPageSwipeChange,
+                    onPageSwipeModeChange = onPageSwipeModeChange,
                     onPageSwipeAnimationChange = onPageSwipeAnimationChange,
                     onInfinitePageSwipeChange = onInfinitePageSwipeChange,
                     onButtonVibrationLevelChange = onButtonVibrationLevelChange,
@@ -1014,7 +1056,7 @@ private fun SettingsPage(
                     columns = columns,
                     rows = rows,
                     pageSwipeAxis = pageSwipeAxis,
-                    multiTouchPageSwipe = multiTouchPageSwipe,
+                    pageSwipeMode = pageSwipeMode,
                     pageSwipeAnimation = pageSwipeAnimation,
                     infinitePageSwipe = infinitePageSwipe,
                     buttonVibrationLevel = buttonVibrationLevel,
@@ -1022,7 +1064,7 @@ private fun SettingsPage(
                     pageCount = pageCount,
                     logs = logs,
                     onPageSwipeAxisChange = onPageSwipeAxisChange,
-                    onMultiTouchPageSwipeChange = onMultiTouchPageSwipeChange,
+                    onPageSwipeModeChange = onPageSwipeModeChange,
                     onPageSwipeAnimationChange = onPageSwipeAnimationChange,
                     onInfinitePageSwipeChange = onInfinitePageSwipeChange,
                     onButtonVibrationLevelChange = onButtonVibrationLevelChange,
@@ -1399,7 +1441,7 @@ private fun ClassicSettingsContent(
     columns: Int,
     rows: Int,
     pageSwipeAxis: PageSwipeAxis,
-    multiTouchPageSwipe: Boolean,
+    pageSwipeMode: PageSwipeMode,
     pageSwipeAnimation: Boolean,
     infinitePageSwipe: Boolean,
     buttonVibrationLevel: ButtonVibrationLevel,
@@ -1407,7 +1449,7 @@ private fun ClassicSettingsContent(
     pageCount: Int,
     logs: List<ActivityLog>,
     onPageSwipeAxisChange: (PageSwipeAxis) -> Unit,
-    onMultiTouchPageSwipeChange: (Boolean) -> Unit,
+    onPageSwipeModeChange: (PageSwipeMode) -> Unit,
     onPageSwipeAnimationChange: (Boolean) -> Unit,
     onInfinitePageSwipeChange: (Boolean) -> Unit,
     onButtonVibrationLevelChange: (ButtonVibrationLevel) -> Unit,
@@ -1455,13 +1497,11 @@ private fun ClassicSettingsContent(
             )
         }
         item {
-            SettingsSwitchRow(
+            PageSwipeModeSettingRow(
                 icon = Icons.Filled.TouchApp,
                 iconColor = Color(0xFF00B8A9),
-                title = stringResource(R.string.settings_multitouch),
-                subtitle = stringResource(R.string.settings_multitouch_desc),
-                checked = multiTouchPageSwipe,
-                onCheckedChange = onMultiTouchPageSwipeChange
+                pageSwipeMode = pageSwipeMode,
+                onPageSwipeModeChange = onPageSwipeModeChange
             )
         }
         item {
@@ -1510,14 +1550,14 @@ private fun ClassicSettingsContent(
 private fun ConsoleSettingsContent(
     deckPages: List<DeckPageConfig>,
     activePageId: Int,
-    multiTouchPageSwipe: Boolean,
+    pageSwipeMode: PageSwipeMode,
     pageSwipeAnimation: Boolean,
     infinitePageSwipe: Boolean,
     buttonVibrationLevel: ButtonVibrationLevel,
     pageName: String,
     pageCount: Int,
     logs: List<ActivityLog>,
-    onMultiTouchPageSwipeChange: (Boolean) -> Unit,
+    onPageSwipeModeChange: (PageSwipeMode) -> Unit,
     onPageSwipeAnimationChange: (Boolean) -> Unit,
     onInfinitePageSwipeChange: (Boolean) -> Unit,
     onButtonVibrationLevelChange: (ButtonVibrationLevel) -> Unit,
@@ -1560,13 +1600,11 @@ private fun ConsoleSettingsContent(
             )
         }
         item {
-            SettingsSwitchRow(
+            PageSwipeModeSettingRow(
                 icon = Icons.Filled.TouchApp,
                 iconColor = Color(0xFF00B8A9),
-                title = stringResource(R.string.settings_multitouch),
-                subtitle = stringResource(R.string.settings_multitouch_desc),
-                checked = multiTouchPageSwipe,
-                onCheckedChange = onMultiTouchPageSwipeChange
+                pageSwipeMode = pageSwipeMode,
+                onPageSwipeModeChange = onPageSwipeModeChange
             )
         }
         item {
@@ -1834,6 +1872,29 @@ private fun SettingsSwitchRow(
 }
 
 @Composable
+private fun PageSwipeModeSettingRow(
+    icon: ImageVector,
+    iconColor: Color,
+    pageSwipeMode: PageSwipeMode,
+    onPageSwipeModeChange: (PageSwipeMode) -> Unit
+) {
+    SettingRow(
+        icon = icon,
+        iconColor = iconColor,
+        title = stringResource(R.string.settings_page_swipe_mode),
+        subtitle = stringResource(R.string.settings_page_swipe_mode_desc),
+        trailing = {
+            SettingsSegmentedControl(
+                options = PageSwipeMode.values().toList(),
+                selected = pageSwipeMode,
+                label = { stringResource(it.labelRes) },
+                onSelected = onPageSwipeModeChange
+            )
+        }
+    )
+}
+
+@Composable
 private fun VibrationSettingRow(
     buttonVibrationLevel: ButtonVibrationLevel,
     onButtonVibrationLevelChange: (ButtonVibrationLevel) -> Unit
@@ -2035,14 +2096,14 @@ private fun DeckSettingsPanel(
     deckPages: List<DeckPageConfig>,
     activePageId: Int,
     pageSwipeAxis: PageSwipeAxis,
-    multiTouchPageSwipe: Boolean,
+    pageSwipeMode: PageSwipeMode,
     pageSwipeAnimation: Boolean,
     infinitePageSwipe: Boolean,
     buttonVibrationLevel: ButtonVibrationLevel,
     pageName: String,
     pageCount: Int,
     onPageSwipeAxisChange: (PageSwipeAxis) -> Unit,
-    onMultiTouchPageSwipeChange: (Boolean) -> Unit,
+    onPageSwipeModeChange: (PageSwipeMode) -> Unit,
     onPageSwipeAnimationChange: (Boolean) -> Unit,
     onInfinitePageSwipeChange: (Boolean) -> Unit,
     onButtonVibrationLevelChange: (ButtonVibrationLevel) -> Unit,
@@ -2092,9 +2153,9 @@ private fun DeckSettingsPanel(
             OutlinedButton(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(8.dp),
-                onClick = { onMultiTouchPageSwipeChange(!multiTouchPageSwipe) }
+                onClick = { onPageSwipeModeChange(pageSwipeMode.next()) }
             ) {
-                Text(stringResource(if (multiTouchPageSwipe) R.string.multi_touch_swipe_on else R.string.multi_touch_swipe_off))
+                Text(stringResource(pageSwipeMode.labelRes))
             }
             OutlinedButton(
                 modifier = Modifier.fillMaxWidth(),
@@ -2134,14 +2195,14 @@ private fun ConsoleSettingsPanel(
     deckPages: List<DeckPageConfig>,
     activePageId: Int,
     pageSwipeAxis: PageSwipeAxis,
-    multiTouchPageSwipe: Boolean,
+    pageSwipeMode: PageSwipeMode,
     pageSwipeAnimation: Boolean,
     infinitePageSwipe: Boolean,
     buttonVibrationLevel: ButtonVibrationLevel,
     pageName: String,
     pageCount: Int,
     onPageSwipeAxisChange: (PageSwipeAxis) -> Unit,
-    onMultiTouchPageSwipeChange: (Boolean) -> Unit,
+    onPageSwipeModeChange: (PageSwipeMode) -> Unit,
     onPageSwipeAnimationChange: (Boolean) -> Unit,
     onInfinitePageSwipeChange: (Boolean) -> Unit,
     onButtonVibrationLevelChange: (ButtonVibrationLevel) -> Unit,
@@ -2200,9 +2261,9 @@ private fun ConsoleSettingsPanel(
             OutlinedButton(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(14.dp),
-                onClick = { onMultiTouchPageSwipeChange(!multiTouchPageSwipe) }
+                onClick = { onPageSwipeModeChange(pageSwipeMode.next()) }
             ) {
-                Text(stringResource(if (multiTouchPageSwipe) R.string.multi_touch_swipe_on else R.string.multi_touch_swipe_off))
+                Text(stringResource(pageSwipeMode.labelRes))
             }
             OutlinedButton(
                 modifier = Modifier.fillMaxWidth(),
@@ -2412,7 +2473,7 @@ private fun LayoutEditorPage(
     appWidgetHost: AppWidgetHost,
     appWidgetManager: AppWidgetManager,
     pageSwipeAxis: PageSwipeAxis,
-    multiTouchPageSwipe: Boolean,
+    pageSwipeMode: PageSwipeMode,
     pageSwipeAnimation: Boolean,
     pageSwipeDelta: Int,
     pageAnimationSequence: Int,
@@ -2508,7 +2569,7 @@ private fun LayoutEditorPage(
                 consoleLayout = ConsoleLayoutConfig(emptyList()),
                 previewMode = true,
                 pageSwipeAxis = pageSwipeAxis,
-                multiTouchPageSwipe = multiTouchPageSwipe,
+                pageSwipeMode = pageSwipeMode,
                 pageSwipeAnimation = pageSwipeAnimation,
                 pageSwipeDelta = pageSwipeDelta,
                 pageAnimationSequence = pageAnimationSequence,
@@ -2689,7 +2750,7 @@ private fun DeckPage(
     consoleLayout: ConsoleLayoutConfig,
     previewMode: Boolean,
     pageSwipeAxis: PageSwipeAxis,
-    multiTouchPageSwipe: Boolean,
+    pageSwipeMode: PageSwipeMode,
     pageSwipeAnimation: Boolean,
     pageSwipeDelta: Int,
     pageAnimationSequence: Int,
@@ -2711,8 +2772,8 @@ private fun DeckPage(
             start = if (pageSwipeAxis == PageSwipeAxis.Vertical) 12.dp else 0.dp,
             bottom = if (pageSwipeAxis == PageSwipeAxis.Horizontal) 12.dp else 0.dp
         )
-        val swipeModifier = Modifier.multiTouchPageSwipe(
-            enabled = multiTouchPageSwipe,
+        val swipeModifier = Modifier.pageSwipeGesture(
+            mode = pageSwipeMode,
             axis = pageSwipeAxis,
             onPageSwipe = onPageSwipe
         )
@@ -2733,7 +2794,7 @@ private fun DeckPage(
                 pageSwipeAnimation = pageSwipeAnimation,
                 pageSwipeDelta = pageSwipeDelta,
                 pageAnimationSequence = pageAnimationSequence,
-                multiTouchPageSwipe = multiTouchPageSwipe,
+                pageSwipeMode = pageSwipeMode,
                 layout = consoleLayout,
                 columns = safeColumns,
                 rows = safeRows,
@@ -2846,7 +2907,7 @@ private fun ConsoleDeckSurface(
     pageSwipeAnimation: Boolean,
     pageSwipeDelta: Int,
     pageAnimationSequence: Int,
-    multiTouchPageSwipe: Boolean,
+    pageSwipeMode: PageSwipeMode,
     layout: ConsoleLayoutConfig,
     columns: Int,
     rows: Int,
@@ -2862,8 +2923,8 @@ private fun ConsoleDeckSurface(
     val settingsButton = remember(deckPages) {
         deckPages.flatMap { it.buttons }.firstOrNull { buttonAppAction(it) == DeckActionType.Settings }
     }
-    val swipeModifier = Modifier.multiTouchPageSwipe(
-        enabled = multiTouchPageSwipe,
+    val swipeModifier = Modifier.pageSwipeGesture(
+        mode = pageSwipeMode,
         axis = PageSwipeAxis.Horizontal,
         onPageSwipe = onPageSwipe
     )
@@ -3374,13 +3435,13 @@ private fun PageDot(active: Boolean) {
     )
 }
 
-private fun Modifier.multiTouchPageSwipe(
-    enabled: Boolean,
+private fun Modifier.pageSwipeGesture(
+    mode: PageSwipeMode,
     axis: PageSwipeAxis,
     onPageSwipe: (Int) -> Unit
 ): Modifier {
-    if (!enabled) return this
-    return pointerInput(axis) {
+    if (mode == PageSwipeMode.Disabled) return this
+    return pointerInput(axis, mode) {
         awaitPointerEventScope {
             var tracking = false
             var previousCentroid: Offset? = null
@@ -3393,7 +3454,7 @@ private fun Modifier.multiTouchPageSwipe(
                 val pressed = event.changes.filter { it.pressed }
                 if (pressed.isNotEmpty()) {
                     maxPointerCount = maxOf(maxPointerCount, pressed.size)
-                    if (pressed.size >= 2 || multiTouchActive) {
+                    if (mode == PageSwipeMode.MultiTouch && (pressed.size >= 2 || multiTouchActive)) {
                         multiTouchActive = true
                         event.changes.forEach { if (it.pressed) it.consume() }
                     }
@@ -3408,8 +3469,22 @@ private fun Modifier.multiTouchPageSwipe(
                         previousCentroid?.let { totalDrag += centroid - it }
                         previousCentroid = centroid
                     }
+                    val singleTouchSwipeStarted = mode == PageSwipeMode.SingleTouch &&
+                        maxPointerCount == 1 &&
+                        when (axis) {
+                            PageSwipeAxis.Horizontal -> abs(totalDrag.x) > 24f && abs(totalDrag.x) > abs(totalDrag.y)
+                            PageSwipeAxis.Vertical -> abs(totalDrag.y) > 24f && abs(totalDrag.y) > abs(totalDrag.x)
+                        }
+                    if (singleTouchSwipeStarted) {
+                        event.changes.forEach { if (it.pressed) it.consume() }
+                    }
                 } else if (tracking) {
-                    if (multiTouchActive && maxPointerCount in 2..3) {
+                    val validSwipe = when (mode) {
+                        PageSwipeMode.Disabled -> false
+                        PageSwipeMode.SingleTouch -> maxPointerCount == 1
+                        PageSwipeMode.MultiTouch -> multiTouchActive && maxPointerCount in 2..3
+                    }
+                    if (validSwipe) {
                         event.changes.forEach { it.consume() }
                         val threshold = 80f
                         var pageDelta = 0
@@ -3427,7 +3502,7 @@ private fun Modifier.multiTouchPageSwipe(
                         }
                         Log.d(
                             "MobileDeckGesture",
-                            "pageSwipe axis=$axis pointers=$maxPointerCount drag=${totalDrag.x},${totalDrag.y} delta=$pageDelta"
+                            "pageSwipe mode=$mode axis=$axis pointers=$maxPointerCount drag=${totalDrag.x},${totalDrag.y} delta=$pageDelta"
                         )
                         if (pageDelta != 0) onPageSwipe(pageDelta)
                     }
@@ -5195,12 +5270,23 @@ private fun savePageSwipeAxis(context: Context, axis: PageSwipeAxis) {
     context.deckPrefs().edit().putString(PREF_PAGE_SWIPE_AXIS, axis.name).apply()
 }
 
-private fun loadMultiTouchPageSwipe(context: Context): Boolean {
-    return context.deckPrefs().getBoolean(PREF_MULTI_TOUCH_PAGE_SWIPE, true)
+private fun loadPageSwipeMode(context: Context): PageSwipeMode {
+    return runCatching {
+        PageSwipeMode.valueOf(context.deckPrefs().getString(PREF_PAGE_SWIPE_MODE, null) ?: "")
+    }.getOrElse {
+        if (context.deckPrefs().getBoolean(PREF_MULTI_TOUCH_PAGE_SWIPE, true)) {
+            PageSwipeMode.MultiTouch
+        } else {
+            PageSwipeMode.Disabled
+        }
+    }
 }
 
-private fun saveMultiTouchPageSwipe(context: Context, enabled: Boolean) {
-    context.deckPrefs().edit().putBoolean(PREF_MULTI_TOUCH_PAGE_SWIPE, enabled).apply()
+private fun savePageSwipeMode(context: Context, mode: PageSwipeMode) {
+    context.deckPrefs().edit()
+        .putString(PREF_PAGE_SWIPE_MODE, mode.name)
+        .putBoolean(PREF_MULTI_TOUCH_PAGE_SWIPE, mode == PageSwipeMode.MultiTouch)
+        .apply()
 }
 
 private fun loadPageSwipeAnimation(context: Context): Boolean {
@@ -5358,6 +5444,7 @@ private const val PREF_COLUMNS = "columns"
 private const val PREF_ROWS = "rows"
 private const val PREF_SPACING = "spacing"
 private const val PREF_PAGE_SWIPE_AXIS = "page_swipe_axis"
+private const val PREF_PAGE_SWIPE_MODE = "page_swipe_mode"
 private const val PREF_MULTI_TOUCH_PAGE_SWIPE = "multi_touch_page_swipe"
 private const val PREF_PAGE_SWIPE_ANIMATION = "page_swipe_animation"
 private const val PREF_INFINITE_PAGE_SWIPE = "infinite_page_swipe"

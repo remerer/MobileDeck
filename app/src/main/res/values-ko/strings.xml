@@ -20,6 +20,8 @@
     <string name="settings_console_horizontal_desc">콘솔 UI는 좌측 사이드바를 고정하고 버튼 영역만 가로로 전환합니다.</string>
     <string name="settings_page_direction">페이지 방향</string>
     <string name="settings_page_direction_desc">덱 페이지 이동 방향을 설정합니다.</string>
+    <string name="settings_page_swipe_mode">페이지 전환 제스처</string>
+    <string name="settings_page_swipe_mode_desc">한손가락 슬라이드, 멀티터치 슬라이드, 버튼으로만 전환 중 선택합니다.</string>
     <string name="settings_multitouch">멀티터치 페이지 전환</string>
     <string name="settings_multitouch_desc">스와이프 제스처로 페이지를 전환합니다.</string>
     <string name="settings_page_wrap">페이지 순환 전환</string>
@@ -37,6 +39,9 @@
     <string name="page_axis_horizontal_short">가로</string>
     <string name="page_axis_vertical">세로 페이지</string>
     <string name="page_axis_vertical_short">세로</string>
+    <string name="page_swipe_mode_disabled">버튼으로만</string>
+    <string name="page_swipe_mode_single">한손가락</string>
+    <string name="page_swipe_mode_multi">멀티터치</string>
     <string name="multi_touch_swipe_on">멀티터치 페이지 전환 켜짐</string>
     <string name="multi_touch_swipe_off">멀티터치 페이지 전환 꺼짐</string>
     <string name="page_wrap_on">페이지 순환 전환 켜짐</string>

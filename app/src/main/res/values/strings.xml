@@ -20,6 +20,8 @@
     <string name="settings_console_horizontal_desc">Console UI keeps the left sidebar fixed and pages only the button area horizontally.</string>
     <string name="settings_page_direction">Page direction</string>
     <string name="settings_page_direction_desc">Set the deck page swipe direction.</string>
+    <string name="settings_page_swipe_mode">Page change gesture</string>
+    <string name="settings_page_swipe_mode_desc">Choose one-finger swipe, multi-touch swipe, or button-only page changes.</string>
     <string name="settings_multitouch">Multi-touch page swipe</string>
     <string name="settings_multitouch_desc">Use a swipe gesture to change pages.</string>
     <string name="settings_page_wrap">Loop page swipe</string>
@@ -37,6 +39,9 @@
     <string name="page_axis_horizontal_short">Horizontal</string>
     <string name="page_axis_vertical">Vertical pages</string>
     <string name="page_axis_vertical_short">Vertical</string>
+    <string name="page_swipe_mode_disabled">Buttons only</string>
+    <string name="page_swipe_mode_single">One finger</string>
+    <string name="page_swipe_mode_multi">Multi-touch</string>
     <string name="multi_touch_swipe_on">Multi-touch page swipe on</string>
     <string name="multi_touch_swipe_off">Multi-touch page swipe off</string>
     <string name="page_wrap_on">Loop page swipe on</string>
