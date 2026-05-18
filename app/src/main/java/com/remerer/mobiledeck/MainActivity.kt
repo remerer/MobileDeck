@@ -1650,10 +1650,12 @@ private fun ConsoleDeckSurface(
     onButtonTouchEnded: () -> Unit
 ) {
     val settingsButton = buttons.firstOrNull { buttonAppAction(it) == DeckActionType.Settings }
-    val consoleButtons = remember(buttons, columns, rows) {
-        buttons
-            .filterNot { buttonAppAction(it) == DeckActionType.Settings }
-            .mapIndexed { index, button -> button.copy(position = index) }
+    val consoleRows = remember(buttons, columns, rows) {
+        consoleButtonRows(
+            buttons = buttons.filterNot { buttonAppAction(it) == DeckActionType.Settings },
+            columns = columns,
+            rows = rows
+        )
     }
     Box(
         modifier = modifier
@@ -1689,35 +1691,95 @@ private fun ConsoleDeckSurface(
             ) {
                 val density = LocalDensity.current
                 val consoleSpacing = maxOf(spacing, 10.dp)
-                val cellSize = with(density) {
+                val rowHeight = with(density) {
                     val spacingPx = consoleSpacing.toPx()
-                    val maxCellWidth = (constraints.maxWidth - spacingPx * (columns - 1)) / columns
-                    val maxCellHeight = (constraints.maxHeight - spacingPx * (rows - 1)) / rows
-                    minOf(maxCellWidth, maxCellHeight).toDp()
+                    ((constraints.maxHeight - spacingPx * (rows - 1).coerceAtLeast(0)) / rows.coerceAtLeast(1)).toDp()
                 }
-                ButtonGrid(
+                ConsoleButtonRows(
                     modifier = Modifier.fillMaxSize(),
-                    buttons = consoleButtons,
-                    columns = columns,
-                    rows = rows,
-                    cellSize = cellSize,
+                    rows = consoleRows,
+                    rowHeight = rowHeight,
                     spacing = consoleSpacing,
                     status = status,
                     appWidgetHost = appWidgetHost,
                     appWidgetManager = appWidgetManager,
-                    visualMode = DeckUiMode.Console,
-                    previewMode = false,
-                    showTitle = false,
                     onButtonPressed = onButtonPressed,
                     onButtonTouchStarted = onButtonTouchStarted,
-                    onButtonTouchEnded = onButtonTouchEnded,
-                    onButtonEdit = {},
-                    onButtonMoved = { _, _ -> },
-                    onEmptySlotPressed = {}
+                    onButtonTouchEnded = onButtonTouchEnded
                 )
             }
         }
     }
+}
+
+@Composable
+private fun ConsoleButtonRows(
+    modifier: Modifier = Modifier,
+    rows: List<List<DeckButton>>,
+    rowHeight: Dp,
+    spacing: Dp,
+    status: HidStatus,
+    appWidgetHost: AppWidgetHost,
+    appWidgetManager: AppWidgetManager,
+    onButtonPressed: (DeckButton) -> Unit,
+    onButtonTouchStarted: () -> Unit,
+    onButtonTouchEnded: () -> Unit
+) {
+    Column(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(spacing)
+    ) {
+        rows.forEach { rowButtons ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(rowHeight)
+                    .weight(1f),
+                horizontalArrangement = Arrangement.spacedBy(spacing)
+            ) {
+                rowButtons.forEach { button ->
+                    DeckKey(
+                        modifier = Modifier
+                            .weight(button.spanColumns.coerceAtLeast(1).toFloat())
+                            .fillMaxHeight(),
+                        button = button,
+                        status = status,
+                        appWidgetHost = appWidgetHost,
+                        appWidgetManager = appWidgetManager,
+                        visualMode = DeckUiMode.Console,
+                        enabled = true,
+                        previewMode = false,
+                        columns = rowButtons.size.coerceAtLeast(1),
+                        slot = button.position,
+                        cellSize = rowHeight,
+                        spacing = spacing,
+                        onPressed = { onButtonPressed(button) },
+                        onPressFeedback = onButtonTouchStarted,
+                        onReleaseFeedback = onButtonTouchEnded,
+                        onEdit = {},
+                        onMove = {}
+                    )
+                }
+            }
+        }
+    }
+}
+
+private fun consoleButtonRows(
+    buttons: List<DeckButton>,
+    columns: Int,
+    rows: Int
+): List<List<DeckButton>> {
+    val safeColumns = columns.coerceAtLeast(1)
+    val safeRows = rows.coerceAtLeast(1)
+    val buckets = List(safeRows) { mutableListOf<DeckButton>() }
+    buttons
+        .sortedWith(compareBy<DeckButton> { it.position / safeColumns }.thenBy { it.position % safeColumns })
+        .forEach { button ->
+            val rowIndex = (button.position / safeColumns).coerceIn(0, safeRows - 1)
+            buckets[rowIndex].add(button)
+        }
+    return buckets.map { it.toList() }
 }
 
 @Composable
