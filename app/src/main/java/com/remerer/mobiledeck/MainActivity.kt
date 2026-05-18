@@ -1679,7 +1679,7 @@ private fun ConsoleDeckSurface(
         ) {
             ConsoleSidebar(
                 modifier = Modifier
-                    .width(220.dp)
+                    .width(160.dp)
                     .fillMaxHeight(),
                 status = status,
                 onSettings = { settingsButton?.let(onButtonPressed) }
@@ -1693,7 +1693,8 @@ private fun ConsoleDeckSurface(
                 val consoleSpacing = maxOf(spacing, 10.dp)
                 val rowHeight = with(density) {
                     val spacingPx = consoleSpacing.toPx()
-                    ((constraints.maxHeight - spacingPx * (rows - 1).coerceAtLeast(0)) / rows.coerceAtLeast(1)).toDp()
+                    val rowCount = consoleRows.size.coerceAtLeast(1)
+                    ((constraints.maxHeight - spacingPx * (rowCount - 1)) / rowCount).toDp()
                 }
                 ConsoleButtonRows(
                     modifier = Modifier.fillMaxSize(),
@@ -1770,16 +1771,54 @@ private fun consoleButtonRows(
     columns: Int,
     rows: Int
 ): List<List<DeckButton>> {
-    val safeColumns = columns.coerceAtLeast(1)
-    val safeRows = rows.coerceAtLeast(1)
-    val buckets = List(safeRows) { mutableListOf<DeckButton>() }
-    buttons
-        .sortedWith(compareBy<DeckButton> { it.position / safeColumns }.thenBy { it.position % safeColumns })
-        .forEach { button ->
-            val rowIndex = (button.position / safeColumns).coerceIn(0, safeRows - 1)
-            buckets[rowIndex].add(button)
+    val media = buttons
+        .filter {
+            it.actionType == DeckActionType.MediaKey ||
+                buttonAppAction(it) == DeckActionType.PreviousPage ||
+                buttonAppAction(it) == DeckActionType.NextPage
         }
-    return buckets.map { it.toList() }
+        .sortedBy { consoleMediaOrder(it) }
+    val prominent = buttons
+        .filter {
+            it.spanColumns > 1 ||
+                it.appWidgetId != INVALID_APP_WIDGET_ID ||
+                it.actionType == DeckActionType.Utility ||
+                it.iconImageUri.isNotBlank()
+        }
+        .sortedBy { it.position }
+    val system = buttons
+        .filter { buttonAppAction(it) == DeckActionType.BluetoothStatus }
+        .sortedBy { it.position }
+    val usedIds = (media + prominent + system).map { it.id }.toSet()
+    val regular = buttons
+        .filterNot { it.id in usedIds }
+        .sortedBy { it.position }
+
+    val bottom = (prominent + system).distinctBy { it.id }
+    val rowsList = buildList {
+        add(media)
+        add(regular)
+        add(bottom)
+    }.filter { it.isNotEmpty() }
+
+    return if (rowsList.isEmpty()) {
+        List(rows.coerceAtLeast(1)) { emptyList() }
+    } else {
+        rowsList
+    }
+}
+
+private fun consoleMediaOrder(button: DeckButton): Int {
+    val appAction = buttonAppAction(button)
+    return when {
+        button.actionType == DeckActionType.MediaKey && button.payload == MEDIA_PLAY_PAUSE -> 0
+        appAction == DeckActionType.PreviousPage || button.payload == MEDIA_PREVIOUS -> 1
+        appAction == DeckActionType.NextPage || button.payload == MEDIA_NEXT -> 2
+        button.actionType == DeckActionType.MediaKey && button.payload == MEDIA_VOLUME_UP -> 3
+        button.actionType == DeckActionType.MediaKey && button.payload == MEDIA_MUTE -> 4
+        button.actionType == DeckActionType.MediaKey && button.payload == MEDIA_VOLUME_DOWN -> 5
+        else -> 10 + button.position
+    }
 }
 
 @Composable
@@ -1795,10 +1834,10 @@ private fun ConsoleSidebar(
         tonalElevation = 0.dp
     ) {
         Column(
-            modifier = Modifier.padding(18.dp),
+            modifier = Modifier.padding(14.dp),
             verticalArrangement = Arrangement.SpaceBetween
         ) {
-            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(
                     text = "☰",
                     style = MaterialTheme.typography.headlineSmall,
@@ -1806,7 +1845,7 @@ private fun ConsoleSidebar(
                 )
                 Text(
                     text = stringResource(R.string.deck_title),
-                    style = MaterialTheme.typography.headlineLarge,
+                    style = MaterialTheme.typography.headlineMedium,
                     fontWeight = FontWeight.Bold,
                     color = Color.White,
                     maxLines = 2
@@ -1835,10 +1874,10 @@ private fun ConsoleSidebar(
                     overflow = TextOverflow.Ellipsis
                 )
             }
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
                     text = currentTimeText(),
-                    style = MaterialTheme.typography.titleLarge,
+                    style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                     color = Color.White
                 )
@@ -2263,7 +2302,7 @@ private fun DeckKey(
         tonalElevation = if (isConsole) 0.dp else 2.dp,
         color = containerColor
     ) {
-        val showText = cellSize >= 96.dp
+    val showText = if (isConsole) cellSize >= 58.dp else cellSize >= 96.dp
         val showSubtitle = showText
         if (hasWidget) {
             Box(modifier = Modifier.fillMaxSize()) {
@@ -2334,7 +2373,7 @@ private fun DeckKey(
                         large = button.displayMode == DeckDisplayMode.IconOnly || !showText
                     )
                 }
-                if (button.displayMode == DeckDisplayMode.IconAndText && showText) {
+                if ((button.displayMode == DeckDisplayMode.IconAndText || isConsole) && showText) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(5.dp)
