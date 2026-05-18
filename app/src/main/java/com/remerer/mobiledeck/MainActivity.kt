@@ -50,6 +50,8 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -69,6 +71,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -81,26 +84,37 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Apps
+import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Bluetooth
 import androidx.compose.material.icons.filled.Code
+import androidx.compose.material.icons.filled.GridView
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Keyboard
+import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.TextFields
+import androidx.compose.material.icons.filled.TouchApp
 import androidx.compose.material.icons.filled.Videocam
+import androidx.compose.material.icons.filled.Vibration
 import androidx.compose.material.icons.filled.VolumeDown
 import androidx.compose.material.icons.filled.VolumeOff
 import androidx.compose.material.icons.filled.VolumeUp
@@ -136,6 +150,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.viewinterop.AndroidView
 import com.remerer.mobiledeck.ui.theme.MobileDeckTheme
@@ -933,92 +948,57 @@ private fun SettingsPage(
     onAddButton: () -> Unit,
     onAddPage: () -> Unit
 ) {
-    val isConsoleMode = deckUiMode == DeckUiMode.Console
-    LazyColumn(
-        modifier = if (isConsoleMode) {
-            modifier.background(
+    Row(
+        modifier = modifier
+            .fillMaxSize()
+            .background(
                 Brush.linearGradient(
                     listOf(
-                        Color(0xFF071018),
-                        Color(0xFF101D29),
-                        Color(0xFF050A0F)
+                        Color(0xFF050A10),
+                        Color(0xFF0D1721),
+                        Color(0xFF06111A)
                     )
                 )
             )
-        } else {
-            modifier
-        },
-        contentPadding = PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        item {
-            UiModeToggle(
-                deckUiMode = deckUiMode,
-                consoleStyle = isConsoleMode,
-                onDeckUiModeChange = onDeckUiModeChange
-            )
-        }
-
-        item {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column {
-                    Text(
-                        text = stringResource(R.string.settings_title),
-                        style = MaterialTheme.typography.headlineMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = if (isConsoleMode) Color.White else MaterialTheme.colorScheme.onSurface
-                    )
-                    Text(
-                        text = stringResource(if (isConsoleMode) R.string.console_settings_subtitle else R.string.settings_subtitle),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = if (isConsoleMode) Color.White.copy(alpha = 0.66f) else MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                OutlinedButton(
-                    shape = RoundedCornerShape(8.dp),
-                    onClick = onBack
-                ) {
-                    Text(stringResource(R.string.deck))
-                }
-                OutlinedButton(
-                    shape = RoundedCornerShape(8.dp),
-                    onClick = if (isConsoleMode) onConsoleLayoutEditor else onLayoutEditor
-                ) {
-                    Text(stringResource(if (isConsoleMode) R.string.console_layout_editor else R.string.layout_editor))
-                }
-            }
-        }
-
-        item {
-            Header(
-                status = status,
-                consoleStyle = isConsoleMode,
-                onStart = onStart,
-                onStop = onStop,
-                onMakeDiscoverable = onMakeDiscoverable,
-                pairedHosts = pairedHosts,
-                onRefreshHosts = onRefreshHosts,
-                onConnectHost = onConnectHost
-            )
-        }
-
-        item {
-            if (isConsoleMode) {
-                ConsoleSettingsPanel(
+        SettingsSidebar(
+            modifier = Modifier
+                .width(300.dp)
+                .fillMaxHeight(),
+            status = status,
+            deckUiMode = deckUiMode,
+            pairedHosts = pairedHosts,
+            onBack = onBack,
+            onDeckUiModeChange = onDeckUiModeChange,
+            onStart = onStart,
+            onStop = onStop,
+            onMakeDiscoverable = onMakeDiscoverable,
+            onRefreshHosts = onRefreshHosts,
+            onConnectHost = onConnectHost
+        )
+        AnimatedContent(
+            targetState = deckUiMode,
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxHeight(),
+            transitionSpec = {
+                val direction = if (targetState == DeckUiMode.Console) 1 else -1
+                slideInHorizontally { width -> direction * width } togetherWith
+                    slideOutHorizontally { width -> -direction * width }
+            },
+            label = "settingsMode"
+        ) { mode ->
+            if (mode == DeckUiMode.Console) {
+                ConsoleSettingsContent(
                     deckPages = deckPages,
                     activePageId = activePageId,
-                    pageSwipeAxis = pageSwipeAxis,
                     multiTouchPageSwipe = multiTouchPageSwipe,
                     pageSwipeAnimation = pageSwipeAnimation,
                     infinitePageSwipe = infinitePageSwipe,
                     buttonVibrationLevel = buttonVibrationLevel,
                     pageName = pageName,
                     pageCount = pageCount,
-                    onPageSwipeAxisChange = onPageSwipeAxisChange,
+                    logs = logs,
                     onMultiTouchPageSwipeChange = onMultiTouchPageSwipeChange,
                     onPageSwipeAnimationChange = onPageSwipeAnimationChange,
                     onInfinitePageSwipeChange = onInfinitePageSwipeChange,
@@ -1027,9 +1007,11 @@ private fun SettingsPage(
                     onAddPage = onAddPage
                 )
             } else {
-                DeckSettingsPanel(
+                ClassicSettingsContent(
                     deckPages = deckPages,
                     activePageId = activePageId,
+                    columns = columns,
+                    rows = rows,
                     pageSwipeAxis = pageSwipeAxis,
                     multiTouchPageSwipe = multiTouchPageSwipe,
                     pageSwipeAnimation = pageSwipeAnimation,
@@ -1037,58 +1019,961 @@ private fun SettingsPage(
                     buttonVibrationLevel = buttonVibrationLevel,
                     pageName = pageName,
                     pageCount = pageCount,
+                    logs = logs,
                     onPageSwipeAxisChange = onPageSwipeAxisChange,
                     onMultiTouchPageSwipeChange = onMultiTouchPageSwipeChange,
                     onPageSwipeAnimationChange = onPageSwipeAnimationChange,
                     onInfinitePageSwipeChange = onInfinitePageSwipeChange,
                     onButtonVibrationLevelChange = onButtonVibrationLevelChange,
-                    onAddPage = onAddPage,
+                    onLayoutEditor = onLayoutEditor,
+                    onAddPage = onAddPage
                 )
             }
         }
+    }
+}
 
-        item {
-            DiagnosticsPanel(logs = logs, consoleStyle = isConsoleMode)
+@Composable
+private fun SettingsSidebar(
+    modifier: Modifier = Modifier,
+    status: HidStatus,
+    deckUiMode: DeckUiMode,
+    pairedHosts: List<PairedHidHost>,
+    onBack: () -> Unit,
+    onDeckUiModeChange: (DeckUiMode) -> Unit,
+    onStart: () -> Unit,
+    onStop: () -> Unit,
+    onMakeDiscoverable: () -> Unit,
+    onRefreshHosts: () -> Unit,
+    onConnectHost: (PairedHidHost) -> Unit
+) {
+    Column(
+        modifier = modifier
+            .background(Color(0xFF071018).copy(alpha = 0.92f))
+            .border(1.dp, Color.White.copy(alpha = 0.08f))
+            .verticalScroll(rememberScrollState())
+            .padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(
+                text = stringResource(R.string.app_name),
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+                color = Color.White
+            )
+            IconButton(onClick = onBack) {
+                Icon(
+                    imageVector = Icons.Filled.ArrowBack,
+                    contentDescription = stringResource(R.string.settings_back_to_deck),
+                    tint = Color.White
+                )
+            }
         }
+        UiModeToggle(
+            deckUiMode = deckUiMode,
+            onDeckUiModeChange = onDeckUiModeChange
+        )
+        Text(
+            text = stringResource(R.string.settings_title),
+            style = MaterialTheme.typography.headlineSmall,
+            fontWeight = FontWeight.Bold,
+            color = Color.White,
+            modifier = Modifier.padding(top = 8.dp)
+        )
+        Text(
+            text = stringResource(R.string.settings_subtitle),
+            style = MaterialTheme.typography.bodySmall,
+            color = Color.White.copy(alpha = 0.62f)
+        )
+        SidebarStatusCard(status)
+        SidebarActionCard(
+            icon = Icons.Filled.Bluetooth,
+            title = stringResource(R.string.register_hid),
+            subtitle = stringResource(R.string.settings_register_hid_desc),
+            highlighted = true,
+            onClick = onStart
+        )
+        SidebarActionCard(
+            icon = Icons.Filled.Stop,
+            title = stringResource(R.string.stop),
+            subtitle = stringResource(R.string.settings_stop_hid_desc),
+            onClick = onStop
+        )
+        SidebarActionCard(
+            icon = Icons.Filled.Search,
+            title = stringResource(R.string.make_discoverable),
+            subtitle = stringResource(R.string.settings_discoverable_desc),
+            trailing = {
+                Text(
+                    text = stringResource(R.string.refresh),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color(0xFF67D7FF)
+                )
+            },
+            onClick = onMakeDiscoverable
+        )
+        PairedHostsCard(
+            pairedHosts = pairedHosts,
+            onRefreshHosts = onRefreshHosts,
+            onConnectHost = onConnectHost
+        )
+        Spacer(Modifier.height(4.dp))
+        SidebarActionCard(
+            icon = Icons.Filled.Info,
+            title = stringResource(R.string.settings_app_info),
+            subtitle = stringResource(R.string.settings_app_info_desc),
+            enabled = false,
+            onClick = {}
+        )
     }
 }
 
 @Composable
 private fun UiModeToggle(
     deckUiMode: DeckUiMode,
-    consoleStyle: Boolean,
     onDeckUiModeChange: (DeckUiMode) -> Unit
 ) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    BoxWithConstraints(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(42.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .background(Color(0xFF101B25))
+            .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(8.dp))
     ) {
-        DeckUiMode.values().forEach { mode ->
-            val selected = deckUiMode == mode
-            val background = when {
-                selected && consoleStyle -> Color(0xFF2D75D6)
-                selected -> MaterialTheme.colorScheme.primary
-                consoleStyle -> Color.White.copy(alpha = 0.08f)
-                else -> MaterialTheme.colorScheme.surfaceVariant
+        val selectedIndex = if (deckUiMode == DeckUiMode.Console) 1f else 0f
+        val offsetIndex by animateFloatAsState(selectedIndex, label = "settingsModeToggle")
+        Box(
+            modifier = Modifier
+                .fillMaxHeight()
+                .fillMaxWidth(0.5f)
+                .offset { IntOffset((constraints.maxWidth * 0.5f * offsetIndex).roundToInt(), 0) }
+                .padding(3.dp)
+                .clip(RoundedCornerShape(7.dp))
+                .background(
+                    Brush.linearGradient(
+                        listOf(Color(0xFF0574D8), Color(0xFF11B9FF))
+                    )
+                )
+                .border(1.dp, Color(0xFF6DDBFF), RoundedCornerShape(7.dp))
+        )
+        Row(Modifier.fillMaxSize()) {
+            DeckUiMode.values().forEach { mode ->
+                Surface(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight(),
+                    color = Color.Transparent,
+                    contentColor = Color.White,
+                    onClick = { onDeckUiModeChange(mode) }
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Text(
+                            text = stringResource(mode.labelRes),
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.SemiBold,
+                            color = if (deckUiMode == mode) Color.White else Color.White.copy(alpha = 0.62f),
+                            textAlign = TextAlign.Center
+                        )
+                    }
+                }
             }
-            val foreground = if (selected || consoleStyle) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
-            Surface(
+        }
+    }
+}
+
+@Composable
+private fun SidebarStatusCard(status: HidStatus) {
+    SettingsCard {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(
+                modifier = Modifier.weight(1f),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                SettingsIconTile(Icons.Filled.Bluetooth, Color(0xFF0EA5FF))
+                Text(
+                    text = stringResource(R.string.settings_hid_management),
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Color.White,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            SettingsStatusBadge(status.state)
+        }
+        Text(
+            text = localizedStatusMessage(status.message),
+            style = MaterialTheme.typography.bodySmall,
+            color = Color.White.copy(alpha = 0.58f),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+    }
+}
+
+@Composable
+private fun SettingsStatusBadge(state: HidConnectionState) {
+    val color = statusDotColor(state)
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(999.dp))
+            .background(color.copy(alpha = 0.18f))
+            .padding(horizontal = 8.dp, vertical = 5.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(5.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(7.dp)
+                .clip(CircleShape)
+                .background(color)
+        )
+        Text(
+            text = stringResource(state.labelRes()),
+            style = MaterialTheme.typography.labelSmall,
+            color = color,
+            maxLines = 1
+        )
+    }
+}
+
+@Composable
+private fun SidebarActionCard(
+    icon: ImageVector,
+    title: String,
+    subtitle: String,
+    modifier: Modifier = Modifier,
+    highlighted: Boolean = false,
+    enabled: Boolean = true,
+    trailing: (@Composable () -> Unit)? = null,
+    onClick: () -> Unit
+) {
+    val background = if (highlighted) {
+        Brush.linearGradient(listOf(Color(0xFF004B78), Color(0xFF0078D7)))
+    } else {
+        Brush.linearGradient(listOf(Color(0xFF111D27), Color(0xFF0D1720)))
+    }
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        color = Color.Transparent,
+        contentColor = Color.White,
+        shape = RoundedCornerShape(8.dp),
+        enabled = enabled,
+        onClick = onClick
+    ) {
+        Row(
+            modifier = Modifier
+                .background(background)
+                .border(1.dp, Color.White.copy(alpha = if (highlighted) 0.16f else 0.08f), RoundedCornerShape(8.dp))
+                .padding(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            SettingsIconTile(icon, if (highlighted) Color(0xFF13B8FF) else Color(0xFF233342))
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Color.White
+                )
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color.White.copy(alpha = 0.62f),
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            trailing?.invoke()
+        }
+    }
+}
+
+@Composable
+private fun PairedHostsCard(
+    pairedHosts: List<PairedHidHost>,
+    onRefreshHosts: () -> Unit,
+    onConnectHost: (PairedHidHost) -> Unit
+) {
+    SettingsCard {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            SettingsIconTile(Icons.Filled.Link, Color(0xFF0B98C9))
+            Text(
+                text = stringResource(R.string.paired_hosts),
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                color = Color.White
+            )
+            TextButton(onClick = onRefreshHosts) {
+                Text(stringResource(R.string.refresh), color = Color(0xFF67D7FF))
+            }
+        }
+        if (pairedHosts.isEmpty()) {
+            Text(
+                text = stringResource(R.string.no_paired_hosts),
+                style = MaterialTheme.typography.bodySmall,
+                color = Color.White.copy(alpha = 0.62f)
+            )
+        } else {
+            pairedHosts.take(3).forEach { host ->
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    color = Color.White.copy(alpha = 0.04f),
+                    shape = RoundedCornerShape(6.dp),
+                    onClick = { onConnectHost(host) }
+                ) {
+                    Text(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                        text = host.name,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color.White,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ClassicSettingsContent(
+    deckPages: List<DeckPageConfig>,
+    activePageId: Int,
+    columns: Int,
+    rows: Int,
+    pageSwipeAxis: PageSwipeAxis,
+    multiTouchPageSwipe: Boolean,
+    pageSwipeAnimation: Boolean,
+    infinitePageSwipe: Boolean,
+    buttonVibrationLevel: ButtonVibrationLevel,
+    pageName: String,
+    pageCount: Int,
+    logs: List<ActivityLog>,
+    onPageSwipeAxisChange: (PageSwipeAxis) -> Unit,
+    onMultiTouchPageSwipeChange: (Boolean) -> Unit,
+    onPageSwipeAnimationChange: (Boolean) -> Unit,
+    onInfinitePageSwipeChange: (Boolean) -> Unit,
+    onButtonVibrationLevelChange: (ButtonVibrationLevel) -> Unit,
+    onLayoutEditor: () -> Unit,
+    onAddPage: () -> Unit
+) {
+    SettingsDetailContent(
+        accent = Color(0xFF9B5DE5),
+        icon = Icons.Filled.GridView,
+        title = stringResource(R.string.settings_classic_header),
+        subtitle = stringResource(R.string.settings_classic_subtitle)
+    ) {
+        item {
+            SettingsPreviewCard(title = stringResource(R.string.settings_layout_preview)) {
+                ClassicSettingsPreview()
+            }
+        }
+        item {
+            SettingRow(
+                icon = Icons.Filled.GridView,
+                iconColor = Color(0xFF9B5DE5),
+                title = stringResource(R.string.layout_editor),
+                subtitle = stringResource(R.string.settings_classic_layout_desc),
+                trailing = {
+                    TextButton(onClick = onLayoutEditor) {
+                        Text(stringResource(R.string.layout_editor), color = Color(0xFF67D7FF))
+                    }
+                }
+            )
+        }
+        item {
+            SettingRow(
+                icon = Icons.Filled.SwapHoriz,
+                iconColor = Color(0xFF9B5DE5),
+                title = stringResource(R.string.settings_page_direction),
+                subtitle = stringResource(R.string.settings_page_direction_desc),
+                trailing = {
+                    SettingsSegmentedControl(
+                        options = PageSwipeAxis.values().toList(),
+                        selected = pageSwipeAxis,
+                        label = { stringResource(it.shortLabelRes) },
+                        onSelected = onPageSwipeAxisChange
+                    )
+                }
+            )
+        }
+        item {
+            SettingsSwitchRow(
+                icon = Icons.Filled.TouchApp,
+                iconColor = Color(0xFF00B8A9),
+                title = stringResource(R.string.settings_multitouch),
+                subtitle = stringResource(R.string.settings_multitouch_desc),
+                checked = multiTouchPageSwipe,
+                onCheckedChange = onMultiTouchPageSwipeChange
+            )
+        }
+        item {
+            SettingsSwitchRow(
+                icon = Icons.Filled.Refresh,
+                iconColor = Color(0xFF78B83B),
+                title = stringResource(R.string.settings_page_wrap),
+                subtitle = stringResource(R.string.settings_page_wrap_desc),
+                checked = infinitePageSwipe,
+                onCheckedChange = onInfinitePageSwipeChange
+            )
+        }
+        item {
+            SettingsSwitchRow(
+                icon = Icons.Filled.PlayArrow,
+                iconColor = Color(0xFFE47B17),
+                title = stringResource(R.string.settings_page_animation),
+                subtitle = stringResource(R.string.settings_page_animation_desc),
+                checked = pageSwipeAnimation,
+                onCheckedChange = onPageSwipeAnimationChange
+            )
+        }
+        item {
+            VibrationSettingRow(
+                buttonVibrationLevel = buttonVibrationLevel,
+                onButtonVibrationLevelChange = onButtonVibrationLevelChange
+            )
+        }
+        item {
+            PageSummaryRow(
+                pageName = pageName,
+                pageCount = pageCount,
+                activeIndex = deckPages.indexOfFirst { it.id == activePageId }.coerceAtLeast(0),
+                columns = columns,
+                rows = rows,
+                onAddPage = onAddPage
+            )
+        }
+        item {
+            SettingsDiagnosticsCard(logs)
+        }
+    }
+}
+
+@Composable
+private fun ConsoleSettingsContent(
+    deckPages: List<DeckPageConfig>,
+    activePageId: Int,
+    multiTouchPageSwipe: Boolean,
+    pageSwipeAnimation: Boolean,
+    infinitePageSwipe: Boolean,
+    buttonVibrationLevel: ButtonVibrationLevel,
+    pageName: String,
+    pageCount: Int,
+    logs: List<ActivityLog>,
+    onMultiTouchPageSwipeChange: (Boolean) -> Unit,
+    onPageSwipeAnimationChange: (Boolean) -> Unit,
+    onInfinitePageSwipeChange: (Boolean) -> Unit,
+    onButtonVibrationLevelChange: (ButtonVibrationLevel) -> Unit,
+    onConsoleLayoutEditor: () -> Unit,
+    onAddPage: () -> Unit
+) {
+    SettingsDetailContent(
+        accent = Color(0xFF00A6E7),
+        icon = Icons.Filled.Settings,
+        title = stringResource(R.string.console_settings),
+        subtitle = stringResource(R.string.console_settings_subtitle)
+    ) {
+        item {
+            SettingsPreviewCard(title = stringResource(R.string.settings_console_preview)) {
+                ConsoleSettingsPreview()
+            }
+        }
+        item {
+            SettingRow(
+                icon = Icons.Filled.GridView,
+                iconColor = Color(0xFF00A6E7),
+                title = stringResource(R.string.console_layout_editor),
+                subtitle = stringResource(R.string.settings_console_layout_desc),
+                trailing = {
+                    TextButton(onClick = onConsoleLayoutEditor) {
+                        Text(stringResource(R.string.console_layout_editor), color = Color(0xFF67D7FF))
+                    }
+                }
+            )
+        }
+        item {
+            SettingRow(
+                icon = Icons.Filled.SwapHoriz,
+                iconColor = Color(0xFF00A6E7),
+                title = stringResource(R.string.settings_page_direction),
+                subtitle = stringResource(R.string.settings_console_horizontal_desc),
+                trailing = {
+                    SettingsValuePill(text = stringResource(R.string.page_axis_horizontal_short))
+                }
+            )
+        }
+        item {
+            SettingsSwitchRow(
+                icon = Icons.Filled.TouchApp,
+                iconColor = Color(0xFF00B8A9),
+                title = stringResource(R.string.settings_multitouch),
+                subtitle = stringResource(R.string.settings_multitouch_desc),
+                checked = multiTouchPageSwipe,
+                onCheckedChange = onMultiTouchPageSwipeChange
+            )
+        }
+        item {
+            SettingsSwitchRow(
+                icon = Icons.Filled.Refresh,
+                iconColor = Color(0xFF78B83B),
+                title = stringResource(R.string.settings_page_wrap),
+                subtitle = stringResource(R.string.settings_page_wrap_desc),
+                checked = infinitePageSwipe,
+                onCheckedChange = onInfinitePageSwipeChange
+            )
+        }
+        item {
+            SettingsSwitchRow(
+                icon = Icons.Filled.PlayArrow,
+                iconColor = Color(0xFFE47B17),
+                title = stringResource(R.string.settings_page_animation),
+                subtitle = stringResource(R.string.settings_page_animation_desc),
+                checked = pageSwipeAnimation,
+                onCheckedChange = onPageSwipeAnimationChange
+            )
+        }
+        item {
+            VibrationSettingRow(
+                buttonVibrationLevel = buttonVibrationLevel,
+                onButtonVibrationLevelChange = onButtonVibrationLevelChange
+            )
+        }
+        item {
+            PageSummaryRow(
+                pageName = pageName,
+                pageCount = pageCount,
+                activeIndex = deckPages.indexOfFirst { it.id == activePageId }.coerceAtLeast(0),
+                columns = null,
+                rows = null,
+                onAddPage = onAddPage
+            )
+        }
+        item {
+            SettingsDiagnosticsCard(logs)
+        }
+    }
+}
+
+@Composable
+private fun SettingsDetailContent(
+    accent: Color,
+    icon: ImageVector,
+    title: String,
+    subtitle: String,
+    content: LazyListScope.() -> Unit
+) {
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(start = 14.dp, top = 14.dp, end = 14.dp, bottom = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        item {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                SettingsIconTile(icon, accent)
+                Column {
+                    Text(
+                        text = title,
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                    )
+                    Text(
+                        text = subtitle,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color.White.copy(alpha = 0.62f)
+                    )
+                }
+            }
+        }
+        content()
+        item {
+            Text(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 8.dp),
+                text = stringResource(R.string.settings_drag_more),
+                style = MaterialTheme.typography.bodySmall,
+                color = Color.White.copy(alpha = 0.36f),
+                textAlign = TextAlign.Center
+            )
+        }
+    }
+}
+
+@Composable
+private fun SettingsPreviewCard(
+    title: String,
+    content: @Composable () -> Unit
+) {
+    SettingsCard {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = Color.White
+        )
+        content()
+        PageIndicator(
+            modifier = Modifier.fillMaxWidth(),
+            pageCount = 2,
+            activeIndex = 0
+        )
+    }
+}
+
+@Composable
+private fun ClassicSettingsPreview() {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(94.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        listOf(
+            Color(0xFF7B3EB1),
+            Color(0xFF00A6A6),
+            Color(0xFF6FA833),
+            Color(0xFFE47B17),
+            Color(0xFF7B3EB1)
+        ).forEachIndexed { index, color ->
+            Box(
                 modifier = Modifier
                     .weight(1f)
-                    .clip(RoundedCornerShape(999.dp)),
-                color = background,
-                contentColor = foreground,
-                onClick = { onDeckUiModeChange(mode) }
+                    .fillMaxHeight()
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(color),
+                contentAlignment = Alignment.Center
             ) {
-                Text(
-                    modifier = Modifier.padding(vertical = 12.dp),
-                    text = stringResource(mode.labelRes),
-                    textAlign = TextAlign.Center,
-                    style = MaterialTheme.typography.labelLarge,
-                    fontWeight = FontWeight.SemiBold
+                Icon(
+                    imageVector = when (index) {
+                        0 -> Icons.Filled.SwapHoriz
+                        1 -> Icons.Filled.Apps
+                        2 -> Icons.Filled.PlayArrow
+                        3 -> Icons.Filled.Vibration
+                        else -> Icons.Filled.GridView
+                    },
+                    contentDescription = null,
+                    tint = Color.White,
+                    modifier = Modifier.size(28.dp)
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun ConsoleSettingsPreview() {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(116.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .background(Color(0xFF08131D))
+            .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(8.dp))
+            .padding(12.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .align(Alignment.CenterStart)
+                .size(58.dp)
+                .clip(CircleShape)
+                .background(Color(0xFF153146))
+                .border(4.dp, Color(0xFF00A6E7), CircleShape)
+        )
+        Column(
+            modifier = Modifier.align(Alignment.Center),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            repeat(3) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    repeat(4) {
+                        Box(
+                            modifier = Modifier
+                                .width(64.dp)
+                                .height(16.dp)
+                                .clip(RoundedCornerShape(3.dp))
+                                .background(Color.White.copy(alpha = 0.05f))
+                                .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(3.dp))
+                        )
+                    }
+                }
+            }
+        }
+        Column(
+            modifier = Modifier.align(Alignment.CenterEnd),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text("Y", color = Color.White, fontWeight = FontWeight.Bold)
+            Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                Text("X", color = Color.White, fontWeight = FontWeight.Bold)
+                Text("B", color = Color.White, fontWeight = FontWeight.Bold)
+            }
+            Text("A", color = Color.White, fontWeight = FontWeight.Bold)
+        }
+    }
+}
+
+@Composable
+private fun SettingRow(
+    icon: ImageVector,
+    iconColor: Color,
+    title: String,
+    subtitle: String,
+    trailing: @Composable () -> Unit
+) {
+    SettingsCard {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            SettingsIconTile(icon, iconColor)
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Color.White
+                )
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color.White.copy(alpha = 0.58f),
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            trailing()
+        }
+    }
+}
+
+@Composable
+private fun SettingsSwitchRow(
+    icon: ImageVector,
+    iconColor: Color,
+    title: String,
+    subtitle: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit
+) {
+    SettingRow(
+        icon = icon,
+        iconColor = iconColor,
+        title = title,
+        subtitle = subtitle,
+        trailing = {
+            Switch(checked = checked, onCheckedChange = onCheckedChange)
+        }
+    )
+}
+
+@Composable
+private fun VibrationSettingRow(
+    buttonVibrationLevel: ButtonVibrationLevel,
+    onButtonVibrationLevelChange: (ButtonVibrationLevel) -> Unit
+) {
+    SettingRow(
+        icon = Icons.Filled.Vibration,
+        iconColor = Color(0xFFE47B17),
+        title = stringResource(R.string.settings_vibration),
+        subtitle = stringResource(R.string.settings_vibration_desc),
+        trailing = {
+            SettingsSegmentedControl(
+                options = ButtonVibrationLevel.values().toList(),
+                selected = buttonVibrationLevel,
+                label = { stringResource(it.labelRes) },
+                onSelected = onButtonVibrationLevelChange
+            )
+        }
+    )
+}
+
+@Composable
+private fun PageSummaryRow(
+    pageName: String,
+    pageCount: Int,
+    activeIndex: Int,
+    columns: Int?,
+    rows: Int?,
+    onAddPage: () -> Unit
+) {
+    val pageSummary = stringResource(R.string.page_count_summary, pageName, pageCount)
+    val layoutSummary = if (columns != null && rows != null) {
+        "$pageSummary - ${columns}x$rows"
+    } else {
+        pageSummary
+    }
+    SettingRow(
+        icon = Icons.Filled.Apps,
+        iconColor = Color(0xFF0EA5FF),
+        title = stringResource(R.string.add_page_count, pageCount, MAX_PAGES),
+        subtitle = layoutSummary,
+        trailing = {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                PageIndicator(pageCount = pageCount, activeIndex = activeIndex)
+                Button(
+                    enabled = pageCount < MAX_PAGES,
+                    shape = RoundedCornerShape(8.dp),
+                    onClick = onAddPage
+                ) {
+                    Text(stringResource(R.string.add_button))
+                }
+            }
+        }
+    )
+}
+
+@Composable
+private fun SettingsDiagnosticsCard(logs: List<ActivityLog>) {
+    SettingsCard {
+        Text(
+            text = stringResource(R.string.diagnostics),
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = Color.White
+        )
+        if (logs.isEmpty()) {
+            Text(
+                text = stringResource(R.string.no_actions_yet),
+                style = MaterialTheme.typography.bodySmall,
+                color = Color.White.copy(alpha = 0.58f)
+            )
+        } else {
+            logs.take(5).forEach { log ->
+                Text(
+                    text = "${log.buttonTitle} ${log.note}: ${log.payload}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color.White.copy(alpha = 0.72f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun <T> SettingsSegmentedControl(
+    options: List<T>,
+    selected: T,
+    label: @Composable (T) -> String,
+    onSelected: (T) -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .height(38.dp)
+            .clip(RoundedCornerShape(7.dp))
+            .background(Color.White.copy(alpha = 0.04f))
+            .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(7.dp))
+    ) {
+        options.forEach { option ->
+            val active = option == selected
+            Surface(
+                color = if (active) Color(0xFF006CAC) else Color.Transparent,
+                contentColor = Color.White,
+                onClick = { onSelected(option) }
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxHeight()
+                        .width(64.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = label(option),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = if (active) Color.White else Color.White.copy(alpha = 0.62f),
+                        textAlign = TextAlign.Center,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SettingsValuePill(text: String) {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(999.dp))
+            .background(Color(0xFF006CAC).copy(alpha = 0.32f))
+            .border(1.dp, Color(0xFF22C5FF).copy(alpha = 0.42f), RoundedCornerShape(999.dp))
+            .padding(horizontal = 14.dp, vertical = 8.dp)
+    ) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.SemiBold,
+            color = Color(0xFF76DFFF)
+        )
+    }
+}
+
+@Composable
+private fun SettingsCard(
+    modifier: Modifier = Modifier,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(Color(0xFF111D27).copy(alpha = 0.86f))
+            .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(8.dp))
+            .padding(10.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+        content = content
+    )
+}
+
+@Composable
+private fun SettingsIconTile(
+    icon: ImageVector,
+    color: Color
+) {
+    Box(
+        modifier = Modifier
+            .size(34.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .background(color.copy(alpha = 0.9f)),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = Color.White,
+            modifier = Modifier.size(20.dp)
+        )
     }
 }
 
