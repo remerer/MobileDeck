@@ -51,6 +51,7 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -120,12 +121,14 @@ import androidx.compose.material.icons.filled.VolumeDown
 import androidx.compose.material.icons.filled.VolumeOff
 import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -137,6 +140,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.compositeOver
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -155,6 +160,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.viewinterop.AndroidView
 import com.remerer.mobiledeck.ui.theme.MobileDeckTheme
+import com.remerer.mobiledeck.ui.theme.MobileDeckThemeStyle
 import kotlinx.coroutines.delay
 import org.json.JSONArray
 import org.json.JSONObject
@@ -233,6 +239,13 @@ private enum class DeckUiMode(@StringRes val labelRes: Int) {
     Console(R.string.deck_ui_console)
 }
 
+private fun DeckUiMode.toThemeStyle(): MobileDeckThemeStyle {
+    return when (this) {
+        DeckUiMode.Classic -> MobileDeckThemeStyle.Classic
+        DeckUiMode.Console -> MobileDeckThemeStyle.Console
+    }
+}
+
 private data class DeckButton(
     val id: Int,
     val title: String,
@@ -294,6 +307,48 @@ private data class PageAnimationTarget(
     val sequence: Int
 )
 
+private data class DeckThemeColors(
+    val backgroundGradient: List<Color>,
+    val sidebarBackground: Color,
+    val sidebarBorder: Color,
+    val cardBackground: Color,
+    val cardBorder: Color,
+    val textPrimary: Color,
+    val textSecondary: Color,
+    val textMuted: Color,
+    val toggleBackground: Color,
+    val actionStart: Color,
+    val actionEnd: Color,
+    val neutralIconBackground: Color,
+    val consoleSidebar: Color,
+    val consolePreviewBackground: Color,
+    val consoleButtonDefault: Color,
+    val consoleButtonFeatured: Color,
+    val consoleButtonSystem: Color
+)
+
+private val DefaultDeckThemeColors = DeckThemeColors(
+    backgroundGradient = listOf(Color(0xFF0F141A), Color(0xFF151B22), Color(0xFF10151B)),
+    sidebarBackground = Color(0xFF10171F).copy(alpha = 0.94f),
+    sidebarBorder = Color.White.copy(alpha = 0.08f),
+    cardBackground = Color(0xFF18212B).copy(alpha = 0.86f),
+    cardBorder = Color.White.copy(alpha = 0.08f),
+    textPrimary = Color.White,
+    textSecondary = Color.White.copy(alpha = 0.64f),
+    textMuted = Color.White.copy(alpha = 0.38f),
+    toggleBackground = Color(0xFF151D26),
+    actionStart = Color(0xFF18212B),
+    actionEnd = Color(0xFF131B24),
+    neutralIconBackground = Color(0xFF263342),
+    consoleSidebar = Color(0xFF17212B).copy(alpha = 0.86f),
+    consolePreviewBackground = Color(0xFF101820),
+    consoleButtonDefault = Color(0xFF24313D),
+    consoleButtonFeatured = Color(0xFF245B9D),
+    consoleButtonSystem = Color(0xFF1F5DAD)
+)
+
+private val LocalDeckThemeColors = staticCompositionLocalOf { DefaultDeckThemeColors }
+
 private enum class AppPage {
     Deck,
     LayoutEditor,
@@ -314,6 +369,89 @@ private enum class ButtonVibrationLevel(
     fun next(): ButtonVibrationLevel {
         val values = values()
         return values[(ordinal + 1) % values.size]
+    }
+}
+
+@Composable
+private fun deckThemeColors(mode: DeckUiMode = DeckUiMode.Classic): DeckThemeColors {
+    val dark = isSystemInDarkTheme()
+    return when {
+        mode == DeckUiMode.Console && dark -> DeckThemeColors(
+            backgroundGradient = listOf(Color(0xFF050A10), Color(0xFF0D1721), Color(0xFF06111A)),
+            sidebarBackground = Color(0xFF071018).copy(alpha = 0.92f),
+            sidebarBorder = Color.White.copy(alpha = 0.08f),
+            cardBackground = Color(0xFF111D27).copy(alpha = 0.86f),
+            cardBorder = Color.White.copy(alpha = 0.08f),
+            textPrimary = Color.White,
+            textSecondary = Color.White.copy(alpha = 0.64f),
+            textMuted = Color.White.copy(alpha = 0.38f),
+            toggleBackground = Color(0xFF101B25),
+            actionStart = Color(0xFF111D27),
+            actionEnd = Color(0xFF0D1720),
+            neutralIconBackground = Color(0xFF233342),
+            consoleSidebar = Color(0xFF17212B).copy(alpha = 0.86f),
+            consolePreviewBackground = Color(0xFF08131D),
+            consoleButtonDefault = Color(0xFF1B2630),
+            consoleButtonFeatured = Color(0xFF245B9D),
+            consoleButtonSystem = Color(0xFF1F5DAD)
+        )
+        mode == DeckUiMode.Console -> DeckThemeColors(
+            backgroundGradient = listOf(Color(0xFFF2F8FC), Color(0xFFE6F2FA), Color(0xFFDCEAF4)),
+            sidebarBackground = Color(0xFFF8FCFF).copy(alpha = 0.96f),
+            sidebarBorder = Color(0xFFB8D2E4),
+            cardBackground = Color.White.copy(alpha = 0.88f),
+            cardBorder = Color(0xFFC8DCE8),
+            textPrimary = Color(0xFF10202B),
+            textSecondary = Color(0xFF51616D),
+            textMuted = Color(0xFF7A8A95),
+            toggleBackground = Color(0xFFE4F0F8),
+            actionStart = Color(0xFFF8FCFF),
+            actionEnd = Color(0xFFEAF5FB),
+            neutralIconBackground = Color(0xFFD7E8F3),
+            consoleSidebar = Color(0xFFFFFFFF).copy(alpha = 0.9f),
+            consolePreviewBackground = Color(0xFFEAF5FB),
+            consoleButtonDefault = Color(0xFFDBE8F1),
+            consoleButtonFeatured = Color(0xFF1976B7),
+            consoleButtonSystem = Color(0xFF1D82BE)
+        )
+        dark -> DeckThemeColors(
+            backgroundGradient = listOf(Color(0xFF0F141A), Color(0xFF151B22), Color(0xFF10151B)),
+            sidebarBackground = Color(0xFF10171F).copy(alpha = 0.94f),
+            sidebarBorder = Color.White.copy(alpha = 0.08f),
+            cardBackground = Color(0xFF18212B).copy(alpha = 0.86f),
+            cardBorder = Color.White.copy(alpha = 0.08f),
+            textPrimary = Color.White,
+            textSecondary = Color.White.copy(alpha = 0.64f),
+            textMuted = Color.White.copy(alpha = 0.38f),
+            toggleBackground = Color(0xFF151D26),
+            actionStart = Color(0xFF18212B),
+            actionEnd = Color(0xFF131B24),
+            neutralIconBackground = Color(0xFF263342),
+            consoleSidebar = Color(0xFF17212B).copy(alpha = 0.86f),
+            consolePreviewBackground = Color(0xFF101820),
+            consoleButtonDefault = Color(0xFF24313D),
+            consoleButtonFeatured = Color(0xFF245B9D),
+            consoleButtonSystem = Color(0xFF1F5DAD)
+        )
+        else -> DeckThemeColors(
+            backgroundGradient = listOf(Color(0xFFF7F9FC), Color(0xFFEFF4FA), Color(0xFFE6EDF5)),
+            sidebarBackground = Color.White.copy(alpha = 0.95f),
+            sidebarBorder = Color(0xFFD0DAE5),
+            cardBackground = Color.White.copy(alpha = 0.9f),
+            cardBorder = Color(0xFFD7E0EA),
+            textPrimary = Color(0xFF17202A),
+            textSecondary = Color(0xFF56616D),
+            textMuted = Color(0xFF838E99),
+            toggleBackground = Color(0xFFE8EEF5),
+            actionStart = Color(0xFFFFFFFF),
+            actionEnd = Color(0xFFF0F5FA),
+            neutralIconBackground = Color(0xFFDDE7F2),
+            consoleSidebar = Color.White.copy(alpha = 0.9f),
+            consolePreviewBackground = Color(0xFFEFF4FA),
+            consoleButtonDefault = Color(0xFFE1E8F0),
+            consoleButtonFeatured = Color(0xFF276DB4),
+            consoleButtonSystem = Color(0xFF2369B0)
+        )
     }
 }
 
@@ -649,6 +787,9 @@ private fun MobileDeckApp() {
         onDispose { hidManager.stop() }
     }
 
+    val appColors = deckThemeColors(deckUiMode)
+    MobileDeckTheme(style = deckUiMode.toThemeStyle()) {
+    CompositionLocalProvider(LocalDeckThemeColors provides appColors) {
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         containerColor = MaterialTheme.colorScheme.background,
@@ -952,6 +1093,8 @@ private fun MobileDeckApp() {
             }
         )
     }
+    }
+    }
 }
 
 @Composable
@@ -991,17 +1134,12 @@ private fun SettingsPage(
     onAddButton: () -> Unit,
     onAddPage: () -> Unit
 ) {
+    val colors = deckThemeColors(deckUiMode)
     Row(
         modifier = modifier
             .fillMaxSize()
             .background(
-                Brush.linearGradient(
-                    listOf(
-                        Color(0xFF050A10),
-                        Color(0xFF0D1721),
-                        Color(0xFF06111A)
-                    )
-                )
+                Brush.linearGradient(colors.backgroundGradient)
             )
     ) {
         SettingsSidebar(
@@ -1090,10 +1228,11 @@ private fun SettingsSidebar(
     onRefreshHosts: () -> Unit,
     onConnectHost: (PairedHidHost) -> Unit
 ) {
+    val colors = deckThemeColors(deckUiMode)
     Column(
         modifier = modifier
-            .background(Color(0xFF071018).copy(alpha = 0.92f))
-            .border(1.dp, Color.White.copy(alpha = 0.08f))
+            .background(colors.sidebarBackground)
+            .border(1.dp, colors.sidebarBorder)
             .verticalScroll(rememberScrollState())
             .padding(14.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
@@ -1107,13 +1246,13 @@ private fun SettingsSidebar(
                 text = stringResource(R.string.app_name),
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold,
-                color = Color.White
+                color = colors.textPrimary
             )
             IconButton(onClick = onBack) {
                 Icon(
                     imageVector = Icons.Filled.ArrowBack,
                     contentDescription = stringResource(R.string.settings_back_to_deck),
-                    tint = Color.White
+                    tint = colors.textPrimary
                 )
             }
         }
@@ -1186,6 +1325,7 @@ private fun UiModeToggle(
     deckUiMode: DeckUiMode,
     onDeckUiModeChange: (DeckUiMode) -> Unit
 ) {
+    val colors = deckThemeColors(deckUiMode)
     val selectedStart by animateColorAsState(
         targetValue = if (deckUiMode == DeckUiMode.Console) Color(0xFF006BAC) else Color(0xFF0B63D1),
         label = "settingsToggleStart"
@@ -1203,8 +1343,8 @@ private fun UiModeToggle(
             .fillMaxWidth()
             .height(42.dp)
             .clip(RoundedCornerShape(8.dp))
-            .background(Color(0xFF101B25))
-            .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(8.dp))
+            .background(colors.toggleBackground)
+            .border(1.dp, colors.cardBorder, RoundedCornerShape(8.dp))
     ) {
         val selectedIndex = if (deckUiMode == DeckUiMode.Console) 1f else 0f
         val offsetIndex by animateFloatAsState(selectedIndex, label = "settingsModeToggle")
@@ -1226,18 +1366,18 @@ private fun UiModeToggle(
             DeckUiMode.values().forEach { mode ->
                 Surface(
                     modifier = Modifier
-                        .weight(1f)
-                        .fillMaxHeight(),
-                    color = Color.Transparent,
-                    contentColor = Color.White,
-                    onClick = { onDeckUiModeChange(mode) }
-                ) {
+                    .weight(1f)
+                    .fillMaxHeight(),
+                color = Color.Transparent,
+                contentColor = colors.textPrimary,
+                onClick = { onDeckUiModeChange(mode) }
+            ) {
                     Box(contentAlignment = Alignment.Center) {
                         Text(
                             text = stringResource(mode.labelRes),
                             style = MaterialTheme.typography.labelLarge,
                             fontWeight = FontWeight.SemiBold,
-                            color = if (deckUiMode == mode) Color.White else Color.White.copy(alpha = 0.62f),
+                            color = if (deckUiMode == mode) Color.White else colors.textSecondary,
                             textAlign = TextAlign.Center
                         )
                     }
@@ -1252,7 +1392,8 @@ private fun SidebarStatusCard(
     status: HidStatus,
     deckUiMode: DeckUiMode
 ) {
-    SettingsCard(accent = settingsModeAccent(deckUiMode)) {
+    val colors = deckThemeColors(deckUiMode)
+    SettingsCard(accent = settingsModeAccent(deckUiMode), themeColors = colors) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
@@ -1269,7 +1410,7 @@ private fun SidebarStatusCard(
                     modifier = Modifier.weight(1f),
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.SemiBold,
-                    color = Color.White,
+                    color = colors.textPrimary,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -1279,7 +1420,7 @@ private fun SidebarStatusCard(
         Text(
             text = localizedStatusMessage(status.message),
             style = MaterialTheme.typography.bodySmall,
-            color = Color.White.copy(alpha = 0.58f),
+            color = colors.textSecondary,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
         )
@@ -1326,27 +1467,28 @@ private fun SidebarActionCard(
 ) {
     val accent = settingsModeAccent(deckUiMode)
     val secondaryAccent = settingsModeSecondaryAccent(deckUiMode)
+    val colors = deckThemeColors(deckUiMode)
     val startColor by animateColorAsState(
-        targetValue = if (highlighted) accent.copy(alpha = 0.68f) else Color(0xFF111D27),
+        targetValue = if (highlighted) accent.copy(alpha = if (isSystemInDarkTheme()) 0.68f else 0.18f) else colors.actionStart,
         label = "sidebarActionStart"
     )
     val endColor by animateColorAsState(
-        targetValue = if (highlighted) secondaryAccent.copy(alpha = 0.82f) else Color(0xFF0D1720),
+        targetValue = if (highlighted) secondaryAccent.copy(alpha = if (isSystemInDarkTheme()) 0.82f else 0.22f) else colors.actionEnd,
         label = "sidebarActionEnd"
     )
     val borderColor by animateColorAsState(
-        targetValue = if (highlighted) accent.copy(alpha = 0.5f) else Color.White.copy(alpha = 0.08f),
+        targetValue = if (highlighted) accent.copy(alpha = 0.5f) else colors.cardBorder,
         label = "sidebarActionBorder"
     )
     val iconColor by animateColorAsState(
-        targetValue = if (highlighted) accent else Color(0xFF233342),
+        targetValue = if (highlighted) accent else colors.neutralIconBackground,
         label = "sidebarActionIcon"
     )
     val background = Brush.linearGradient(listOf(startColor, endColor))
     Surface(
         modifier = modifier.fillMaxWidth(),
         color = Color.Transparent,
-        contentColor = Color.White,
+        contentColor = colors.textPrimary,
         shape = RoundedCornerShape(8.dp),
         enabled = enabled,
         onClick = onClick
@@ -1365,12 +1507,12 @@ private fun SidebarActionCard(
                     text = title,
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.SemiBold,
-                    color = Color.White
+                    color = colors.textPrimary
                 )
                 Text(
                     text = subtitle,
                     style = MaterialTheme.typography.bodySmall,
-                    color = Color.White.copy(alpha = 0.62f),
+                    color = colors.textSecondary,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -1388,7 +1530,8 @@ private fun PairedHostsCard(
     onConnectHost: (PairedHidHost) -> Unit
 ) {
     val accent = settingsModeAccent(deckUiMode)
-    SettingsCard(accent = accent) {
+    val colors = deckThemeColors(deckUiMode)
+    SettingsCard(accent = accent, themeColors = colors) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
@@ -1400,7 +1543,7 @@ private fun PairedHostsCard(
                 modifier = Modifier.weight(1f),
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.SemiBold,
-                color = Color.White
+                color = colors.textPrimary
             )
             TextButton(onClick = onRefreshHosts) {
                 Text(stringResource(R.string.refresh), color = accent)
@@ -1410,13 +1553,13 @@ private fun PairedHostsCard(
             Text(
                 text = stringResource(R.string.no_paired_hosts),
                 style = MaterialTheme.typography.bodySmall,
-                color = Color.White.copy(alpha = 0.62f)
+                color = colors.textSecondary
             )
         } else {
             pairedHosts.take(3).forEach { host ->
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
-                    color = Color.White.copy(alpha = 0.04f),
+                    color = colors.toggleBackground.copy(alpha = 0.55f),
                     shape = RoundedCornerShape(6.dp),
                     onClick = { onConnectHost(host) }
                 ) {
@@ -1424,7 +1567,7 @@ private fun PairedHostsCard(
                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
                         text = host.name,
                         style = MaterialTheme.typography.bodySmall,
-                        color = Color.White,
+                        color = colors.textPrimary,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
@@ -1457,6 +1600,7 @@ private fun ClassicSettingsContent(
     onAddPage: () -> Unit
 ) {
     SettingsDetailContent(
+        mode = DeckUiMode.Classic,
         accent = Color(0xFF9B5DE5),
         icon = Icons.Filled.GridView,
         title = stringResource(R.string.settings_classic_header),
@@ -1475,7 +1619,7 @@ private fun ClassicSettingsContent(
                 subtitle = stringResource(R.string.settings_classic_layout_desc),
                 trailing = {
                     TextButton(onClick = onLayoutEditor) {
-                        Text(stringResource(R.string.layout_editor), color = Color(0xFF67D7FF))
+                        Text(stringResource(R.string.layout_editor), color = MaterialTheme.colorScheme.primary)
                     }
                 }
             )
@@ -1565,6 +1709,7 @@ private fun ConsoleSettingsContent(
     onAddPage: () -> Unit
 ) {
     SettingsDetailContent(
+        mode = DeckUiMode.Console,
         accent = Color(0xFF00A6E7),
         icon = Icons.Filled.Settings,
         title = stringResource(R.string.console_settings),
@@ -1583,7 +1728,7 @@ private fun ConsoleSettingsContent(
                 subtitle = stringResource(R.string.settings_console_layout_desc),
                 trailing = {
                     TextButton(onClick = onConsoleLayoutEditor) {
-                        Text(stringResource(R.string.console_layout_editor), color = Color(0xFF67D7FF))
+                        Text(stringResource(R.string.console_layout_editor), color = MaterialTheme.colorScheme.primary)
                     }
                 }
             )
@@ -1651,12 +1796,14 @@ private fun ConsoleSettingsContent(
 
 @Composable
 private fun SettingsDetailContent(
+    mode: DeckUiMode,
     accent: Color,
     icon: ImageVector,
     title: String,
     subtitle: String,
     content: LazyListScope.() -> Unit
 ) {
+    val colors = deckThemeColors(mode)
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(start = 14.dp, top = 14.dp, end = 14.dp, bottom = 24.dp),
@@ -1674,12 +1821,12 @@ private fun SettingsDetailContent(
                         text = title,
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.Bold,
-                        color = Color.White
+                        color = colors.textPrimary
                     )
                     Text(
                         text = subtitle,
                         style = MaterialTheme.typography.bodySmall,
-                        color = Color.White.copy(alpha = 0.62f)
+                        color = colors.textSecondary
                     )
                 }
             }
@@ -1692,7 +1839,7 @@ private fun SettingsDetailContent(
                     .padding(top = 8.dp),
                 text = stringResource(R.string.settings_drag_more),
                 style = MaterialTheme.typography.bodySmall,
-                color = Color.White.copy(alpha = 0.36f),
+                color = colors.textMuted,
                 textAlign = TextAlign.Center
             )
         }
@@ -1704,12 +1851,13 @@ private fun SettingsPreviewCard(
     title: String,
     content: @Composable () -> Unit
 ) {
+    val colors = LocalDeckThemeColors.current
     SettingsCard {
         Text(
             text = title,
             style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.SemiBold,
-            color = Color.White
+            color = colors.textPrimary
         )
         content()
         PageIndicator(
@@ -1762,13 +1910,14 @@ private fun ClassicSettingsPreview() {
 
 @Composable
 private fun ConsoleSettingsPreview() {
+    val colors = LocalDeckThemeColors.current
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .height(116.dp)
             .clip(RoundedCornerShape(8.dp))
-            .background(Color(0xFF08131D))
-            .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(8.dp))
+            .background(colors.consolePreviewBackground)
+            .border(1.dp, colors.cardBorder, RoundedCornerShape(8.dp))
             .padding(12.dp)
     ) {
         Box(
@@ -1791,8 +1940,8 @@ private fun ConsoleSettingsPreview() {
                                 .width(64.dp)
                                 .height(16.dp)
                                 .clip(RoundedCornerShape(3.dp))
-                                .background(Color.White.copy(alpha = 0.05f))
-                                .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(3.dp))
+                                .background(colors.cardBackground)
+                                .border(1.dp, colors.cardBorder, RoundedCornerShape(3.dp))
                         )
                     }
                 }
@@ -1803,12 +1952,12 @@ private fun ConsoleSettingsPreview() {
             verticalArrangement = Arrangement.spacedBy(6.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Text("Y", color = Color.White, fontWeight = FontWeight.Bold)
+            Text("Y", color = colors.textPrimary, fontWeight = FontWeight.Bold)
             Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                Text("X", color = Color.White, fontWeight = FontWeight.Bold)
-                Text("B", color = Color.White, fontWeight = FontWeight.Bold)
+                Text("X", color = colors.textPrimary, fontWeight = FontWeight.Bold)
+                Text("B", color = colors.textPrimary, fontWeight = FontWeight.Bold)
             }
-            Text("A", color = Color.White, fontWeight = FontWeight.Bold)
+            Text("A", color = colors.textPrimary, fontWeight = FontWeight.Bold)
         }
     }
 }
@@ -1821,6 +1970,7 @@ private fun SettingRow(
     subtitle: String,
     trailing: @Composable () -> Unit
 ) {
+    val colors = LocalDeckThemeColors.current
     SettingsCard {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -1836,12 +1986,12 @@ private fun SettingRow(
                     text = title,
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.SemiBold,
-                    color = Color.White
+                    color = colors.textPrimary
                 )
                 Text(
                     text = subtitle,
                     style = MaterialTheme.typography.bodySmall,
-                    color = Color.White.copy(alpha = 0.58f),
+                    color = colors.textSecondary,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -1952,25 +2102,26 @@ private fun PageSummaryRow(
 
 @Composable
 private fun SettingsDiagnosticsCard(logs: List<ActivityLog>) {
+    val colors = LocalDeckThemeColors.current
     SettingsCard {
         Text(
             text = stringResource(R.string.diagnostics),
             style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.SemiBold,
-            color = Color.White
+            color = colors.textPrimary
         )
         if (logs.isEmpty()) {
             Text(
                 text = stringResource(R.string.no_actions_yet),
                 style = MaterialTheme.typography.bodySmall,
-                color = Color.White.copy(alpha = 0.58f)
+                color = colors.textSecondary
             )
         } else {
             logs.take(5).forEach { log ->
                 Text(
                     text = "${log.buttonTitle} ${log.note}: ${log.payload}",
                     style = MaterialTheme.typography.bodySmall,
-                    color = Color.White.copy(alpha = 0.72f),
+                    color = colors.textSecondary,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -1986,18 +2137,19 @@ private fun <T> SettingsSegmentedControl(
     label: @Composable (T) -> String,
     onSelected: (T) -> Unit
 ) {
+    val colors = LocalDeckThemeColors.current
     Row(
         modifier = Modifier
             .height(38.dp)
             .clip(RoundedCornerShape(7.dp))
-            .background(Color.White.copy(alpha = 0.04f))
-            .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(7.dp))
+            .background(colors.toggleBackground)
+            .border(1.dp, colors.cardBorder, RoundedCornerShape(7.dp))
     ) {
         options.forEach { option ->
             val active = option == selected
             Surface(
                 color = if (active) Color(0xFF006CAC) else Color.Transparent,
-                contentColor = Color.White,
+                contentColor = if (active) Color.White else colors.textPrimary,
                 onClick = { onSelected(option) }
             ) {
                 Box(
@@ -2009,7 +2161,7 @@ private fun <T> SettingsSegmentedControl(
                     Text(
                         text = label(option),
                         style = MaterialTheme.typography.labelMedium,
-                        color = if (active) Color.White else Color.White.copy(alpha = 0.62f),
+                        color = if (active) Color.White else colors.textSecondary,
                         textAlign = TextAlign.Center,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
@@ -2033,7 +2185,7 @@ private fun SettingsValuePill(text: String) {
             text = text,
             style = MaterialTheme.typography.labelLarge,
             fontWeight = FontWeight.SemiBold,
-            color = Color(0xFF76DFFF)
+            color = if (isSystemInDarkTheme()) Color(0xFF76DFFF) else Color(0xFF005D86)
         )
     }
 }
@@ -2042,17 +2194,19 @@ private fun SettingsValuePill(text: String) {
 private fun SettingsCard(
     modifier: Modifier = Modifier,
     accent: Color = Color(0xFF0EA5FF),
+    themeColors: DeckThemeColors? = null,
     content: @Composable ColumnScope.() -> Unit
 ) {
+    val colors = themeColors ?: LocalDeckThemeColors.current
     val borderColor by animateColorAsState(
-        targetValue = accent.copy(alpha = 0.18f),
+        targetValue = accent.copy(alpha = 0.18f).compositeOver(colors.cardBorder.copy(alpha = 0.5f)),
         label = "settingsCardBorder"
     )
     Column(
         modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
-            .background(Color(0xFF111D27).copy(alpha = 0.86f))
+            .background(colors.cardBackground)
             .border(1.dp, borderColor, RoundedCornerShape(8.dp))
             .padding(10.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -2066,6 +2220,7 @@ private fun SettingsIconTile(
     color: Color
 ) {
     val animatedColor by animateColorAsState(color, label = "settingsIconTile")
+    val tint = if (animatedColor.luminance() > 0.55f) Color(0xFF153040) else Color.White
     Box(
         modifier = Modifier
             .size(34.dp)
@@ -2076,7 +2231,7 @@ private fun SettingsIconTile(
         Icon(
             imageVector = icon,
             contentDescription = null,
-            tint = Color.White,
+            tint = tint,
             modifier = Modifier.size(20.dp)
         )
     }
@@ -2920,6 +3075,7 @@ private fun ConsoleDeckSurface(
     onButtonTouchStarted: () -> Unit,
     onButtonTouchEnded: () -> Unit
 ) {
+    val colors = LocalDeckThemeColors.current
     val settingsButton = remember(deckPages) {
         deckPages.flatMap { it.buttons }.firstOrNull { buttonAppAction(it) == DeckActionType.Settings }
     }
@@ -2931,13 +3087,7 @@ private fun ConsoleDeckSurface(
     Box(
         modifier = modifier
             .background(
-                Brush.linearGradient(
-                    listOf(
-                        Color(0xFF071019),
-                        Color(0xFF101B25),
-                        Color(0xFF050A10)
-                    )
-                )
+                Brush.linearGradient(colors.backgroundGradient)
             )
     ) {
         Row(
@@ -3147,10 +3297,11 @@ private fun ConsoleSidebar(
     status: HidStatus,
     onSettings: () -> Unit
 ) {
+    val colors = LocalDeckThemeColors.current
     Surface(
         modifier = modifier,
         shape = RoundedCornerShape(20.dp),
-        color = Color(0xFF17212B).copy(alpha = 0.86f),
+        color = colors.consoleSidebar,
         tonalElevation = 0.dp
     ) {
         Column(
@@ -3161,13 +3312,13 @@ private fun ConsoleSidebar(
                 Text(
                     text = "☰",
                     style = MaterialTheme.typography.headlineSmall,
-                    color = Color.White.copy(alpha = 0.92f)
+                    color = colors.textPrimary
                 )
                 Text(
                     text = stringResource(R.string.deck_title),
                     style = MaterialTheme.typography.headlineMedium,
                     fontWeight = FontWeight.Bold,
-                    color = Color.White,
+                    color = colors.textPrimary,
                     maxLines = 2
                 )
                 Row(
@@ -3189,7 +3340,7 @@ private fun ConsoleSidebar(
                 Text(
                     text = status.message,
                     style = MaterialTheme.typography.bodySmall,
-                    color = Color.White.copy(alpha = 0.62f),
+                    color = colors.textSecondary,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -3199,12 +3350,12 @@ private fun ConsoleSidebar(
                     text = currentTimeText(),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
-                    color = Color.White
+                    color = colors.textPrimary
                 )
                 Text(
                     text = currentDateText(),
                     style = MaterialTheme.typography.bodyMedium,
-                    color = Color.White.copy(alpha = 0.62f)
+                    color = colors.textSecondary
                 )
                 OutlinedButton(
                     modifier = Modifier.size(48.dp),
@@ -3215,7 +3366,7 @@ private fun ConsoleSidebar(
                     Icon(
                         imageVector = Icons.Default.Settings,
                         contentDescription = stringResource(R.string.settings_title),
-                        tint = Color.White
+                        tint = colors.textPrimary
                     )
                 }
             }
@@ -3753,12 +3904,17 @@ private fun DeckKey(
     onMove: (Int) -> Unit
 ) {
     val isConsole = visualMode == DeckUiMode.Console
+    val themeColors = LocalDeckThemeColors.current
     val containerColor = when {
         !enabled -> MaterialTheme.colorScheme.surfaceVariant
         isConsole -> consoleButtonColor(button)
         else -> button.color
     }
-    val contentColor = if (enabled) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
+    val contentColor = when {
+        !enabled -> MaterialTheme.colorScheme.onSurfaceVariant
+        isConsole && containerColor.luminance() > 0.5f -> themeColors.textPrimary
+        else -> Color.White
+    }
     val density = LocalDensity.current
     var dragOffset by remember(button.id) { mutableStateOf(Offset.Zero) }
     val moveThresholdPx = with(density) { ((cellSize + spacing) * 0.55f).toPx() }
@@ -3881,7 +4037,7 @@ private fun DeckKey(
                 .then(
                     if (isConsole) {
                         Modifier
-                            .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(18.dp))
+                            .border(1.dp, themeColors.cardBorder, RoundedCornerShape(18.dp))
                             .padding(10.dp)
                     } else {
                         Modifier.padding(8.dp)
@@ -4092,12 +4248,14 @@ private fun DeckButtonIcon(
     }
 }
 
+@Composable
 private fun consoleButtonColor(button: DeckButton): Color {
+    val colors = LocalDeckThemeColors.current
     return when {
         button.actionType == DeckActionType.MediaKey &&
-            button.payload in setOf(MEDIA_PLAY_PAUSE, MEDIA_VOLUME_UP) -> Color(0xFF245B9D)
-        buttonAppAction(button) == DeckActionType.BluetoothStatus -> Color(0xFF1F5DAD)
-        else -> Color(0xFF1B2630)
+            button.payload in setOf(MEDIA_PLAY_PAUSE, MEDIA_VOLUME_UP) -> colors.consoleButtonFeatured
+        buttonAppAction(button) == DeckActionType.BluetoothStatus -> colors.consoleButtonSystem
+        else -> colors.consoleButtonDefault
     }
 }
 
