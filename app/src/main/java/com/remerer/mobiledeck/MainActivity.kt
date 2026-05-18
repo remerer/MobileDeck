@@ -30,6 +30,7 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.core.graphics.drawable.toBitmap
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -1078,55 +1079,60 @@ private fun SettingsSidebar(
             deckUiMode = deckUiMode,
             onDeckUiModeChange = onDeckUiModeChange
         )
-        Text(
-            text = stringResource(R.string.settings_title),
-            style = MaterialTheme.typography.headlineSmall,
-            fontWeight = FontWeight.Bold,
-            color = Color.White,
-            modifier = Modifier.padding(top = 8.dp)
-        )
-        Text(
-            text = stringResource(R.string.settings_subtitle),
-            style = MaterialTheme.typography.bodySmall,
-            color = Color.White.copy(alpha = 0.62f)
-        )
-        SidebarStatusCard(status)
-        SidebarActionCard(
-            icon = Icons.Filled.Bluetooth,
-            title = stringResource(R.string.register_hid),
-            subtitle = stringResource(R.string.settings_register_hid_desc),
-            highlighted = true,
-            onClick = onStart
-        )
-        SidebarActionCard(
-            icon = Icons.Filled.Stop,
-            title = stringResource(R.string.stop),
-            subtitle = stringResource(R.string.settings_stop_hid_desc),
-            onClick = onStop
-        )
-        SidebarActionCard(
-            icon = Icons.Filled.Search,
-            title = stringResource(R.string.make_discoverable),
-            subtitle = stringResource(R.string.settings_discoverable_desc),
-            trailing = {
-                Text(
-                    text = stringResource(R.string.refresh),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = Color(0xFF67D7FF)
-                )
+        AnimatedContent(
+            targetState = deckUiMode,
+            transitionSpec = {
+                val direction = if (targetState == DeckUiMode.Console) 1 else -1
+                slideInHorizontally { width -> direction * width } togetherWith
+                    slideOutHorizontally { width -> -direction * width }
             },
-            onClick = onMakeDiscoverable
-        )
-        PairedHostsCard(
-            pairedHosts = pairedHosts,
-            onRefreshHosts = onRefreshHosts,
-            onConnectHost = onConnectHost
-        )
+            label = "bluetoothSettingsMode"
+        ) { mode ->
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                SidebarStatusCard(status = status, deckUiMode = mode)
+                SidebarActionCard(
+                    icon = Icons.Filled.Bluetooth,
+                    title = stringResource(R.string.register_hid),
+                    subtitle = stringResource(R.string.settings_register_hid_desc),
+                    deckUiMode = mode,
+                    highlighted = true,
+                    onClick = onStart
+                )
+                SidebarActionCard(
+                    icon = Icons.Filled.Stop,
+                    title = stringResource(R.string.stop),
+                    subtitle = stringResource(R.string.settings_stop_hid_desc),
+                    deckUiMode = mode,
+                    onClick = onStop
+                )
+                SidebarActionCard(
+                    icon = Icons.Filled.Search,
+                    title = stringResource(R.string.make_discoverable),
+                    subtitle = stringResource(R.string.settings_discoverable_desc),
+                    deckUiMode = mode,
+                    trailing = {
+                        Text(
+                            text = stringResource(R.string.refresh),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = settingsModeAccent(mode)
+                        )
+                    },
+                    onClick = onMakeDiscoverable
+                )
+                PairedHostsCard(
+                    pairedHosts = pairedHosts,
+                    deckUiMode = mode,
+                    onRefreshHosts = onRefreshHosts,
+                    onConnectHost = onConnectHost
+                )
+            }
+        }
         Spacer(Modifier.height(4.dp))
         SidebarActionCard(
             icon = Icons.Filled.Info,
             title = stringResource(R.string.settings_app_info),
             subtitle = stringResource(R.string.settings_app_info_desc),
+            deckUiMode = deckUiMode,
             enabled = false,
             onClick = {}
         )
@@ -1138,6 +1144,18 @@ private fun UiModeToggle(
     deckUiMode: DeckUiMode,
     onDeckUiModeChange: (DeckUiMode) -> Unit
 ) {
+    val selectedStart by animateColorAsState(
+        targetValue = if (deckUiMode == DeckUiMode.Console) Color(0xFF006BAC) else Color(0xFF0B63D1),
+        label = "settingsToggleStart"
+    )
+    val selectedEnd by animateColorAsState(
+        targetValue = if (deckUiMode == DeckUiMode.Console) Color(0xFF11B9FF) else Color(0xFF228BFF),
+        label = "settingsToggleEnd"
+    )
+    val selectedBorder by animateColorAsState(
+        targetValue = if (deckUiMode == DeckUiMode.Console) Color(0xFF6DDBFF) else Color(0xFF72B8FF),
+        label = "settingsToggleBorder"
+    )
     BoxWithConstraints(
         modifier = Modifier
             .fillMaxWidth()
@@ -1157,10 +1175,10 @@ private fun UiModeToggle(
                 .clip(RoundedCornerShape(7.dp))
                 .background(
                     Brush.linearGradient(
-                        listOf(Color(0xFF0574D8), Color(0xFF11B9FF))
+                        listOf(selectedStart, selectedEnd)
                     )
                 )
-                .border(1.dp, Color(0xFF6DDBFF), RoundedCornerShape(7.dp))
+                .border(1.dp, selectedBorder, RoundedCornerShape(7.dp))
         )
         Row(Modifier.fillMaxSize()) {
             DeckUiMode.values().forEach { mode ->
@@ -1188,8 +1206,11 @@ private fun UiModeToggle(
 }
 
 @Composable
-private fun SidebarStatusCard(status: HidStatus) {
-    SettingsCard {
+private fun SidebarStatusCard(
+    status: HidStatus,
+    deckUiMode: DeckUiMode
+) {
+    SettingsCard(accent = settingsModeAccent(deckUiMode)) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
@@ -1200,7 +1221,7 @@ private fun SidebarStatusCard(status: HidStatus) {
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                SettingsIconTile(Icons.Filled.Bluetooth, Color(0xFF0EA5FF))
+                SettingsIconTile(Icons.Filled.Bluetooth, settingsModeAccent(deckUiMode))
                 Text(
                     text = stringResource(R.string.settings_hid_management),
                     modifier = Modifier.weight(1f),
@@ -1254,17 +1275,32 @@ private fun SidebarActionCard(
     icon: ImageVector,
     title: String,
     subtitle: String,
+    deckUiMode: DeckUiMode,
     modifier: Modifier = Modifier,
     highlighted: Boolean = false,
     enabled: Boolean = true,
     trailing: (@Composable () -> Unit)? = null,
     onClick: () -> Unit
 ) {
-    val background = if (highlighted) {
-        Brush.linearGradient(listOf(Color(0xFF004B78), Color(0xFF0078D7)))
-    } else {
-        Brush.linearGradient(listOf(Color(0xFF111D27), Color(0xFF0D1720)))
-    }
+    val accent = settingsModeAccent(deckUiMode)
+    val secondaryAccent = settingsModeSecondaryAccent(deckUiMode)
+    val startColor by animateColorAsState(
+        targetValue = if (highlighted) accent.copy(alpha = 0.68f) else Color(0xFF111D27),
+        label = "sidebarActionStart"
+    )
+    val endColor by animateColorAsState(
+        targetValue = if (highlighted) secondaryAccent.copy(alpha = 0.82f) else Color(0xFF0D1720),
+        label = "sidebarActionEnd"
+    )
+    val borderColor by animateColorAsState(
+        targetValue = if (highlighted) accent.copy(alpha = 0.5f) else Color.White.copy(alpha = 0.08f),
+        label = "sidebarActionBorder"
+    )
+    val iconColor by animateColorAsState(
+        targetValue = if (highlighted) accent else Color(0xFF233342),
+        label = "sidebarActionIcon"
+    )
+    val background = Brush.linearGradient(listOf(startColor, endColor))
     Surface(
         modifier = modifier.fillMaxWidth(),
         color = Color.Transparent,
@@ -1276,12 +1312,12 @@ private fun SidebarActionCard(
         Row(
             modifier = Modifier
                 .background(background)
-                .border(1.dp, Color.White.copy(alpha = if (highlighted) 0.16f else 0.08f), RoundedCornerShape(8.dp))
+                .border(1.dp, borderColor, RoundedCornerShape(8.dp))
                 .padding(10.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            SettingsIconTile(icon, if (highlighted) Color(0xFF13B8FF) else Color(0xFF233342))
+            SettingsIconTile(icon, iconColor)
             Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(
                     text = title,
@@ -1305,16 +1341,18 @@ private fun SidebarActionCard(
 @Composable
 private fun PairedHostsCard(
     pairedHosts: List<PairedHidHost>,
+    deckUiMode: DeckUiMode,
     onRefreshHosts: () -> Unit,
     onConnectHost: (PairedHidHost) -> Unit
 ) {
-    SettingsCard {
+    val accent = settingsModeAccent(deckUiMode)
+    SettingsCard(accent = accent) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            SettingsIconTile(Icons.Filled.Link, Color(0xFF0B98C9))
+            SettingsIconTile(Icons.Filled.Link, accent)
             Text(
                 text = stringResource(R.string.paired_hosts),
                 modifier = Modifier.weight(1f),
@@ -1323,7 +1361,7 @@ private fun PairedHostsCard(
                 color = Color.White
             )
             TextButton(onClick = onRefreshHosts) {
-                Text(stringResource(R.string.refresh), color = Color(0xFF67D7FF))
+                Text(stringResource(R.string.refresh), color = accent)
             }
         }
         if (pairedHosts.isEmpty()) {
@@ -1942,14 +1980,19 @@ private fun SettingsValuePill(text: String) {
 @Composable
 private fun SettingsCard(
     modifier: Modifier = Modifier,
+    accent: Color = Color(0xFF0EA5FF),
     content: @Composable ColumnScope.() -> Unit
 ) {
+    val borderColor by animateColorAsState(
+        targetValue = accent.copy(alpha = 0.18f),
+        label = "settingsCardBorder"
+    )
     Column(
         modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
             .background(Color(0xFF111D27).copy(alpha = 0.86f))
-            .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(8.dp))
+            .border(1.dp, borderColor, RoundedCornerShape(8.dp))
             .padding(10.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
         content = content
@@ -1961,11 +2004,12 @@ private fun SettingsIconTile(
     icon: ImageVector,
     color: Color
 ) {
+    val animatedColor by animateColorAsState(color, label = "settingsIconTile")
     Box(
         modifier = Modifier
             .size(34.dp)
             .clip(RoundedCornerShape(8.dp))
-            .background(color.copy(alpha = 0.9f)),
+            .background(animatedColor.copy(alpha = 0.9f)),
         contentAlignment = Alignment.Center
     ) {
         Icon(
@@ -1975,6 +2019,14 @@ private fun SettingsIconTile(
             modifier = Modifier.size(20.dp)
         )
     }
+}
+
+private fun settingsModeAccent(mode: DeckUiMode): Color {
+    return if (mode == DeckUiMode.Console) Color(0xFF00A6E7) else Color(0xFF0B7FE8)
+}
+
+private fun settingsModeSecondaryAccent(mode: DeckUiMode): Color {
+    return if (mode == DeckUiMode.Console) Color(0xFF004B78) else Color(0xFF124E91)
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
