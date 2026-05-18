@@ -24,6 +24,8 @@
     <string name="button_vibration_strong">Button vibration strong</string>
     <string name="deck_ui_classic">Classic UI</string>
     <string name="deck_ui_console">Console UI</string>
+    <string name="console_settings">Console settings</string>
+    <string name="console_settings_subtitle">Console layout and deck controls</string>
     <string name="console_layout_editor">Console layout</string>
     <string name="console_row">Row %1$d</string>
     <string name="add_console_row">Add row</string>

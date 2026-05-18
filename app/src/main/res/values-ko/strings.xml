@@ -24,6 +24,8 @@
     <string name="button_vibration_strong">버튼 진동 강함</string>
     <string name="deck_ui_classic">클래식 UI</string>
     <string name="deck_ui_console">콘솔 UI</string>
+    <string name="console_settings">콘솔 설정</string>
+    <string name="console_settings_subtitle">콘솔 레이아웃 및 덱 조작</string>
     <string name="console_layout_editor">콘솔 레이아웃</string>
     <string name="console_row">%1$d행</string>
     <string name="add_console_row">행 추가</string>

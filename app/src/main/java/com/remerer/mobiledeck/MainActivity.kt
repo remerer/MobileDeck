@@ -118,6 +118,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.asImageBitmap
@@ -932,11 +933,32 @@ private fun SettingsPage(
     onAddButton: () -> Unit,
     onAddPage: () -> Unit
 ) {
+    val isConsoleMode = deckUiMode == DeckUiMode.Console
     LazyColumn(
-        modifier = modifier,
+        modifier = if (isConsoleMode) {
+            modifier.background(
+                Brush.linearGradient(
+                    listOf(
+                        Color(0xFF071018),
+                        Color(0xFF101D29),
+                        Color(0xFF050A0F)
+                    )
+                )
+            )
+        } else {
+            modifier
+        },
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
+        item {
+            UiModeToggle(
+                deckUiMode = deckUiMode,
+                consoleStyle = isConsoleMode,
+                onDeckUiModeChange = onDeckUiModeChange
+            )
+        }
+
         item {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -947,12 +969,13 @@ private fun SettingsPage(
                     Text(
                         text = stringResource(R.string.settings_title),
                         style = MaterialTheme.typography.headlineMedium,
-                        fontWeight = FontWeight.Bold
+                        fontWeight = FontWeight.Bold,
+                        color = if (isConsoleMode) Color.White else MaterialTheme.colorScheme.onSurface
                     )
                     Text(
-                        text = stringResource(R.string.settings_subtitle),
+                        text = stringResource(if (isConsoleMode) R.string.console_settings_subtitle else R.string.settings_subtitle),
                         style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = if (isConsoleMode) Color.White.copy(alpha = 0.66f) else MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
                 OutlinedButton(
@@ -963,9 +986,9 @@ private fun SettingsPage(
                 }
                 OutlinedButton(
                     shape = RoundedCornerShape(8.dp),
-                    onClick = onLayoutEditor
+                    onClick = if (isConsoleMode) onConsoleLayoutEditor else onLayoutEditor
                 ) {
-                    Text(stringResource(R.string.layout_editor))
+                    Text(stringResource(if (isConsoleMode) R.string.console_layout_editor else R.string.layout_editor))
                 }
             }
         }
@@ -973,6 +996,7 @@ private fun SettingsPage(
         item {
             Header(
                 status = status,
+                consoleStyle = isConsoleMode,
                 onStart = onStart,
                 onStop = onStop,
                 onMakeDiscoverable = onMakeDiscoverable,
@@ -983,30 +1007,87 @@ private fun SettingsPage(
         }
 
         item {
-            DeckSettingsPanel(
-                deckPages = deckPages,
-                activePageId = activePageId,
-                pageSwipeAxis = pageSwipeAxis,
-                multiTouchPageSwipe = multiTouchPageSwipe,
-                pageSwipeAnimation = pageSwipeAnimation,
-                infinitePageSwipe = infinitePageSwipe,
-                buttonVibrationLevel = buttonVibrationLevel,
-                deckUiMode = deckUiMode,
-                pageName = pageName,
-                pageCount = pageCount,
-                onPageSwipeAxisChange = onPageSwipeAxisChange,
-                onMultiTouchPageSwipeChange = onMultiTouchPageSwipeChange,
-                onPageSwipeAnimationChange = onPageSwipeAnimationChange,
-                onInfinitePageSwipeChange = onInfinitePageSwipeChange,
-                onButtonVibrationLevelChange = onButtonVibrationLevelChange,
-                onDeckUiModeChange = onDeckUiModeChange,
-                onConsoleLayoutEditor = onConsoleLayoutEditor,
-                onAddPage = onAddPage,
-            )
+            if (isConsoleMode) {
+                ConsoleSettingsPanel(
+                    deckPages = deckPages,
+                    activePageId = activePageId,
+                    pageSwipeAxis = pageSwipeAxis,
+                    multiTouchPageSwipe = multiTouchPageSwipe,
+                    pageSwipeAnimation = pageSwipeAnimation,
+                    infinitePageSwipe = infinitePageSwipe,
+                    buttonVibrationLevel = buttonVibrationLevel,
+                    pageName = pageName,
+                    pageCount = pageCount,
+                    onPageSwipeAxisChange = onPageSwipeAxisChange,
+                    onMultiTouchPageSwipeChange = onMultiTouchPageSwipeChange,
+                    onPageSwipeAnimationChange = onPageSwipeAnimationChange,
+                    onInfinitePageSwipeChange = onInfinitePageSwipeChange,
+                    onButtonVibrationLevelChange = onButtonVibrationLevelChange,
+                    onConsoleLayoutEditor = onConsoleLayoutEditor,
+                    onAddPage = onAddPage
+                )
+            } else {
+                DeckSettingsPanel(
+                    deckPages = deckPages,
+                    activePageId = activePageId,
+                    pageSwipeAxis = pageSwipeAxis,
+                    multiTouchPageSwipe = multiTouchPageSwipe,
+                    pageSwipeAnimation = pageSwipeAnimation,
+                    infinitePageSwipe = infinitePageSwipe,
+                    buttonVibrationLevel = buttonVibrationLevel,
+                    pageName = pageName,
+                    pageCount = pageCount,
+                    onPageSwipeAxisChange = onPageSwipeAxisChange,
+                    onMultiTouchPageSwipeChange = onMultiTouchPageSwipeChange,
+                    onPageSwipeAnimationChange = onPageSwipeAnimationChange,
+                    onInfinitePageSwipeChange = onInfinitePageSwipeChange,
+                    onButtonVibrationLevelChange = onButtonVibrationLevelChange,
+                    onAddPage = onAddPage,
+                )
+            }
         }
 
         item {
-            DiagnosticsPanel(logs = logs)
+            DiagnosticsPanel(logs = logs, consoleStyle = isConsoleMode)
+        }
+    }
+}
+
+@Composable
+private fun UiModeToggle(
+    deckUiMode: DeckUiMode,
+    consoleStyle: Boolean,
+    onDeckUiModeChange: (DeckUiMode) -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        DeckUiMode.values().forEach { mode ->
+            val selected = deckUiMode == mode
+            val background = when {
+                selected && consoleStyle -> Color(0xFF2D75D6)
+                selected -> MaterialTheme.colorScheme.primary
+                consoleStyle -> Color.White.copy(alpha = 0.08f)
+                else -> MaterialTheme.colorScheme.surfaceVariant
+            }
+            val foreground = if (selected || consoleStyle) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
+            Surface(
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(999.dp)),
+                color = background,
+                contentColor = foreground,
+                onClick = { onDeckUiModeChange(mode) }
+            ) {
+                Text(
+                    modifier = Modifier.padding(vertical = 12.dp),
+                    text = stringResource(mode.labelRes),
+                    textAlign = TextAlign.Center,
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
         }
     }
 }
@@ -1021,7 +1102,6 @@ private fun DeckSettingsPanel(
     pageSwipeAnimation: Boolean,
     infinitePageSwipe: Boolean,
     buttonVibrationLevel: ButtonVibrationLevel,
-    deckUiMode: DeckUiMode,
     pageName: String,
     pageCount: Int,
     onPageSwipeAxisChange: (PageSwipeAxis) -> Unit,
@@ -1029,8 +1109,6 @@ private fun DeckSettingsPanel(
     onPageSwipeAnimationChange: (Boolean) -> Unit,
     onInfinitePageSwipeChange: (Boolean) -> Unit,
     onButtonVibrationLevelChange: (ButtonVibrationLevel) -> Unit,
-    onDeckUiModeChange: (DeckUiMode) -> Unit,
-    onConsoleLayoutEditor: () -> Unit,
     onAddPage: () -> Unit
 ) {
     Card(
@@ -1102,27 +1180,6 @@ private fun DeckSettingsPanel(
             ) {
                 Text(stringResource(buttonVibrationLevel.labelRes))
             }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                DeckUiMode.values().forEach { mode ->
-                    OutlinedButton(
-                        modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(8.dp),
-                        onClick = { onDeckUiModeChange(mode) }
-                    ) {
-                        Text(stringResource(if (deckUiMode == mode) mode.labelRes else mode.labelRes))
-                    }
-                }
-            }
-            OutlinedButton(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(8.dp),
-                onClick = onConsoleLayoutEditor
-            ) {
-                Text(stringResource(R.string.console_layout_editor))
-            }
             OutlinedButton(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(8.dp),
@@ -1136,8 +1193,117 @@ private fun DeckSettingsPanel(
 }
 
 @Composable
+private fun ConsoleSettingsPanel(
+    deckPages: List<DeckPageConfig>,
+    activePageId: Int,
+    pageSwipeAxis: PageSwipeAxis,
+    multiTouchPageSwipe: Boolean,
+    pageSwipeAnimation: Boolean,
+    infinitePageSwipe: Boolean,
+    buttonVibrationLevel: ButtonVibrationLevel,
+    pageName: String,
+    pageCount: Int,
+    onPageSwipeAxisChange: (PageSwipeAxis) -> Unit,
+    onMultiTouchPageSwipeChange: (Boolean) -> Unit,
+    onPageSwipeAnimationChange: (Boolean) -> Unit,
+    onInfinitePageSwipeChange: (Boolean) -> Unit,
+    onButtonVibrationLevelChange: (ButtonVibrationLevel) -> Unit,
+    onConsoleLayoutEditor: () -> Unit,
+    onAddPage: () -> Unit
+) {
+    Card(
+        shape = RoundedCornerShape(18.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF14202A).copy(alpha = 0.88f))
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Text(
+                text = stringResource(R.string.console_settings),
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+                color = Color.White
+            )
+            Text(
+                text = stringResource(R.string.page_count_summary, pageName, pageCount),
+                style = MaterialTheme.typography.bodySmall,
+                color = Color.White.copy(alpha = 0.6f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            PageIndicator(
+                modifier = Modifier.fillMaxWidth(),
+                pageCount = deckPages.size,
+                activeIndex = deckPages.indexOfFirst { it.id == activePageId }.coerceAtLeast(0)
+            )
+            Button(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(14.dp),
+                onClick = onConsoleLayoutEditor
+            ) {
+                Text(stringResource(R.string.console_layout_editor))
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                PageSwipeAxis.values().forEach { axis ->
+                    OutlinedButton(
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(14.dp),
+                        onClick = { onPageSwipeAxisChange(axis) }
+                    ) {
+                        Text(stringResource(if (pageSwipeAxis == axis) axis.labelRes else axis.shortLabelRes))
+                    }
+                }
+            }
+            OutlinedButton(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(14.dp),
+                onClick = { onMultiTouchPageSwipeChange(!multiTouchPageSwipe) }
+            ) {
+                Text(stringResource(if (multiTouchPageSwipe) R.string.multi_touch_swipe_on else R.string.multi_touch_swipe_off))
+            }
+            OutlinedButton(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(14.dp),
+                onClick = { onInfinitePageSwipeChange(!infinitePageSwipe) }
+            ) {
+                Text(stringResource(if (infinitePageSwipe) R.string.page_wrap_on else R.string.page_wrap_off))
+            }
+            OutlinedButton(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(14.dp),
+                onClick = { onPageSwipeAnimationChange(!pageSwipeAnimation) }
+            ) {
+                Text(stringResource(if (pageSwipeAnimation) R.string.page_swipe_animation_on else R.string.page_swipe_animation_off))
+            }
+            OutlinedButton(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(14.dp),
+                onClick = { onButtonVibrationLevelChange(buttonVibrationLevel.next()) }
+            ) {
+                Text(stringResource(buttonVibrationLevel.labelRes))
+            }
+            OutlinedButton(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(14.dp),
+                enabled = pageCount < MAX_PAGES,
+                onClick = onAddPage
+            ) {
+                Text(stringResource(R.string.add_page_count, pageCount, MAX_PAGES))
+            }
+        }
+    }
+}
+
+@Composable
 private fun Header(
     status: HidStatus,
+    consoleStyle: Boolean = false,
     onStart: () -> Unit,
     onStop: () -> Unit,
     onMakeDiscoverable: () -> Unit,
@@ -1145,6 +1311,9 @@ private fun Header(
     onRefreshHosts: () -> Unit,
     onConnectHost: (PairedHidHost) -> Unit
 ) {
+    val primaryText = if (consoleStyle) Color.White else MaterialTheme.colorScheme.onSurface
+    val secondaryText = if (consoleStyle) Color.White.copy(alpha = 0.64f) else MaterialTheme.colorScheme.onSurfaceVariant
+    val cardColor = if (consoleStyle) Color(0xFF17232D).copy(alpha = 0.9f) else MaterialTheme.colorScheme.surfaceVariant
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -1155,12 +1324,13 @@ private fun Header(
                 Text(
                     text = stringResource(R.string.app_name),
                     style = MaterialTheme.typography.headlineMedium,
-                    fontWeight = FontWeight.Bold
+                    fontWeight = FontWeight.Bold,
+                    color = primaryText
                 )
                 Text(
                     text = stringResource(R.string.app_tagline),
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = secondaryText
                 )
             }
             StatusPill(status.state)
@@ -1168,7 +1338,7 @@ private fun Header(
 
         Card(
             shape = RoundedCornerShape(8.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+            colors = CardDefaults.cardColors(containerColor = cardColor)
         ) {
             Column(
                 modifier = Modifier.padding(12.dp),
@@ -1206,13 +1376,13 @@ private fun Header(
                 Text(
                     text = localizedStatusMessage(status.message),
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = secondaryText
                 )
 
                 Text(
                     text = stringResource(R.string.pairing_hint),
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = secondaryText
                 )
 
                 Row(
@@ -1223,7 +1393,7 @@ private fun Header(
                     Text(
                         text = stringResource(R.string.paired_hosts),
                         style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = secondaryText
                     )
                     TextButton(onClick = onRefreshHosts) {
                         Text(stringResource(R.string.refresh))
@@ -1234,7 +1404,7 @@ private fun Header(
                     Text(
                         text = stringResource(R.string.no_paired_hosts),
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = secondaryText
                     )
                 } else {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1618,6 +1788,30 @@ private fun DeckPage(
             minOf(maxCellWidth, maxCellHeight).toDp()
         }
 
+        if (uiMode == DeckUiMode.Console && !previewMode) {
+            ConsoleDeckSurface(
+                modifier = Modifier.fillMaxSize(),
+                deckPages = deckPages,
+                activePageId = activePageId,
+                pageSwipeAnimation = pageSwipeAnimation,
+                pageSwipeDelta = pageSwipeDelta,
+                pageAnimationSequence = pageAnimationSequence,
+                multiTouchPageSwipe = multiTouchPageSwipe,
+                layout = consoleLayout,
+                columns = safeColumns,
+                rows = safeRows,
+                spacing = spacing,
+                status = status,
+                appWidgetHost = appWidgetHost,
+                appWidgetManager = appWidgetManager,
+                onPageSwipe = onPageSwipe,
+                onButtonPressed = onButtonPressed,
+                onButtonTouchStarted = onButtonTouchStarted,
+                onButtonTouchEnded = onButtonTouchEnded
+            )
+            return@BoxWithConstraints
+        }
+
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -1640,45 +1834,27 @@ private fun DeckPage(
                 label = "pageSwipe"
             ) { target ->
                 val targetButtons = deckPages.firstOrNull { it.id == target.pageId }?.buttons.orEmpty()
-                if (uiMode == DeckUiMode.Console && !previewMode) {
-                    ConsoleDeckSurface(
-                        modifier = Modifier.fillMaxSize(),
-                        contentPadding = indicatorPadding,
-                        buttons = targetButtons,
-                        layout = consoleLayout,
-                        columns = safeColumns,
-                        rows = safeRows,
-                        spacing = spacing,
-                        status = status,
-                        appWidgetHost = appWidgetHost,
-                        appWidgetManager = appWidgetManager,
-                        onButtonPressed = onButtonPressed,
-                        onButtonTouchStarted = onButtonTouchStarted,
-                        onButtonTouchEnded = onButtonTouchEnded
-                    )
-                } else {
-                    ButtonGrid(
-                        modifier = Modifier.fillMaxSize(),
-                        contentPadding = indicatorPadding,
-                        buttons = targetButtons,
-                        columns = safeColumns,
-                        rows = safeRows,
-                        cellSize = cellSize,
-                        spacing = spacing,
-                        status = status,
-                        appWidgetHost = appWidgetHost,
-                        appWidgetManager = appWidgetManager,
-                        visualMode = DeckUiMode.Classic,
-                        previewMode = previewMode,
-                        showTitle = target.pageId == deckPages.firstOrNull()?.id,
-                        onButtonPressed = onButtonPressed,
-                        onButtonTouchStarted = onButtonTouchStarted,
-                        onButtonTouchEnded = onButtonTouchEnded,
-                        onButtonEdit = onButtonEdit,
-                        onButtonMoved = onButtonMoved,
-                        onEmptySlotPressed = onEmptySlotPressed
-                    )
-                }
+                ButtonGrid(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = indicatorPadding,
+                    buttons = targetButtons,
+                    columns = safeColumns,
+                    rows = safeRows,
+                    cellSize = cellSize,
+                    spacing = spacing,
+                    status = status,
+                    appWidgetHost = appWidgetHost,
+                    appWidgetManager = appWidgetManager,
+                    visualMode = DeckUiMode.Classic,
+                    previewMode = previewMode,
+                    showTitle = target.pageId == deckPages.firstOrNull()?.id,
+                    onButtonPressed = onButtonPressed,
+                    onButtonTouchStarted = onButtonTouchStarted,
+                    onButtonTouchEnded = onButtonTouchEnded,
+                    onButtonEdit = onButtonEdit,
+                    onButtonMoved = onButtonMoved,
+                    onEmptySlotPressed = onEmptySlotPressed
+                )
             }
             PageIndicator(
                 modifier = Modifier
@@ -1728,8 +1904,12 @@ private fun PageIndicator(
 @Composable
 private fun ConsoleDeckSurface(
     modifier: Modifier = Modifier,
-    contentPadding: PaddingValues,
-    buttons: List<DeckButton>,
+    deckPages: List<DeckPageConfig>,
+    activePageId: Int,
+    pageSwipeAnimation: Boolean,
+    pageSwipeDelta: Int,
+    pageAnimationSequence: Int,
+    multiTouchPageSwipe: Boolean,
     layout: ConsoleLayoutConfig,
     columns: Int,
     rows: Int,
@@ -1737,23 +1917,21 @@ private fun ConsoleDeckSurface(
     status: HidStatus,
     appWidgetHost: AppWidgetHost,
     appWidgetManager: AppWidgetManager,
+    onPageSwipe: (Int) -> Unit,
     onButtonPressed: (DeckButton) -> Unit,
     onButtonTouchStarted: () -> Unit,
     onButtonTouchEnded: () -> Unit
 ) {
-    val settingsButton = buttons.firstOrNull { buttonAppAction(it) == DeckActionType.Settings }
-    val consoleRows = remember(buttons, layout, columns, rows) {
-        consoleLayoutRows(
-            layout = layout,
-            buttons = buttons.filterNot { buttonAppAction(it) == DeckActionType.Settings },
-            columns = columns,
-            rows = rows
-        )
+    val settingsButton = remember(deckPages) {
+        deckPages.flatMap { it.buttons }.firstOrNull { buttonAppAction(it) == DeckActionType.Settings }
     }
+    val swipeModifier = Modifier.multiTouchPageSwipe(
+        enabled = multiTouchPageSwipe,
+        axis = PageSwipeAxis.Horizontal,
+        onPageSwipe = onPageSwipe
+    )
     Box(
         modifier = modifier
-            .padding(contentPadding)
-            .clip(RoundedCornerShape(26.dp))
             .background(
                 Brush.linearGradient(
                     listOf(
@@ -1763,8 +1941,6 @@ private fun ConsoleDeckSurface(
                     )
                 )
             )
-            .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(26.dp))
-            .padding(12.dp)
     ) {
         Row(
             modifier = Modifier.fillMaxSize(),
@@ -1781,25 +1957,57 @@ private fun ConsoleDeckSurface(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxHeight()
+                    .then(swipeModifier)
             ) {
                 val density = LocalDensity.current
                 val consoleSpacing = maxOf(spacing, 10.dp)
-                val rowHeight = with(density) {
-                    val spacingPx = consoleSpacing.toPx()
-                    val rowCount = consoleRows.size.coerceAtLeast(1)
-                    ((constraints.maxHeight - spacingPx * (rowCount - 1)) / rowCount).toDp()
-                }
-                ConsoleButtonRows(
+                AnimatedContent(
+                    targetState = PageAnimationTarget(activePageId, pageSwipeDelta, pageAnimationSequence),
                     modifier = Modifier.fillMaxSize(),
-                    rows = consoleRows,
-                    rowHeight = rowHeight,
-                    spacing = consoleSpacing,
-                    status = status,
-                    appWidgetHost = appWidgetHost,
-                    appWidgetManager = appWidgetManager,
-                    onButtonPressed = onButtonPressed,
-                    onButtonTouchStarted = onButtonTouchStarted,
-                    onButtonTouchEnded = onButtonTouchEnded
+                    transitionSpec = {
+                        if (!pageSwipeAnimation) {
+                            fadeIn(tween(0)) togetherWith fadeOut(tween(0))
+                        } else {
+                            slideInHorizontally { width -> targetState.delta.signOrOne() * width } togetherWith
+                                slideOutHorizontally { width -> -targetState.delta.signOrOne() * width }
+                        }
+                    },
+                    label = "consolePageSwipe"
+                ) { target ->
+                    val targetButtons = deckPages.firstOrNull { it.id == target.pageId }?.buttons.orEmpty()
+                    val consoleRows = consoleLayoutRows(
+                        layout = layout,
+                        buttons = targetButtons.filterNot { buttonAppAction(it) == DeckActionType.Settings },
+                        columns = columns,
+                        rows = rows
+                    )
+                    val rowHeight = with(density) {
+                        val spacingPx = consoleSpacing.toPx()
+                        val rowCount = consoleRows.size.coerceAtLeast(1)
+                        ((constraints.maxHeight - 12.dp.toPx() - spacingPx * (rowCount - 1)) / rowCount).toDp()
+                    }
+                    ConsoleButtonRows(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(bottom = 12.dp),
+                        rows = consoleRows,
+                        rowHeight = rowHeight,
+                        spacing = consoleSpacing,
+                        status = status,
+                        appWidgetHost = appWidgetHost,
+                        appWidgetManager = appWidgetManager,
+                        onButtonPressed = onButtonPressed,
+                        onButtonTouchStarted = onButtonTouchStarted,
+                        onButtonTouchEnded = onButtonTouchEnded
+                    )
+                }
+                PageIndicator(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = 2.dp),
+                    pageCount = deckPages.size,
+                    activeIndex = deckPages.indexOfFirst { it.id == activePageId }.coerceAtLeast(0),
+                    axis = PageSwipeAxis.Horizontal
                 )
             }
         }
@@ -3094,10 +3302,16 @@ private fun localizedStatusMessage(message: String): String {
 }
 
 @Composable
-private fun DiagnosticsPanel(logs: List<ActivityLog>) {
+private fun DiagnosticsPanel(
+    logs: List<ActivityLog>,
+    consoleStyle: Boolean = false
+) {
+    val primaryText = if (consoleStyle) Color.White else MaterialTheme.colorScheme.onSurface
+    val secondaryText = if (consoleStyle) Color.White.copy(alpha = 0.64f) else MaterialTheme.colorScheme.onSurfaceVariant
+    val cardColor = if (consoleStyle) Color(0xFF17232D).copy(alpha = 0.9f) else MaterialTheme.colorScheme.surface
     Card(
         shape = RoundedCornerShape(8.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        colors = CardDefaults.cardColors(containerColor = cardColor)
     ) {
         Column(
             modifier = Modifier
@@ -3108,14 +3322,15 @@ private fun DiagnosticsPanel(logs: List<ActivityLog>) {
             Text(
                 text = stringResource(R.string.diagnostics),
                 style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold
+                fontWeight = FontWeight.SemiBold,
+                color = primaryText
             )
 
             if (logs.isEmpty()) {
                 Text(
                     text = stringResource(R.string.no_actions_yet),
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = secondaryText
                 )
             } else {
                 LazyColumn(
@@ -3126,6 +3341,7 @@ private fun DiagnosticsPanel(logs: List<ActivityLog>) {
                         Text(
                             text = "${log.buttonTitle} ${log.note}: ${log.payload}",
                             style = MaterialTheme.typography.bodyMedium,
+                            color = primaryText,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
