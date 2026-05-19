@@ -158,4 +158,5 @@
     <string name="status_error">Error</string>
     <string name="status_message_permissions_denied">Bluetooth permissions were denied</string>
     <string name="status_message_discoverable_finished">Discoverable request finished.</string>
+    <string name="status_message_discoverable_canceled">Discoverable mode was canceled in MobileDeck. Android may keep the device visible until the system timeout.</string>
 </resources>

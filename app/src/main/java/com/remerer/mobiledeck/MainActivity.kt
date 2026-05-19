@@ -658,6 +658,17 @@ private fun MobileDeckApp() {
         }
     }
 
+    fun cancelDiscoverable() {
+        pairingDiscoverable = false
+        pairingDiscoverableUntilMillis = null
+        if (pendingBluetoothPermissionAction == BluetoothPermissionAction.MakeDiscoverable) {
+            pendingBluetoothPermissionAction = null
+        }
+        hidStatus = hidStatus.copy(
+            message = "Discoverable request canceled in MobileDeck."
+        )
+    }
+
     fun addDeckButton(position: Int? = null, editAfterCreate: Boolean = false) {
         val colors = defaultDeckColors()
         val buttonCapacity = pageButtonCapacity(activeDeckPage.id, deckPages, deckColumns, deckRows)
@@ -1071,6 +1082,10 @@ private fun MobileDeckApp() {
                     context.applicationContext.vibrateButtonPress(buttonVibrationLevel)
                     makeDiscoverable()
                 },
+                onCancelDiscoverable = {
+                    context.applicationContext.vibrateButtonPress(buttonVibrationLevel)
+                    cancelDiscoverable()
+                },
                 onRefreshHosts = {
                     context.applicationContext.vibrateButtonPress(buttonVibrationLevel)
                     pairedHosts = hidManager.pairedHosts()
@@ -1192,6 +1207,7 @@ private fun SettingsPage(
     onStart: () -> Unit,
     onStop: () -> Unit,
     onMakeDiscoverable: () -> Unit,
+    onCancelDiscoverable: () -> Unit,
     onRefreshHosts: () -> Unit,
     onConnectHost: (PairedHidHost) -> Unit,
     onColumnsChange: (Int) -> Unit,
@@ -1220,6 +1236,7 @@ private fun SettingsPage(
             onStart = onStart,
             onStop = onStop,
             onMakeDiscoverable = onMakeDiscoverable,
+            onCancelDiscoverable = onCancelDiscoverable,
             onRefreshHosts = onRefreshHosts,
             onConnectHost = onConnectHost
         )
@@ -1292,6 +1309,7 @@ private fun SettingsSidebar(
     onStart: () -> Unit,
     onStop: () -> Unit,
     onMakeDiscoverable: () -> Unit,
+    onCancelDiscoverable: () -> Unit,
     onRefreshHosts: () -> Unit,
     onConnectHost: (PairedHidHost) -> Unit
 ) {
@@ -1362,11 +1380,13 @@ private fun SettingsSidebar(
                         Switch(
                             checked = pairingDiscoverable,
                             onCheckedChange = { enabled ->
-                                if (enabled) onMakeDiscoverable()
+                                if (enabled) onMakeDiscoverable() else onCancelDiscoverable()
                             }
                         )
                     },
-                    onClick = onMakeDiscoverable
+                    onClick = {
+                        if (pairingDiscoverable) onCancelDiscoverable() else onMakeDiscoverable()
+                    }
                 )
                 PairedHostsCard(
                     pairedHosts = pairedHosts,
@@ -4607,6 +4627,7 @@ private fun localizedStatusMessage(message: String): String {
         "Bluetooth permissions were denied" -> stringResource(R.string.status_message_permissions_denied)
         "Discoverable request finished. Pair from the PC while HID is registered." -> stringResource(R.string.status_message_discoverable_finished)
         "Discoverable request finished." -> stringResource(R.string.status_message_discoverable_finished)
+        "Discoverable request canceled in MobileDeck." -> stringResource(R.string.status_message_discoverable_canceled)
         else -> message
     }
 }
