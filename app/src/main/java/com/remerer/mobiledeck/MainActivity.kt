@@ -3804,7 +3804,7 @@ private fun Modifier.deckTapGesture(
                 val change = event.changes.firstOrNull { it.id == down.id }
                 if (change != null) {
                     totalDrag += change.position - change.previousPosition
-                    if (abs(totalDrag.x) > 24f || abs(totalDrag.y) > 24f || change.isConsumed) {
+                    if (abs(totalDrag.x) > 24f || abs(totalDrag.y) > 24f) {
                         canceled = true
                     }
                 }
