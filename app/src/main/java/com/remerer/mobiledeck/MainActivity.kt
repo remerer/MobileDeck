@@ -356,6 +356,11 @@ private enum class AppPage {
     Settings
 }
 
+private enum class BluetoothPermissionAction {
+    RegisterHid,
+    MakeDiscoverable
+}
+
 private enum class ButtonVibrationLevel(
     @StringRes val labelRes: Int,
     val durationMillis: Long,
@@ -467,25 +472,64 @@ private fun MobileDeckApp() {
         }
     }
     var pairedHosts by remember { mutableStateOf(emptyList<PairedHidHost>()) }
+    var pendingBluetoothPermissionAction by remember { mutableStateOf<BluetoothPermissionAction?>(null) }
+    var pairingDiscoverable by remember { mutableStateOf(false) }
+    var pairingDiscoverableUntilMillis by remember { mutableStateOf<Long?>(null) }
+    val discoverableLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val durationSeconds = result.resultCode.takeIf { it > 0 } ?: 0
+        if (durationSeconds > 0) {
+            pairingDiscoverableUntilMillis = System.currentTimeMillis() + durationSeconds * 1000L
+        } else {
+            pairingDiscoverable = false
+            pairingDiscoverableUntilMillis = null
+        }
+        hidStatus = hidStatus.copy(
+            message = "Discoverable request finished."
+        )
+    }
+
+    fun launchDiscoverableRequest() {
+        pairingDiscoverable = true
+        runCatching {
+            discoverableLauncher.launch(
+                Intent(BluetoothAdapter.ACTION_REQUEST_DISCOVERABLE).apply {
+                    putExtra(BluetoothAdapter.EXTRA_DISCOVERABLE_DURATION, 300)
+                }
+            )
+        }.onFailure { error ->
+            pairingDiscoverable = false
+            pairingDiscoverableUntilMillis = null
+            hidStatus = HidStatus(
+                HidConnectionState.Error,
+                error.message ?: "Could not request Bluetooth discoverable mode"
+            )
+            Log.e("MobileDeck", "Failed to request discoverable mode", error)
+        }
+    }
+
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
     ) { grants ->
         if (grants.values.all { it }) {
-            hidManager.start()
-            pairedHosts = hidManager.pairedHosts()
+            when (pendingBluetoothPermissionAction) {
+                BluetoothPermissionAction.MakeDiscoverable -> launchDiscoverableRequest()
+                BluetoothPermissionAction.RegisterHid,
+                null -> {
+                    hidManager.start()
+                    pairedHosts = hidManager.pairedHosts()
+                }
+            }
         } else {
+            pairingDiscoverable = false
+            pairingDiscoverableUntilMillis = null
             hidStatus = HidStatus(
                 HidConnectionState.PermissionMissing,
                 "Bluetooth permissions were denied"
             )
         }
-    }
-    val discoverableLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.StartActivityForResult()
-    ) {
-        hidStatus = hidStatus.copy(
-            message = "Discoverable request finished. Pair from the PC while HID is registered."
-        )
+        pendingBluetoothPermissionAction = null
     }
     var deckPages by remember { mutableStateOf(loadDeckPages(context)) }
     var activeDeckPageId by remember { mutableStateOf(deckPages.first().id) }
@@ -509,6 +553,15 @@ private fun MobileDeckApp() {
     var page by remember { mutableStateOf(AppPage.Deck) }
     val activeDeckPage = deckPages.firstOrNull { it.id == activeDeckPageId } ?: deckPages.first()
     val deckButtons = activeDeckPage.buttons
+
+    LaunchedEffect(pairingDiscoverableUntilMillis) {
+        val until = pairingDiscoverableUntilMillis ?: return@LaunchedEffect
+        delay((until - System.currentTimeMillis()).coerceAtLeast(0L))
+        if (pairingDiscoverableUntilMillis == until) {
+            pairingDiscoverable = false
+            pairingDiscoverableUntilMillis = null
+        }
+    }
 
     fun updateButtonEverywhere(button: DeckButton) {
         val updatedPages = updateDeckButton(deckPages, button)
@@ -584,11 +637,23 @@ private fun MobileDeckApp() {
 
     fun startHid() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            pendingBluetoothPermissionAction = BluetoothPermissionAction.RegisterHid
             permissionLauncher.launch(HidKeyboardManager.REQUIRED_BLUETOOTH_PERMISSIONS)
         } else {
             hidManager.start()
         }
         pairedHosts = hidManager.pairedHosts()
+    }
+
+    fun makeDiscoverable() {
+        if (pairingDiscoverable) return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !hidManager.hasRequiredPermissions()) {
+            pairingDiscoverable = true
+            pendingBluetoothPermissionAction = BluetoothPermissionAction.MakeDiscoverable
+            permissionLauncher.launch(HidKeyboardManager.REQUIRED_BLUETOOTH_PERMISSIONS)
+        } else {
+            launchDiscoverableRequest()
+        }
     }
 
     fun addDeckButton(position: Int? = null, editAfterCreate: Boolean = false) {
@@ -953,6 +1018,7 @@ private fun MobileDeckApp() {
                 infinitePageSwipe = infinitePageSwipe,
                 buttonVibrationLevel = buttonVibrationLevel,
                 deckUiMode = deckUiMode,
+                pairingDiscoverable = pairingDiscoverable,
                 onLayoutEditor = {
                     context.applicationContext.vibrateButtonPress(buttonVibrationLevel)
                     page = AppPage.LayoutEditor
@@ -1001,11 +1067,7 @@ private fun MobileDeckApp() {
                 },
                 onMakeDiscoverable = {
                     context.applicationContext.vibrateButtonPress(buttonVibrationLevel)
-                    discoverableLauncher.launch(
-                        Intent(BluetoothAdapter.ACTION_REQUEST_DISCOVERABLE).apply {
-                            putExtra(BluetoothAdapter.EXTRA_DISCOVERABLE_DURATION, 300)
-                        }
-                    )
+                    makeDiscoverable()
                 },
                 onRefreshHosts = {
                     context.applicationContext.vibrateButtonPress(buttonVibrationLevel)
@@ -1112,6 +1174,7 @@ private fun SettingsPage(
     infinitePageSwipe: Boolean,
     buttonVibrationLevel: ButtonVibrationLevel,
     deckUiMode: DeckUiMode,
+    pairingDiscoverable: Boolean,
     pageName: String,
     pageCount: Int,
     pairedHosts: List<PairedHidHost>,
@@ -1149,6 +1212,7 @@ private fun SettingsPage(
             status = status,
             deckUiMode = deckUiMode,
             pairedHosts = pairedHosts,
+            pairingDiscoverable = pairingDiscoverable,
             onBack = onBack,
             onDeckUiModeChange = onDeckUiModeChange,
             onStart = onStart,
@@ -1220,6 +1284,7 @@ private fun SettingsSidebar(
     status: HidStatus,
     deckUiMode: DeckUiMode,
     pairedHosts: List<PairedHidHost>,
+    pairingDiscoverable: Boolean,
     onBack: () -> Unit,
     onDeckUiModeChange: (DeckUiMode) -> Unit,
     onStart: () -> Unit,
@@ -1292,10 +1357,11 @@ private fun SettingsSidebar(
                     subtitle = stringResource(R.string.settings_discoverable_desc),
                     deckUiMode = mode,
                     trailing = {
-                        Text(
-                            text = stringResource(R.string.refresh),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = settingsModeAccent(mode)
+                        Switch(
+                            checked = pairingDiscoverable,
+                            onCheckedChange = { enabled ->
+                                if (enabled) onMakeDiscoverable()
+                            }
                         )
                     },
                     onClick = onMakeDiscoverable
@@ -4467,6 +4533,7 @@ private fun localizedStatusMessage(message: String): String {
     return when (message) {
         "Bluetooth permissions were denied" -> stringResource(R.string.status_message_permissions_denied)
         "Discoverable request finished. Pair from the PC while HID is registered." -> stringResource(R.string.status_message_discoverable_finished)
+        "Discoverable request finished." -> stringResource(R.string.status_message_discoverable_finished)
         else -> message
     }
 }

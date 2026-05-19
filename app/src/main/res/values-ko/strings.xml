@@ -8,7 +8,7 @@
     <string name="settings_hid_management">Bluetooth HID 관리</string>
     <string name="settings_register_hid_desc">Bluetooth HID 키보드로 등록합니다.</string>
     <string name="settings_stop_hid_desc">등록된 HID를 해제합니다.</string>
-    <string name="settings_discoverable_desc">PC에서 MobileDeck Keyboard를 검색할 수 있도록 합니다.</string>
+    <string name="settings_discoverable_desc">PC에서 이 휴대폰을 검색할 수 있도록 합니다. 검색 허용 시간이 끝나면 토글은 자동으로 꺼집니다.</string>
     <string name="settings_app_info">앱 정보</string>
     <string name="settings_app_info_desc">버전, 라이선스 및 오픈소스 정보를 확인합니다.</string>
     <string name="settings_classic_header">덱 레이아웃 설정</string>
@@ -152,5 +152,5 @@
     <string name="status_permission_needed">권한 필요</string>
     <string name="status_error">오류</string>
     <string name="status_message_permissions_denied">블루투스 권한이 거부되었습니다.</string>
-    <string name="status_message_discoverable_finished">검색 허용 요청이 끝났습니다. HID가 등록된 동안 PC에서 페어링하세요.</string>
+    <string name="status_message_discoverable_finished">검색 허용 요청이 끝났습니다.</string>
 </resources>

@@ -8,7 +8,7 @@
     <string name="settings_hid_management">Bluetooth HID management</string>
     <string name="settings_register_hid_desc">Register as a Bluetooth HID keyboard.</string>
     <string name="settings_stop_hid_desc">Unregister the active HID device.</string>
-    <string name="settings_discoverable_desc">Allow the PC to find MobileDeck Keyboard.</string>
+    <string name="settings_discoverable_desc">Allow the PC to find this phone. The toggle turns off when discoverable mode ends.</string>
     <string name="settings_app_info">App info</string>
     <string name="settings_app_info_desc">Version, license, and open source details.</string>
     <string name="settings_classic_header">Deck layout settings</string>
@@ -152,5 +152,5 @@
     <string name="status_permission_needed">Permission needed</string>
     <string name="status_error">Error</string>
     <string name="status_message_permissions_denied">Bluetooth permissions were denied</string>
-    <string name="status_message_discoverable_finished">Discoverable request finished. Pair from the PC while HID is registered.</string>
+    <string name="status_message_discoverable_finished">Discoverable request finished.</string>
 </resources>
