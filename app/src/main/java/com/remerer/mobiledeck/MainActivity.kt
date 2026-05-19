@@ -3878,7 +3878,7 @@ private fun ConsoleSidebar(
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(
-                    text = stringResource(R.string.console_panel),
+                    text = stringResource(R.string.app_name),
                     style = MaterialTheme.typography.headlineMedium,
                     fontWeight = FontWeight.Bold,
                     color = colors.textPrimary,
