@@ -147,6 +147,7 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.changedToUp
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.font.FontWeight
@@ -3782,6 +3783,43 @@ private fun Modifier.pressReleaseFeedback(
     }
 }
 
+private fun Modifier.deckTapGesture(
+    enabled: Boolean,
+    onPress: () -> Unit,
+    onRelease: () -> Unit,
+    onPressedChange: (Boolean) -> Unit,
+    onClick: () -> Unit
+): Modifier {
+    if (!enabled) return this
+    return pointerInput(onPress, onRelease, onClick) {
+        awaitEachGesture {
+            val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+            var totalDrag = Offset.Zero
+            var canceled = false
+            onPressedChange(true)
+            onPress()
+
+            while (true) {
+                val event = awaitPointerEvent(PointerEventPass.Final)
+                val change = event.changes.firstOrNull { it.id == down.id }
+                if (change != null) {
+                    totalDrag += change.position - change.previousPosition
+                    if (abs(totalDrag.x) > 24f || abs(totalDrag.y) > 24f || change.isConsumed) {
+                        canceled = true
+                    }
+                }
+                if (event.changes.all { it.changedToUp() || !it.pressed }) {
+                    break
+                }
+            }
+
+            onPressedChange(false)
+            onRelease()
+            if (!canceled) onClick()
+        }
+    }
+}
+
 private fun Int.signOrOne(): Int = if (this < 0) -1 else 1
 
 private fun wrapIndex(value: Int, size: Int): Int = ((value % size) + size) % size
@@ -4011,8 +4049,10 @@ private fun DeckKey(
         isConsole && containerColor.luminance() > 0.5f -> themeColors.textPrimary
         else -> Color.White
     }
+    val buttonShape = RoundedCornerShape(if (isConsole) 18.dp else 8.dp)
     val density = LocalDensity.current
     var dragOffset by remember(button.id) { mutableStateOf(Offset.Zero) }
+    var touchPressed by remember(button.id) { mutableStateOf(false) }
     val moveThresholdPx = with(density) { ((cellSize + spacing) * 0.55f).toPx() }
     val dragActive = abs(dragOffset.x) > moveThresholdPx || abs(dragOffset.y) > moveThresholdPx
     val animatedX by animateFloatAsState(
@@ -4054,19 +4094,21 @@ private fun DeckKey(
     } else {
         Modifier
     }
-    val clickModifier = if (hasWidget || letWidgetHandleTouch) {
-        Modifier
+    val clickModifier = when {
+        hasWidget || letWidgetHandleTouch -> Modifier
+        previewMode -> Modifier.combinedClickable(onClick = onPressed, onLongClick = onEdit)
+        else -> Modifier.deckTapGesture(
+            enabled = enabled,
+            onPress = onPressFeedback,
+            onRelease = onReleaseFeedback,
+            onPressedChange = { touchPressed = it },
+            onClick = onPressed
+        )
+    }
+    val surfaceColor = if (touchPressed) {
+        Color.White.copy(alpha = if (isConsole) 0.12f else 0.16f).compositeOver(containerColor)
     } else {
-        Modifier
-            .pressReleaseFeedback(
-                enabled = enabled && !previewMode,
-                onPress = onPressFeedback,
-                onRelease = onReleaseFeedback
-            )
-            .combinedClickable(
-                onClick = onPressed,
-                onLongClick = if (previewMode) onEdit else null
-            )
+        containerColor
     }
 
     Surface(
@@ -4078,10 +4120,11 @@ private fun DeckKey(
                 scaleX = animatedScale
                 scaleY = animatedScale
             }
+            .clip(buttonShape)
             .then(clickModifier),
-        shape = RoundedCornerShape(if (isConsole) 18.dp else 8.dp),
+        shape = buttonShape,
         tonalElevation = if (isConsole) 0.dp else 2.dp,
-        color = containerColor
+        color = surfaceColor
     ) {
     val showText = if (isConsole) cellSize >= 58.dp else cellSize >= 96.dp
         val showSubtitle = showText
