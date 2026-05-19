@@ -363,13 +363,14 @@ private enum class BluetoothPermissionAction {
 
 private enum class ButtonVibrationLevel(
     @StringRes val labelRes: Int,
+    @StringRes val shortLabelRes: Int,
     val durationMillis: Long,
     val amplitude: Int
 ) {
-    Off(R.string.button_vibration_off, 0L, 0),
-    Weak(R.string.button_vibration_weak, 10L, 55),
-    Medium(R.string.button_vibration_medium, 14L, 115),
-    Strong(R.string.button_vibration_strong, 18L, 190);
+    Off(R.string.button_vibration_off, R.string.button_vibration_off_short, 0L, 0),
+    Weak(R.string.button_vibration_weak, R.string.button_vibration_weak_short, 10L, 55),
+    Medium(R.string.button_vibration_medium, R.string.button_vibration_medium_short, 14L, 115),
+    Strong(R.string.button_vibration_strong, R.string.button_vibration_strong_short, 18L, 190);
 
     fun next(): ButtonVibrationLevel {
         val values = values()
@@ -2121,11 +2122,9 @@ private fun VibrationSettingRow(
         title = stringResource(R.string.settings_vibration),
         subtitle = stringResource(R.string.settings_vibration_desc),
         trailing = {
-            SettingsSegmentedControl(
-                options = ButtonVibrationLevel.values().toList(),
-                selected = buttonVibrationLevel,
-                label = { stringResource(it.labelRes) },
-                onSelected = onButtonVibrationLevelChange
+            SettingsCycleButton(
+                text = stringResource(buttonVibrationLevel.shortLabelRes),
+                onClick = { onButtonVibrationLevelChange(buttonVibrationLevel.next()) }
             )
         }
     )
@@ -2159,7 +2158,7 @@ private fun PageSummaryRow(
                     shape = RoundedCornerShape(8.dp),
                     onClick = onAddPage
                 ) {
-                    Text(stringResource(R.string.add_button))
+                    Text(stringResource(R.string.add_page))
                 }
             }
         }
@@ -2234,6 +2233,37 @@ private fun <T> SettingsSegmentedControl(
                     )
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun SettingsCycleButton(
+    text: String,
+    onClick: () -> Unit
+) {
+    Surface(
+        shape = RoundedCornerShape(7.dp),
+        color = MaterialTheme.colorScheme.primary.copy(alpha = if (isSystemInDarkTheme()) 0.34f else 0.16f),
+        contentColor = MaterialTheme.colorScheme.primary,
+        onClick = onClick
+    ) {
+        Box(
+            modifier = Modifier
+                .height(38.dp)
+                .width(76.dp)
+                .border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.35f), RoundedCornerShape(7.dp)),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = text,
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.SemiBold,
+                color = if (isSystemInDarkTheme()) Color(0xFF76DFFF) else MaterialTheme.colorScheme.primary,
+                textAlign = TextAlign.Center,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
         }
     }
 }

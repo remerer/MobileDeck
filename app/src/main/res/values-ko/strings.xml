@@ -52,6 +52,10 @@
     <string name="button_vibration_weak">버튼 진동 약함</string>
     <string name="button_vibration_medium">버튼 진동 중간</string>
     <string name="button_vibration_strong">버튼 진동 강함</string>
+    <string name="button_vibration_off_short">끔</string>
+    <string name="button_vibration_weak_short">약</string>
+    <string name="button_vibration_medium_short">중</string>
+    <string name="button_vibration_strong_short">강</string>
     <string name="deck_ui_classic">클래식 UI</string>
     <string name="deck_ui_console">콘솔 UI</string>
     <string name="console_settings">콘솔 설정</string>
@@ -60,6 +64,7 @@
     <string name="console_row">%1$d행</string>
     <string name="add_console_row">행 추가</string>
     <string name="add_button">버튼 추가</string>
+    <string name="add_page">페이지 추가</string>
     <string name="add_page_count">페이지 추가 (%1$d/%2$d)</string>
     <string name="delete_current_page">현재 페이지 삭제</string>
     <string name="register_hid">HID 등록</string>
