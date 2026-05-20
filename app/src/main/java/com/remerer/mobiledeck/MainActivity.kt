@@ -30,6 +30,7 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.core.graphics.drawable.toBitmap
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -41,6 +42,7 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.background
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.border
@@ -72,6 +74,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
@@ -89,6 +92,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.RangeSlider
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
+import androidx.compose.material3.SliderState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -148,12 +155,14 @@ import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.changedToUp
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalInspectionMode
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
@@ -361,6 +370,7 @@ private enum class AppPage {
     Deck,
     LayoutEditor,
     ConsoleLayoutEditor,
+    SliderTest,
     Settings
 }
 
@@ -472,8 +482,13 @@ private fun deckThemeColors(mode: DeckUiMode = DeckUiMode.Classic): DeckThemeCol
 @Composable
 private fun MobileDeckApp() {
     val context = LocalContext.current
-    val appWidgetManager = remember { AppWidgetManager.getInstance(context.applicationContext) }
-    val appWidgetHost = remember { AppWidgetHost(context.applicationContext, APP_WIDGET_HOST_ID) }
+    val isPreview = LocalInspectionMode.current
+    val appWidgetManager = remember(context, isPreview) {
+        if (isPreview) null else AppWidgetManager.getInstance(context.applicationContext)
+    }
+    val appWidgetHost = remember(context, isPreview) {
+        if (isPreview) null else AppWidgetHost(context.applicationContext, APP_WIDGET_HOST_ID)
+    }
     var hidStatus by remember { mutableStateOf(HidStatus()) }
     val hidManager = remember {
         HidKeyboardManager(context.applicationContext) { status ->
@@ -580,7 +595,7 @@ private fun MobileDeckApp() {
     }
 
     fun assignWidgetToButton(buttonId: Int, widgetId: Int) {
-        val info = appWidgetManager.getAppWidgetInfo(widgetId)
+        val info = appWidgetManager?.getAppWidgetInfo(widgetId)
         val updated = deckPages.flatMap { it.buttons }
             .firstOrNull { it.id == buttonId }
             ?.copy(
@@ -605,7 +620,7 @@ private fun MobileDeckApp() {
         if (result.resultCode == Activity.RESULT_OK && buttonId != null && widgetId != null) {
             assignWidgetToButton(buttonId, widgetId)
         } else if (widgetId != null) {
-            appWidgetHost.deleteAppWidgetId(widgetId)
+            appWidgetHost?.deleteAppWidgetId(widgetId)
         }
         pendingWidgetButtonId = null
         pendingWidgetId = null
@@ -618,13 +633,13 @@ private fun MobileDeckApp() {
         val widgetId = result.data?.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, pendingWidgetId ?: INVALID_APP_WIDGET_ID)
             ?: pendingWidgetId
         if (result.resultCode != Activity.RESULT_OK || buttonId == null || widgetId == null || widgetId == INVALID_APP_WIDGET_ID) {
-            if (widgetId != null && widgetId != INVALID_APP_WIDGET_ID) appWidgetHost.deleteAppWidgetId(widgetId)
+            if (widgetId != null && widgetId != INVALID_APP_WIDGET_ID) appWidgetHost?.deleteAppWidgetId(widgetId)
             pendingWidgetButtonId = null
             pendingWidgetId = null
             return@rememberLauncherForActivityResult
         }
 
-        val info = appWidgetManager.getAppWidgetInfo(widgetId)
+        val info = appWidgetManager?.getAppWidgetInfo(widgetId)
         if (info?.configure != null) {
             pendingWidgetId = widgetId
             configureWidgetLauncher.launch(
@@ -641,8 +656,14 @@ private fun MobileDeckApp() {
     }
 
     DisposableEffect(appWidgetHost) {
-        appWidgetHost.startListening()
-        onDispose { appWidgetHost.stopListening() }
+        if (appWidgetHost != null) {
+            appWidgetHost.startListening()
+        }
+        onDispose {
+            if (appWidgetHost != null) {
+                appWidgetHost.stopListening()
+            }
+        }
     }
 
     fun startHid() {
@@ -754,7 +775,7 @@ private fun MobileDeckApp() {
     fun pickWidgetForButton(button: DeckButton) {
         updateButtonEverywhere(button)
         val oldWidgetId = button.appWidgetId
-        val widgetId = appWidgetHost.allocateAppWidgetId()
+        val widgetId = appWidgetHost?.allocateAppWidgetId() ?: return
         pendingWidgetButtonId = button.id
         pendingWidgetId = widgetId
         if (oldWidgetId != INVALID_APP_WIDGET_ID) {
@@ -1005,6 +1026,29 @@ private fun MobileDeckApp() {
                 onEditButton = { button -> editingButton = button }
             )
 
+            AppPage.SliderTest -> SliderTestPage(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
+                    .padding(10.dp),
+                columns = deckColumns,
+                rows = deckRows,
+                spacing = deckSpacing,
+                onBack = { page = AppPage.Settings },
+                onColumnsChange = { columns ->
+                    deckColumns = columns
+                    saveDeckColumns(context, columns)
+                },
+                onRowsChange = { rows ->
+                    deckRows = rows
+                    saveDeckRows(context, rows)
+                },
+                onSpacingChange = { spacing ->
+                    deckSpacing = spacing
+                    saveDeckSpacing(context, spacing)
+                }
+            )
+
             AppPage.Settings -> SettingsPage(
                 modifier = Modifier
                     .fillMaxSize()
@@ -1038,6 +1082,10 @@ private fun MobileDeckApp() {
                 onConsoleLayoutEditor = {
                     context.applicationContext.vibrateButtonPress(buttonVibrationLevel)
                     page = AppPage.ConsoleLayoutEditor
+                },
+                onSliderTest = {
+                    context.applicationContext.vibrateButtonPress(buttonVibrationLevel)
+                    page = AppPage.SliderTest
                 },
                 onPageSwipeAxisChange = { axis ->
                     context.applicationContext.vibrateButtonPress(buttonVibrationLevel)
@@ -1146,7 +1194,9 @@ private fun MobileDeckApp() {
             onDismiss = { editingButton = null },
             onSave = { updated ->
                 if (button.appWidgetId != INVALID_APP_WIDGET_ID && button.appWidgetId != updated.appWidgetId) {
-                    appWidgetHost.deleteAppWidgetId(button.appWidgetId)
+                    if (appWidgetHost != null) {
+                        appWidgetHost.deleteAppWidgetId(button.appWidgetId)
+                    }
                 }
                 val showTitle = activeDeckPage.id == deckPages.firstOrNull()?.id
                 val adjustedButton = shrinkButtonToAvailable(
@@ -1167,7 +1217,9 @@ private fun MobileDeckApp() {
             },
             onDelete = {
                 if (button.appWidgetId != INVALID_APP_WIDGET_ID) {
-                    appWidgetHost.deleteAppWidgetId(button.appWidgetId)
+                    if (appWidgetHost != null) {
+                        appWidgetHost.deleteAppWidgetId(button.appWidgetId)
+                    }
                 }
                 if (button.actionType != DeckActionType.Settings) {
                     val updatedPages = updateDeckPage(deckPages, activeDeckPage.id) {
@@ -1208,6 +1260,7 @@ private fun SettingsPage(
     onBack: () -> Unit,
     onLayoutEditor: () -> Unit,
     onConsoleLayoutEditor: () -> Unit,
+    onSliderTest: () -> Unit,
     onPageSwipeAxisChange: (PageSwipeAxis) -> Unit,
     onPageSwipeModeChange: (PageSwipeMode) -> Unit,
     onPageSwipeAnimationChange: (Boolean) -> Unit,
@@ -1305,6 +1358,7 @@ private fun SettingsPage(
                     onInfinitePageSwipeChange = onInfinitePageSwipeChange,
                     onButtonVibrationLevelChange = onButtonVibrationLevelChange,
                     onLayoutEditor = onLayoutEditor,
+                    onSliderTest = onSliderTest,
                     onColumnsChange = onColumnsChange,
                     onRowsChange = onRowsChange,
                     onSpacingChange = onSpacingChange,
@@ -1414,15 +1468,6 @@ private fun SettingsSidebar(
                 )
             }
         }
-        Spacer(Modifier.height(4.dp))
-        SidebarActionCard(
-            icon = Icons.Filled.Info,
-            title = stringResource(R.string.settings_app_info),
-            subtitle = stringResource(R.string.settings_app_info_desc),
-            deckUiMode = deckUiMode,
-            enabled = false,
-            onClick = {}
-        )
     }
 }
 
@@ -1704,6 +1749,7 @@ private fun ClassicSettingsContent(
     onInfinitePageSwipeChange: (Boolean) -> Unit,
     onButtonVibrationLevelChange: (ButtonVibrationLevel) -> Unit,
     onLayoutEditor: () -> Unit,
+    onSliderTest: () -> Unit,
     onColumnsChange: (Int) -> Unit,
     onRowsChange: (Int) -> Unit,
     onSpacingChange: (Int) -> Unit,
@@ -1724,6 +1770,19 @@ private fun ClassicSettingsContent(
                 onColumnsChange = onColumnsChange,
                 onRowsChange = onRowsChange,
                 onSpacingChange = onSpacingChange
+            )
+        }
+        item {
+            SettingRow(
+                icon = Icons.Filled.TouchApp,
+                iconColor = Color(0xFF0B7FE8),
+                title = stringResource(R.string.slider_test),
+                subtitle = stringResource(R.string.slider_test_desc),
+                trailing = {
+                    TextButton(onClick = onSliderTest) {
+                        Text(stringResource(R.string.slider_test), color = MaterialTheme.colorScheme.primary)
+                    }
+                }
             )
         }
         item {
@@ -1801,6 +1860,9 @@ private fun ClassicSettingsContent(
         }
         item {
             SettingsDiagnosticsCard(logs)
+        }
+        item {
+            SettingsAppInfoRow(mode = DeckUiMode.Classic)
         }
     }
 }
@@ -1912,6 +1974,9 @@ private fun ConsoleSettingsContent(
         item {
             SettingsDiagnosticsCard(logs)
         }
+        item {
+            SettingsAppInfoRow(mode = DeckUiMode.Console)
+        }
     }
 }
 
@@ -1925,44 +1990,101 @@ private fun SettingsDetailContent(
     content: LazyListScope.() -> Unit
 ) {
     val colors = deckThemeColors(mode)
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 14.dp, top = 14.dp, end = 14.dp, bottom = 24.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        item {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                SettingsIconTile(icon, accent)
-                Column {
-                    Text(
-                        text = title,
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold,
-                        color = colors.textPrimary
-                    )
-                    Text(
-                        text = subtitle,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = colors.textSecondary
-                    )
+    val listState = rememberLazyListState()
+    var showDragHint by remember(mode) { mutableStateOf(true) }
+    LaunchedEffect(listState.isScrollInProgress) {
+        if (listState.isScrollInProgress) {
+            showDragHint = false
+        }
+    }
+
+    Box(modifier = Modifier.fillMaxSize()) {
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(start = 14.dp, top = 14.dp, end = 14.dp, bottom = 34.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    SettingsIconTile(icon, accent)
+                    Column {
+                        Text(
+                            text = title,
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = colors.textPrimary
+                        )
+                        Text(
+                            text = subtitle,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = colors.textSecondary
+                        )
+                    }
                 }
             }
+            content()
         }
-        content()
-        item {
-            Text(
+        AnimatedVisibility(
+            visible = showDragHint,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(horizontal = 14.dp, vertical = 10.dp),
+            enter = fadeIn(animationSpec = tween(160)) + slideInVertically { it / 2 },
+            exit = fadeOut(animationSpec = tween(160)) + slideOutVertically { it },
+            label = "settingsDragHint"
+        ) {
+            Surface(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 8.dp),
-                text = stringResource(R.string.settings_drag_more),
-                style = MaterialTheme.typography.bodySmall,
-                color = colors.textMuted,
-                textAlign = TextAlign.Center
-            )
+                    .fillMaxWidth(),
+                color = colors.cardBackground.copy(alpha = if (isSystemInDarkTheme()) 0.78f else 0.86f),
+                contentColor = colors.textSecondary,
+                shape = RoundedCornerShape(999.dp),
+                tonalElevation = 0.dp,
+                shadowElevation = 6.dp
+            ) {
+                Text(
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                    text = stringResource(R.string.settings_drag_more),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.textSecondary,
+                    textAlign = TextAlign.Center
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SettingsAppInfoRow(mode: DeckUiMode) {
+    val colors = deckThemeColors(mode)
+    val accent = settingsModeAccent(mode)
+    SettingsCard(accent = accent, themeColors = colors) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            SettingsIconTile(Icons.Filled.Info, accent)
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    text = stringResource(R.string.settings_app_info),
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = colors.textPrimary
+                )
+                Text(
+                    text = "${stringResource(R.string.app_name)} ${BuildConfig.VERSION_NAME}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.textSecondary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
         }
     }
 }
@@ -1999,30 +2121,43 @@ private fun ClassicLayoutControlsCard(
     onSpacingChange: (Int) -> Unit
 ) {
     val colors = LocalDeckThemeColors.current
+    var editing by remember { mutableStateOf(false) }
     SettingsCard(accent = Color(0xFF9B5DE5)) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
                 Text(
                     text = stringResource(R.string.settings_layout_preview),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
-                    color = colors.textPrimary
+                    color = colors.textPrimary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
                 Text(
                     text = "${columns}x$rows - ${stringResource(R.string.spacing)} $spacing",
                     style = MaterialTheme.typography.bodySmall,
-                    color = colors.textSecondary
+                    color = colors.textSecondary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
+            SettingsCycleButton(
+                text = stringResource(if (editing) R.string.save else R.string.edit),
+                onClick = { editing = !editing }
+            )
         }
         ClassicDeviceLayoutPreview(
             columns = columns,
             rows = rows,
             spacing = spacing,
+            editing = editing,
             onColumnsChange = onColumnsChange,
             onRowsChange = onRowsChange,
             onSpacingChange = onSpacingChange
@@ -2035,6 +2170,7 @@ private fun ClassicDeviceLayoutPreview(
     columns: Int,
     rows: Int,
     spacing: Int,
+    editing: Boolean,
     onColumnsChange: (Int) -> Unit,
     onRowsChange: (Int) -> Unit,
     onSpacingChange: (Int) -> Unit
@@ -2043,6 +2179,9 @@ private fun ClassicDeviceLayoutPreview(
     val configuration = LocalConfiguration.current
     val rawRatio = configuration.screenWidthDp.toFloat() / configuration.screenHeightDp.coerceAtLeast(1).toFloat()
     val deviceRatio = if (rawRatio >= 1f) rawRatio else 1f / rawRatio
+    val columnAccent = Color(0xFF0B7FE8)
+    val rowAccent = Color(0xFF00A6A6)
+    val spacingAccent = Color(0xFFE47B17)
 
     BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
         val previewHeight = (maxWidth / deviceRatio).coerceIn(150.dp, 260.dp)
@@ -2053,53 +2192,73 @@ private fun ClassicDeviceLayoutPreview(
                 .clip(RoundedCornerShape(8.dp))
                 .background(colors.consolePreviewBackground)
                 .border(1.dp, colors.cardBorder, RoundedCornerShape(8.dp))
-                .padding(8.dp)
+                .padding(6.dp)
         ) {
             ClassicPreviewGrid(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(top = 34.dp, end = 76.dp),
+                    .padding(
+                        top = if (editing) 34.dp else 0.dp,
+                        end = if (editing) 76.dp else 0.dp
+                    ),
                 columns = columns,
                 rows = rows,
                 spacing = spacing
             )
-            MiniHorizontalLayoutSlider(
-                modifier = Modifier
-                    .align(Alignment.TopStart)
-                    .fillMaxWidth()
-                    .height(28.dp)
-                    .padding(end = 78.dp),
-                label = stringResource(R.string.columns),
-                value = columns,
-                range = MIN_COLUMNS..MAX_COLUMNS,
-                onValueChange = onColumnsChange
-            )
-            Row(
-                modifier = Modifier
-                    .align(Alignment.CenterEnd)
-                    .width(70.dp)
-                    .fillMaxHeight()
-                    .padding(top = 34.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            AnimatedVisibility(
+                visible = editing,
+                modifier = Modifier.align(Alignment.TopStart),
+                enter = fadeIn(tween(140)) + slideInVertically(tween(180)) { -it / 2 },
+                exit = fadeOut(tween(100)) + slideOutVertically(tween(140)) { -it / 2 },
+                label = "classicLayoutSliders"
             ) {
-                MiniVerticalLayoutSlider(
+                MiniHorizontalLayoutSlider(
                     modifier = Modifier
-                        .weight(1f)
-                        .fillMaxHeight(),
-                    label = stringResource(R.string.rows),
-                    value = rows,
-                    range = MIN_ROWS..MAX_ROWS,
-                    onValueChange = onRowsChange
+                        .fillMaxWidth()
+                        .height(30.dp)
+                        .padding(end = 80.dp),
+                    label = stringResource(R.string.columns),
+                    value = columns,
+                    range = MIN_COLUMNS..MAX_COLUMNS,
+                    accent = columnAccent,
+                    onValueChange = onColumnsChange
                 )
-                MiniVerticalLayoutSlider(
+            }
+            AnimatedVisibility(
+                visible = editing,
+                modifier = Modifier.align(Alignment.CenterEnd),
+                enter = fadeIn(tween(140)) + slideInHorizontally(tween(180)) { it / 2 },
+                exit = fadeOut(tween(100)) + slideOutHorizontally(tween(140)) { it / 2 },
+                label = "classicLayoutVerticalSliders"
+            ) {
+                Row(
                     modifier = Modifier
-                        .weight(1f)
-                        .fillMaxHeight(),
-                    label = stringResource(R.string.spacing),
-                    value = spacing,
-                    range = MIN_SPACING_DP..MAX_SPACING_DP,
-                    onValueChange = onSpacingChange
-                )
+                        .width(68.dp)
+                        .fillMaxHeight()
+                        .padding(top = 14.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.End)
+                ) {
+                    MiniVerticalLayoutSlider(
+                        modifier = Modifier
+                            .width(32.dp)
+                            .fillMaxHeight(),
+                        label = stringResource(R.string.rows),
+                        value = rows,
+                        range = MIN_ROWS..MAX_ROWS,
+                        accent = rowAccent,
+                        onValueChange = onRowsChange
+                    )
+                    MiniVerticalLayoutSlider(
+                        modifier = Modifier
+                            .width(32.dp)
+                            .fillMaxHeight(),
+                        label = stringResource(R.string.spacing),
+                        value = spacing,
+                        range = MIN_SPACING_DP..MAX_SPACING_DP,
+                        accent = spacingAccent,
+                        onValueChange = onSpacingChange
+                    )
+                }
             }
         }
     }
@@ -2190,12 +2349,13 @@ private fun MiniHorizontalLayoutSlider(
     label: String,
     value: Int,
     range: IntRange,
+    accent: Color,
     onValueChange: (Int) -> Unit
 ) {
     Row(
         modifier = modifier,
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp)
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         Text(
             text = "$label $value",
@@ -2203,10 +2363,787 @@ private fun MiniHorizontalLayoutSlider(
             color = LocalDeckThemeColors.current.textSecondary,
             maxLines = 1
         )
+        ClassicLayoutDiscreteSlider(
+            modifier = Modifier
+                .weight(1f)
+                .height(30.dp),
+            value = value,
+            range = range,
+            accent = accent,
+            onValueChange = onValueChange
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun MiniVerticalLayoutSlider(
+    modifier: Modifier = Modifier,
+    label: String,
+    value: Int,
+    range: IntRange,
+    accent: Color,
+    onValueChange: (Int) -> Unit
+) {
+    Column(
+        modifier = modifier,
+        horizontalAlignment = Alignment.End,
+        verticalArrangement = Arrangement.spacedBy(1.dp)
+    ) {
+        Text(
+            text = "${label.take(1)} $value",
+            modifier = Modifier.fillMaxWidth(),
+            style = MaterialTheme.typography.labelSmall,
+            color = LocalDeckThemeColors.current.textSecondary,
+            textAlign = TextAlign.End,
+            maxLines = 1
+        )
+        BoxWithConstraints(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth(),
+            contentAlignment = Alignment.CenterEnd
+        ) {
+            ClassicLayoutVerticalDiscreteSlider(
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .width(24.dp),
+                value = value,
+                range = range,
+                accent = accent,
+                onValueChange = onValueChange
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ClassicLayoutVerticalDiscreteSlider(
+    modifier: Modifier = Modifier,
+    value: Int,
+    range: IntRange,
+    accent: Color,
+    onValueChange: (Int) -> Unit
+) {
+    val colors = LocalDeckThemeColors.current
+    var size by remember { mutableStateOf(IntSize.Zero) }
+    val fraction = ((value - range.first).toFloat() / (range.last - range.first).coerceAtLeast(1))
+        .coerceIn(0f, 1f)
+    val tickCount = (range.last - range.first + 1).coerceAtLeast(2)
+
+    fun updateFromY(y: Float) {
+        val usableHeight = size.height.coerceAtLeast(1)
+        val nextFraction = (1f - (y / usableHeight).coerceIn(0f, 1f)).coerceIn(0f, 1f)
+        val next = range.first + (nextFraction * (range.last - range.first)).roundToInt()
+        onValueChange(next.coerceIn(range.first, range.last))
+    }
+
+    Canvas(
+        modifier = modifier
+            .onSizeChanged { size = it }
+            .pointerInput(range, size) {
+                detectTapGestures { offset -> updateFromY(offset.y) }
+            }
+            .pointerInput(range, size) {
+                detectDragGestures { change, _ ->
+                    change.consume()
+                    updateFromY(change.position.y)
+                }
+            }
+    ) {
+        val stroke = 10.dp.toPx()
+        val tickRadius = 2.dp.toPx()
+        val thumbWidth = 22.dp.toPx()
+        val thumbHeight = 3.dp.toPx()
+        val x = this.size.width / 2f
+        val top = stroke / 2f
+        val bottom = this.size.height - stroke / 2f
+        val activeY = bottom - (bottom - top) * fraction
+
+        drawLine(
+            color = colors.textMuted.copy(alpha = 0.44f),
+            start = Offset(x, top),
+            end = Offset(x, bottom),
+            strokeWidth = stroke,
+            cap = StrokeCap.Round
+        )
+        drawLine(
+            color = accent.copy(alpha = 0.78f),
+            start = Offset(x, activeY),
+            end = Offset(x, bottom),
+            strokeWidth = stroke,
+            cap = StrokeCap.Round
+        )
+        repeat(tickCount) { index ->
+            val tickFraction = if (tickCount <= 1) 0f else index.toFloat() / (tickCount - 1)
+            val y = bottom - (bottom - top) * tickFraction
+            drawCircle(
+                color = if (tickFraction <= fraction) {
+                    colors.textPrimary.copy(alpha = 0.76f)
+                } else {
+                    colors.textPrimary.copy(alpha = 0.44f)
+                },
+                radius = tickRadius,
+                center = Offset(x, y)
+            )
+        }
+        drawLine(
+            color = accent,
+            start = Offset(x - thumbWidth / 2f, activeY),
+            end = Offset(x + thumbWidth / 2f, activeY),
+            strokeWidth = thumbHeight,
+            cap = StrokeCap.Round
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ClassicLayoutDiscreteSlider(
+    modifier: Modifier = Modifier,
+    value: Int,
+    range: IntRange,
+    accent: Color,
+    onValueChange: (Int) -> Unit
+) {
+    val colors = LocalDeckThemeColors.current
+    val interactionSource = remember { MutableInteractionSource() }
+    val sliderColors = SliderDefaults.colors(
+        thumbColor = accent,
+        activeTrackColor = accent,
+        inactiveTrackColor = colors.textMuted.copy(alpha = 0.42f),
+        activeTickColor = colors.textPrimary.copy(alpha = 0.72f),
+        inactiveTickColor = colors.textPrimary.copy(alpha = 0.46f)
+    )
+    Slider(
+        modifier = modifier,
+        value = value.toFloat(),
+        onValueChange = { next ->
+            onValueChange(next.roundToInt().coerceIn(range.first, range.last))
+        },
+        valueRange = range.first.toFloat()..range.last.toFloat(),
+        steps = (range.last - range.first - 1).coerceAtLeast(0),
+        colors = sliderColors,
+        interactionSource = interactionSource,
+        thumb = {
+            SliderDefaults.Thumb(
+                interactionSource = interactionSource,
+                colors = sliderColors,
+                thumbSize = DpSize(width = 3.dp, height = 22.dp)
+            )
+        },
+        track = { sliderState ->
+            ClassicLayoutDiscreteTrack(sliderState = sliderState, accent = accent)
+        }
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ClassicLayoutDiscreteTrack(sliderState: SliderState, accent: Color) {
+    val colors = LocalDeckThemeColors.current
+    val activeColor = accent.copy(alpha = 0.78f)
+    val inactiveColor = colors.textMuted.copy(alpha = 0.44f)
+    val activeTickColor = colors.textPrimary.copy(alpha = 0.76f)
+    val inactiveTickColor = colors.textPrimary.copy(alpha = 0.44f)
+    val fraction = ((sliderState.value - sliderState.valueRange.start) /
+        (sliderState.valueRange.endInclusive - sliderState.valueRange.start).coerceAtLeast(1f))
+        .coerceIn(0f, 1f)
+    val tickCount = sliderState.steps + 2
+
+    Canvas(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(22.dp)
+    ) {
+        val y = size.height / 2f
+        val stroke = 10.dp.toPx()
+        val tickRadius = 2.dp.toPx()
+        val start = stroke / 2f
+        val end = size.width - stroke / 2f
+        val activeEnd = start + (end - start) * fraction
+
+        drawLine(
+            color = inactiveColor,
+            start = Offset(start, y),
+            end = Offset(end, y),
+            strokeWidth = stroke,
+            cap = StrokeCap.Round
+        )
+        drawLine(
+            color = activeColor,
+            start = Offset(start, y),
+            end = Offset(activeEnd, y),
+            strokeWidth = stroke,
+            cap = StrokeCap.Round
+        )
+        repeat(tickCount) { index ->
+            val tickFraction = if (tickCount <= 1) 0f else index.toFloat() / (tickCount - 1)
+            val x = start + (end - start) * tickFraction
+            drawCircle(
+                color = if (tickFraction <= fraction) activeTickColor else inactiveTickColor,
+                radius = tickRadius,
+                center = Offset(x, y)
+            )
+        }
+    }
+}
+
+@Composable
+private fun SliderTestPage(
+    modifier: Modifier = Modifier,
+    columns: Int,
+    rows: Int,
+    spacing: Int,
+    onBack: () -> Unit,
+    onColumnsChange: (Int) -> Unit,
+    onRowsChange: (Int) -> Unit,
+    onSpacingChange: (Int) -> Unit
+) {
+    val colors = deckThemeColors(DeckUiMode.Classic)
+    CompositionLocalProvider(LocalDeckThemeColors provides colors) {
+        var sampleColumns by remember(columns) { mutableStateOf(columns.toFloat()) }
+        var sampleRows by remember(rows) { mutableStateOf(rows.toFloat()) }
+        var sampleSpacing by remember(spacing) { mutableStateOf(spacing.toFloat()) }
+        var sampleRange by remember { mutableStateOf(3f..8f) }
+
+        LazyColumn(
+            modifier = modifier
+                .fillMaxSize()
+                .background(Brush.linearGradient(colors.backgroundGradient))
+                .padding(14.dp),
+            contentPadding = PaddingValues(bottom = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column {
+                        Text(
+                            text = stringResource(R.string.slider_test),
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = colors.textPrimary
+                        )
+                        Text(
+                            text = stringResource(R.string.slider_test_desc),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = colors.textSecondary
+                        )
+                    }
+                    TextButton(onClick = onBack) {
+                        Text(stringResource(R.string.settings_back_to_deck), color = MaterialTheme.colorScheme.primary)
+                    }
+                }
+            }
+            item {
+                Text(
+                    text = "${stringResource(R.string.columns)} ${sampleColumns.roundToInt()}  ·  ${stringResource(R.string.rows)} ${sampleRows.roundToInt()}  ·  ${stringResource(R.string.spacing)} ${sampleSpacing.roundToInt()}",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = colors.textSecondary
+                )
+            }
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    SliderSampleCard(
+                        modifier = Modifier.weight(1f),
+                        title = stringResource(R.string.slider_variant_compact),
+                        subtitle = stringResource(R.string.slider_variant_compact_desc),
+                        accent = Color(0xFF9B5DE5)
+                    ) {
+                        MaterialSliderRow(
+                            label = stringResource(R.string.columns),
+                            value = sampleColumns,
+                            range = MIN_COLUMNS..MAX_COLUMNS,
+                            accent = Color(0xFF9B5DE5),
+                            compact = true,
+                            onValueChange = { sampleColumns = it }
+                        )
+                        MaterialSliderRow(
+                            label = stringResource(R.string.spacing),
+                            value = sampleSpacing,
+                            range = MIN_SPACING_DP..MAX_SPACING_DP,
+                            accent = Color(0xFF9B5DE5),
+                            compact = true,
+                            onValueChange = { sampleSpacing = it }
+                        )
+                    }
+                    SliderSampleCard(
+                        modifier = Modifier.weight(1f),
+                        title = stringResource(R.string.slider_variant_pill),
+                        subtitle = stringResource(R.string.slider_variant_pill_desc),
+                        accent = Color(0xFF0B7FE8)
+                    ) {
+                        MaterialPillSlider(
+                            label = stringResource(R.string.columns),
+                            value = sampleColumns,
+                            range = MIN_COLUMNS..MAX_COLUMNS,
+                            accent = Color(0xFF0B7FE8),
+                            onValueChange = { sampleColumns = it }
+                        )
+                        MaterialPillSlider(
+                            label = stringResource(R.string.rows),
+                            value = sampleRows,
+                            range = MIN_ROWS..MAX_ROWS,
+                            accent = Color(0xFF0B7FE8),
+                            onValueChange = { sampleRows = it }
+                        )
+                    }
+                }
+            }
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    SliderSampleCard(
+                        modifier = Modifier.weight(1f),
+                        title = stringResource(R.string.slider_variant_glass),
+                        subtitle = stringResource(R.string.slider_variant_glass_desc),
+                        accent = Color(0xFF00A6A6)
+                    ) {
+                        MaterialValueChipSlider(
+                            label = stringResource(R.string.columns),
+                            value = sampleColumns,
+                            range = MIN_COLUMNS..MAX_COLUMNS,
+                            accent = Color(0xFF00A6A6),
+                            onValueChange = { sampleColumns = it }
+                        )
+                        MaterialValueChipSlider(
+                            label = stringResource(R.string.spacing),
+                            value = sampleSpacing,
+                            range = MIN_SPACING_DP..MAX_SPACING_DP,
+                            accent = Color(0xFF00A6A6),
+                            onValueChange = { sampleSpacing = it }
+                        )
+                    }
+                    SliderSampleCard(
+                        modifier = Modifier.weight(1f),
+                        title = stringResource(R.string.slider_variant_tick),
+                        subtitle = stringResource(R.string.slider_variant_tick_desc),
+                        accent = Color(0xFFE47B17)
+                    ) {
+                        MaterialDiscreteSlider(
+                            label = stringResource(R.string.rows),
+                            value = sampleRows,
+                            range = MIN_ROWS..MAX_ROWS,
+                            accent = Color(0xFFE47B17),
+                            onValueChange = { sampleRows = it }
+                        )
+                        MaterialDiscreteSlider(
+                            label = stringResource(R.string.columns),
+                            value = sampleColumns,
+                            range = MIN_COLUMNS..MAX_COLUMNS,
+                            accent = Color(0xFFE47B17),
+                            onValueChange = { sampleColumns = it }
+                        )
+                    }
+                }
+            }
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    SliderSampleCard(
+                        modifier = Modifier.weight(1f),
+                        title = stringResource(R.string.slider_variant_segment),
+                        subtitle = stringResource(R.string.slider_variant_segment_desc),
+                        accent = Color(0xFF6FA833)
+                    ) {
+                        MaterialRangeSliderRow(
+                            label = stringResource(R.string.slider_range_sample),
+                            value = sampleRange,
+                            range = MIN_COLUMNS.toFloat()..MAX_COLUMNS.toFloat(),
+                            accent = Color(0xFF6FA833),
+                            onValueChange = { next ->
+                                sampleRange = next.start.roundToInt().toFloat()..next.endInclusive.roundToInt().toFloat()
+                            }
+                        )
+                        MaterialDisabledSlider(
+                            label = stringResource(R.string.slider_disabled_sample),
+                            value = sampleRows,
+                            range = MIN_ROWS..MAX_ROWS
+                        )
+                    }
+                    SliderSampleCard(
+                        modifier = Modifier.weight(1f),
+                        title = stringResource(R.string.slider_variant_vertical),
+                        subtitle = stringResource(R.string.slider_variant_vertical_desc),
+                        accent = Color(0xFF7B3EB1)
+                    ) {
+                        MaterialLargeTouchSlider(
+                            label = stringResource(R.string.spacing),
+                            value = sampleSpacing,
+                            range = MIN_SPACING_DP..MAX_SPACING_DP,
+                            accent = Color(0xFF7B3EB1),
+                            onValueChange = { sampleSpacing = it }
+                        )
+                        MaterialSliderRow(
+                            label = stringResource(R.string.rows),
+                            value = sampleRows,
+                            range = MIN_ROWS..MAX_ROWS,
+                            accent = Color(0xFF7B3EB1),
+                            compact = false,
+                            onValueChange = { sampleRows = it }
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MaterialSliderRow(
+    label: String,
+    value: Float,
+    range: IntRange,
+    accent: Color,
+    compact: Boolean,
+    onValueChange: (Float) -> Unit
+) {
+    val colors = LocalDeckThemeColors.current
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Text(
+            text = "$label ${value.roundToInt()}",
+            modifier = Modifier.width(if (compact) 72.dp else 92.dp),
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = colors.textPrimary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+        Slider(
+            modifier = Modifier
+                .weight(1f)
+                .height(if (compact) 30.dp else 38.dp),
+            value = value,
+            onValueChange = onValueChange,
+            valueRange = range.first.toFloat()..range.last.toFloat(),
+            colors = SliderDefaults.colors(
+                thumbColor = accent,
+                activeTrackColor = accent,
+                inactiveTrackColor = colors.textMuted.copy(alpha = 0.35f)
+            )
+        )
+    }
+}
+
+@Composable
+private fun MaterialPillSlider(
+    label: String,
+    value: Float,
+    range: IntRange,
+    accent: Color,
+    onValueChange: (Float) -> Unit
+) {
+    val colors = LocalDeckThemeColors.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(999.dp))
+            .background(colors.toggleBackground.copy(alpha = 0.8f))
+            .border(1.dp, colors.cardBorder, RoundedCornerShape(999.dp))
+            .padding(start = 12.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Text(
+            text = "$label ${value.roundToInt()}",
+            modifier = Modifier.width(86.dp),
+            style = MaterialTheme.typography.labelLarge,
+            color = colors.textPrimary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+        Slider(
+            modifier = Modifier.weight(1f),
+            value = value,
+            onValueChange = onValueChange,
+            valueRange = range.first.toFloat()..range.last.toFloat(),
+            colors = SliderDefaults.colors(
+                thumbColor = accent,
+                activeTrackColor = accent,
+                inactiveTrackColor = colors.textMuted.copy(alpha = 0.32f)
+            )
+        )
+    }
+}
+
+@Composable
+private fun MaterialValueChipSlider(
+    label: String,
+    value: Float,
+    range: IntRange,
+    accent: Color,
+    onValueChange: (Float) -> Unit
+) {
+    val colors = LocalDeckThemeColors.current
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(colors.consolePreviewBackground.copy(alpha = 0.72f))
+            .border(1.dp, colors.cardBorder, RoundedCornerShape(10.dp))
+            .padding(horizontal = 10.dp, vertical = 7.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelMedium,
+                color = colors.textSecondary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Surface(
+                shape = RoundedCornerShape(999.dp),
+                color = accent.copy(alpha = 0.18f),
+                contentColor = colors.textPrimary
+            ) {
+                Text(
+                    text = value.roundToInt().toString(),
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp),
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        }
+        Slider(
+            modifier = Modifier.fillMaxWidth(),
+            value = value,
+            onValueChange = onValueChange,
+            valueRange = range.first.toFloat()..range.last.toFloat(),
+            colors = SliderDefaults.colors(
+                thumbColor = accent,
+                activeTrackColor = accent,
+                inactiveTrackColor = colors.textMuted.copy(alpha = 0.3f)
+            )
+        )
+    }
+}
+
+@Composable
+private fun MaterialDiscreteSlider(
+    label: String,
+    value: Float,
+    range: IntRange,
+    accent: Color,
+    onValueChange: (Float) -> Unit
+) {
+    val colors = LocalDeckThemeColors.current
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelMedium,
+                color = colors.textSecondary
+            )
+            Text(
+                text = value.roundToInt().toString(),
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.Bold,
+                color = colors.textPrimary
+            )
+        }
+        Slider(
+            value = value,
+            onValueChange = { onValueChange(it.roundToInt().toFloat()) },
+            valueRange = range.first.toFloat()..range.last.toFloat(),
+            steps = (range.last - range.first - 1).coerceAtLeast(0),
+            colors = SliderDefaults.colors(
+                thumbColor = accent,
+                activeTrackColor = accent,
+                inactiveTrackColor = colors.textMuted.copy(alpha = 0.34f),
+                activeTickColor = colors.textPrimary.copy(alpha = 0.82f),
+                inactiveTickColor = colors.textMuted.copy(alpha = 0.72f)
+            )
+        )
+    }
+}
+
+@Composable
+private fun MaterialRangeSliderRow(
+    label: String,
+    value: ClosedFloatingPointRange<Float>,
+    range: ClosedFloatingPointRange<Float>,
+    accent: Color,
+    onValueChange: (ClosedFloatingPointRange<Float>) -> Unit
+) {
+    val colors = LocalDeckThemeColors.current
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelMedium,
+                color = colors.textSecondary
+            )
+            Text(
+                text = "${value.start.roundToInt()}-${value.endInclusive.roundToInt()}",
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.Bold,
+                color = colors.textPrimary
+            )
+        }
+        RangeSlider(
+            value = value,
+            onValueChange = onValueChange,
+            valueRange = range,
+            steps = (range.endInclusive - range.start).roundToInt().coerceAtLeast(1) - 1,
+            colors = SliderDefaults.colors(
+                thumbColor = accent,
+                activeTrackColor = accent,
+                inactiveTrackColor = colors.textMuted.copy(alpha = 0.34f)
+            )
+        )
+    }
+}
+
+@Composable
+private fun MaterialDisabledSlider(
+    label: String,
+    value: Float,
+    range: IntRange
+) {
+    val colors = LocalDeckThemeColors.current
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(
+            text = "$label ${value.roundToInt()}",
+            style = MaterialTheme.typography.labelMedium,
+            color = colors.textSecondary
+        )
+        Slider(
+            value = value,
+            onValueChange = {},
+            valueRange = range.first.toFloat()..range.last.toFloat(),
+            enabled = false
+        )
+    }
+}
+
+@Composable
+private fun MaterialLargeTouchSlider(
+    label: String,
+    value: Float,
+    range: IntRange,
+    accent: Color,
+    onValueChange: (Float) -> Unit
+) {
+    val colors = LocalDeckThemeColors.current
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(colors.cardBackground.copy(alpha = 0.78f))
+            .border(1.dp, colors.cardBorder, RoundedCornerShape(14.dp))
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp)
+    ) {
+        Text(
+            text = "$label ${value.roundToInt()}",
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.SemiBold,
+            color = colors.textPrimary
+        )
+        Slider(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(48.dp),
+            value = value,
+            onValueChange = onValueChange,
+            valueRange = range.first.toFloat()..range.last.toFloat(),
+            colors = SliderDefaults.colors(
+                thumbColor = accent,
+                activeTrackColor = accent,
+                inactiveTrackColor = colors.textMuted.copy(alpha = 0.3f)
+            )
+        )
+    }
+}
+
+@Composable
+private fun SliderSampleCard(
+    modifier: Modifier = Modifier,
+    title: String,
+    subtitle: String,
+    accent: Color,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    val colors = LocalDeckThemeColors.current
+    SettingsCard(modifier = modifier, accent = accent) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold,
+            color = colors.textPrimary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+        Text(
+            text = subtitle,
+            style = MaterialTheme.typography.bodySmall,
+            color = colors.textSecondary,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis
+        )
+        content()
+    }
+}
+
+@Composable
+private fun ClassicPillSlider(
+    label: String,
+    value: Int,
+    range: IntRange,
+    onValueChange: (Int) -> Unit
+) {
+    val colors = LocalDeckThemeColors.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(999.dp))
+            .background(colors.toggleBackground.copy(alpha = 0.72f))
+            .border(1.dp, colors.cardBorder, RoundedCornerShape(999.dp))
+            .padding(horizontal = 10.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Text(
+            text = "$label $value",
+            modifier = Modifier.width(72.dp),
+            style = MaterialTheme.typography.labelMedium,
+            color = colors.textPrimary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
         CompactSlider(
             modifier = Modifier
                 .weight(1f)
-                .height(24.dp),
+                .height(28.dp),
             value = value.toFloat(),
             onValueChange = { next -> onValueChange(next.roundToInt().coerceIn(range.first, range.last)) },
             valueRange = range.first.toFloat()..range.last.toFloat()
@@ -2215,7 +3152,172 @@ private fun MiniHorizontalLayoutSlider(
 }
 
 @Composable
-private fun MiniVerticalLayoutSlider(
+private fun ClassicGlassSlider(
+    label: String,
+    value: Int,
+    range: IntRange,
+    onValueChange: (Int) -> Unit
+) {
+    val colors = LocalDeckThemeColors.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(colors.consolePreviewBackground.copy(alpha = 0.74f))
+            .border(1.dp, colors.cardBorder, RoundedCornerShape(8.dp))
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Column(modifier = Modifier.width(76.dp)) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelSmall,
+                color = colors.textSecondary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                text = value.toString(),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = colors.textPrimary
+            )
+        }
+        CompactSlider(
+            modifier = Modifier
+                .weight(1f)
+                .height(32.dp),
+            value = value.toFloat(),
+            onValueChange = { next -> onValueChange(next.roundToInt().coerceIn(range.first, range.last)) },
+            valueRange = range.first.toFloat()..range.last.toFloat()
+        )
+    }
+}
+
+@Composable
+private fun ClassicTickSlider(
+    label: String,
+    value: Int,
+    range: IntRange,
+    onValueChange: (Int) -> Unit
+) {
+    val colors = LocalDeckThemeColors.current
+    var size by remember { mutableStateOf(IntSize.Zero) }
+    val activeColor = MaterialTheme.colorScheme.primary
+    val inactiveColor = colors.textMuted.copy(alpha = 0.45f)
+    val fraction = ((value - range.first).toFloat() / (range.last - range.first).coerceAtLeast(1))
+        .coerceIn(0f, 1f)
+
+    fun updateFromX(x: Float) {
+        val nextFraction = (x / size.width.coerceAtLeast(1)).coerceIn(0f, 1f)
+        val next = range.first + (nextFraction * (range.last - range.first)).roundToInt()
+        onValueChange(next.coerceIn(range.first, range.last))
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelMedium,
+                color = colors.textSecondary
+            )
+            Text(
+                text = value.toString(),
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.Bold,
+                color = colors.textPrimary
+            )
+        }
+        Canvas(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(38.dp)
+                .onSizeChanged { size = it }
+                .pointerInput(range, size) {
+                    detectTapGestures { offset -> updateFromX(offset.x) }
+                }
+                .pointerInput(range, size) {
+                    detectDragGestures { change, _ ->
+                        change.consume()
+                        updateFromX(change.position.x)
+                    }
+                }
+        ) {
+            val y = this.size.height / 2f
+            val start = 8.dp.toPx()
+            val end = this.size.width - 8.dp.toPx()
+            val x = start + (end - start) * fraction
+            drawLine(inactiveColor, Offset(start, y), Offset(end, y), 4.dp.toPx(), StrokeCap.Round)
+            drawLine(activeColor, Offset(start, y), Offset(x, y), 4.dp.toPx(), StrokeCap.Round)
+            val steps = (range.last - range.first).coerceAtLeast(1)
+            repeat(steps + 1) { index ->
+                val tickX = start + (end - start) * (index.toFloat() / steps)
+                drawLine(
+                    color = if (tickX <= x) activeColor else inactiveColor,
+                    start = Offset(tickX, y - 7.dp.toPx()),
+                    end = Offset(tickX, y + 7.dp.toPx()),
+                    strokeWidth = 2.dp.toPx(),
+                    cap = StrokeCap.Round
+                )
+            }
+            drawCircle(activeColor, 8.dp.toPx(), Offset(x, y))
+        }
+    }
+}
+
+@Composable
+private fun ClassicSegmentSlider(
+    label: String,
+    value: Int,
+    values: List<Int>,
+    onValueChange: (Int) -> Unit
+) {
+    val colors = LocalDeckThemeColors.current
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelMedium,
+            color = colors.textSecondary
+        )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(8.dp))
+                .background(colors.toggleBackground.copy(alpha = 0.7f))
+                .padding(3.dp),
+            horizontalArrangement = Arrangement.spacedBy(3.dp)
+        ) {
+            values.forEach { option ->
+                val selected = value == option
+                Surface(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(34.dp),
+                    shape = RoundedCornerShape(6.dp),
+                    color = if (selected) MaterialTheme.colorScheme.primary else Color.Transparent,
+                    contentColor = if (selected) Color.White else colors.textSecondary,
+                    onClick = { onValueChange(option) }
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Text(
+                            text = option.toString(),
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ClassicMeterSlider(
     modifier: Modifier = Modifier,
     label: String,
     value: Int,
@@ -2225,18 +3327,22 @@ private fun MiniVerticalLayoutSlider(
     Column(
         modifier = modifier,
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(4.dp)
+        verticalArrangement = Arrangement.spacedBy(2.dp)
     ) {
         Text(
             text = value.toString(),
-            style = MaterialTheme.typography.labelSmall,
-            color = LocalDeckThemeColors.current.textSecondary,
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.Bold,
+            color = LocalDeckThemeColors.current.textPrimary,
             maxLines = 1
         )
         CompactSlider(
             modifier = Modifier
                 .weight(1f)
-                .fillMaxWidth(),
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(999.dp))
+                .background(LocalDeckThemeColors.current.toggleBackground.copy(alpha = 0.4f))
+                .padding(horizontal = 4.dp),
             value = value.toFloat(),
             onValueChange = { next -> onValueChange(next.roundToInt().coerceIn(range.first, range.last)) },
             valueRange = range.first.toFloat()..range.last.toFloat(),
@@ -3211,8 +4317,8 @@ private fun LayoutEditorPage(
     rows: Int,
     spacing: Dp,
     status: HidStatus,
-    appWidgetHost: AppWidgetHost,
-    appWidgetManager: AppWidgetManager,
+    appWidgetHost: AppWidgetHost?,
+    appWidgetManager: AppWidgetManager?,
     pageSwipeAxis: PageSwipeAxis,
     pageSwipeMode: PageSwipeMode,
     pageSwipeAnimation: Boolean,
@@ -3462,8 +4568,8 @@ private fun DeckPage(
     rows: Int,
     spacing: Dp = DEFAULT_SPACING_DP.dp,
     status: HidStatus,
-    appWidgetHost: AppWidgetHost,
-    appWidgetManager: AppWidgetManager,
+    appWidgetHost: AppWidgetHost?,
+    appWidgetManager: AppWidgetManager?,
     uiMode: DeckUiMode,
     consoleLayout: ConsoleLayoutConfig,
     consolePanelOptions: ConsolePanelOptions,
@@ -3634,8 +4740,8 @@ private fun ConsoleDeckSurface(
     rows: Int,
     spacing: Dp,
     status: HidStatus,
-    appWidgetHost: AppWidgetHost,
-    appWidgetManager: AppWidgetManager,
+    appWidgetHost: AppWidgetHost?,
+    appWidgetManager: AppWidgetManager?,
     onPageSwipe: (Int) -> Unit,
     onButtonPressed: (DeckButton) -> Unit,
     onButtonTouchStarted: () -> Unit,
@@ -3736,8 +4842,8 @@ private fun ConsoleButtonRows(
     rowHeight: Dp,
     spacing: Dp,
     status: HidStatus,
-    appWidgetHost: AppWidgetHost,
-    appWidgetManager: AppWidgetManager,
+    appWidgetHost: AppWidgetHost?,
+    appWidgetManager: AppWidgetManager?,
     onButtonPressed: (DeckButton) -> Unit,
     onButtonTouchStarted: () -> Unit,
     onButtonTouchEnded: () -> Unit
@@ -4414,8 +5520,8 @@ private fun ButtonGrid(
     cellSize: Dp,
     spacing: Dp,
     status: HidStatus,
-    appWidgetHost: AppWidgetHost,
-    appWidgetManager: AppWidgetManager,
+    appWidgetHost: AppWidgetHost?,
+    appWidgetManager: AppWidgetManager?,
     visualMode: DeckUiMode,
     previewMode: Boolean,
     showTitle: Boolean,
@@ -4504,7 +5610,7 @@ private fun TitleDeckSlot(
         color = Color.Transparent
     ) {
         Column(
-            modifier = Modifier.padding(8.dp),
+            modifier = Modifier.padding(4.dp),
             verticalArrangement = Arrangement.Center
         ) {
             Text(
@@ -4558,8 +5664,8 @@ private fun DeckKey(
     modifier: Modifier = Modifier,
     button: DeckButton,
     status: HidStatus,
-    appWidgetHost: AppWidgetHost,
-    appWidgetManager: AppWidgetManager,
+    appWidgetHost: AppWidgetHost?,
+    appWidgetManager: AppWidgetManager?,
     visualMode: DeckUiMode,
     enabled: Boolean,
     previewMode: Boolean,
@@ -4712,6 +5818,15 @@ private fun DeckKey(
             }
             return@Surface
         }
+        if (!isConsole) {
+            ClassicDeckKeyContent(
+                button = button,
+                status = status,
+                contentColor = contentColor,
+                cellSize = cellSize
+            )
+            return@Surface
+        }
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -4806,15 +5921,95 @@ private fun DeckKey(
 }
 
 @Composable
+private fun ClassicDeckKeyContent(
+    button: DeckButton,
+    status: HidStatus,
+    contentColor: Color,
+    cellSize: Dp
+) {
+    val displayTitle = buttonDisplayTitle(button)
+    val showText = cellSize >= 72.dp && button.displayMode != DeckDisplayMode.IconOnly
+    val showSubtitle = cellSize >= 86.dp
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(4.dp),
+        verticalArrangement = if (showText) Arrangement.SpaceBetween else Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Box(
+            modifier = Modifier.weight(1f, fill = showText),
+            contentAlignment = Alignment.Center
+        ) {
+            if (button.displayMode != DeckDisplayMode.KeywordOnly || !showText) {
+                DeckButtonIcon(
+                    button = button,
+                    tint = contentColor,
+                    large = button.displayMode == DeckDisplayMode.IconOnly || !showText
+                )
+            } else {
+                Text(
+                    text = displayTitle,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = contentColor,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+        if (showText) {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    if (buttonAppAction(button) == DeckActionType.BluetoothStatus) {
+                        Box(
+                            modifier = Modifier
+                                .size(7.dp)
+                                .clip(CircleShape)
+                                .background(statusDotColor(status.state))
+                        )
+                    }
+                    Text(
+                        text = displayTitle,
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = contentColor,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        textAlign = TextAlign.Center
+                    )
+                }
+                if (showSubtitle) {
+                    Text(
+                        text = buttonSubtitle(button, status),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = contentColor.copy(alpha = 0.82f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        textAlign = TextAlign.Center
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun DeckWidgetHost(
     modifier: Modifier = Modifier,
-    appWidgetHost: AppWidgetHost,
-    appWidgetManager: AppWidgetManager,
+    appWidgetHost: AppWidgetHost?,
+    appWidgetManager: AppWidgetManager?,
     appWidgetId: Int
 ) {
     val context = LocalContext.current
-    val providerInfo = remember(appWidgetId) { appWidgetManager.getAppWidgetInfo(appWidgetId) }
-    if (providerInfo == null) {
+    val providerInfo = remember(appWidgetId, appWidgetManager) { appWidgetManager?.getAppWidgetInfo(appWidgetId) }
+    if (providerInfo == null || appWidgetHost == null) {
         Box(
             modifier = modifier,
             contentAlignment = Alignment.Center
