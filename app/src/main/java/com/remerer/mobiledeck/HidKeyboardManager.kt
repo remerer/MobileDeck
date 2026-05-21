@@ -299,7 +299,14 @@ class HidKeyboardManager(
 
     fun hasRequiredPermissions(): Boolean {
         return Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
-            REQUIRED_BLUETOOTH_PERMISSIONS.all { permission ->
+            HID_BLUETOOTH_PERMISSIONS.all { permission ->
+                ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED
+            }
+    }
+
+    fun hasDiscoverablePermissions(): Boolean {
+        return Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
+            DISCOVERABLE_BLUETOOTH_PERMISSIONS.all { permission ->
                 ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED
             }
     }
@@ -370,10 +377,17 @@ class HidKeyboardManager(
         private const val MOD_LEFT_ALT = 0x04
         private const val MOD_LEFT_GUI = 0x08
 
-        val REQUIRED_BLUETOOTH_PERMISSIONS = arrayOf(
+        val HID_BLUETOOTH_PERMISSIONS = arrayOf(
             Manifest.permission.BLUETOOTH_CONNECT,
-            Manifest.permission.BLUETOOTH_ADVERTISE,
-            Manifest.permission.BLUETOOTH_SCAN
+            Manifest.permission.BLUETOOTH_ADVERTISE
+        )
+
+        val DISCOVERABLE_BLUETOOTH_PERMISSIONS = arrayOf(
+            Manifest.permission.BLUETOOTH_ADVERTISE
+        )
+
+        val HOST_LIST_BLUETOOTH_PERMISSIONS = arrayOf(
+            Manifest.permission.BLUETOOTH_CONNECT
         )
 
         fun hotkeyReport(payload: String): ByteArray? {
