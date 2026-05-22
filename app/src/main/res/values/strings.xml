@@ -135,6 +135,9 @@
     <string name="delete">Delete</string>
     <string name="reset">Reset</string>
     <string name="cancel">Cancel</string>
+    <string name="next">Next</string>
+    <string name="skip">Skip</string>
+    <string name="tutorial">Tutorial</string>
     <string name="action_settings">Settings</string>
     <string name="action_bluetooth_status">Bluetooth status</string>
     <string name="action_previous_page">Previous page</string>
@@ -185,4 +188,22 @@
     <string name="status_message_discoverable_active">Discoverable mode is active. Pair from the PC while HID is registered.</string>
     <string name="status_message_discoverable_request_canceled">Discoverable request was canceled.</string>
     <string name="status_message_discoverable_canceled">Discoverable mode was canceled in MobileDeck. Android may keep the device visible until the system timeout.</string>
+    <string name="classic_tutorial_title">Classic UI basics</string>
+    <string name="classic_tutorial_subtitle">Use MobileDeck as a phone-sized macro pad for your PC.</string>
+    <string name="classic_tutorial_connect_title">Connect Bluetooth HID first</string>
+    <string name="classic_tutorial_connect_body">Use the Bluetooth management box in this order: register HID, allow pairing discovery, then add "MobileDeck Keyboard" on the PC.</string>
+    <string name="classic_tutorial_order_register">Tap Register HID.</string>
+    <string name="classic_tutorial_order_discoverable">Turn on pairing discovery.</string>
+    <string name="classic_tutorial_order_pair_pc">Pair "MobileDeck Keyboard" from the PC Bluetooth screen.</string>
+    <string name="classic_tutorial_layout_title">Adjust deck layout</string>
+    <string name="classic_tutorial_layout_body">Deck layout controls change the number of visible keys, spacing, page count, page direction, and page swipe behavior.</string>
+    <string name="classic_tutorial_button_settings_title">Edit button behavior</string>
+    <string name="classic_tutorial_button_settings_body">Button settings opens the button editor, where each key can be moved, deleted, and assigned a shortcut, media key, app command, text, run command, icon, or image.</string>
+    <string name="classic_tutorial_press_title">Tap a key to send an action</string>
+    <string name="classic_tutorial_press_body">Media keys, shortcuts, text, and run commands are sent to the connected host.</string>
+    <string name="classic_tutorial_edit_title">Edit the deck from Settings</string>
+    <string name="classic_tutorial_edit_body">Adjust columns, rows, spacing, and use Button editor to add, move, or delete keys.</string>
+    <string name="classic_tutorial_pages_title">Swipe or use page keys</string>
+    <string name="classic_tutorial_pages_body">Move between deck pages with your selected swipe mode or page buttons.</string>
+    <string name="classic_tutorial_done">Start using MobileDeck</string>
 </resources>

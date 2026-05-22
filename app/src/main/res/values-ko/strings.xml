@@ -135,6 +135,9 @@
     <string name="delete">삭제</string>
     <string name="reset">초기화</string>
     <string name="cancel">취소</string>
+    <string name="next">다음</string>
+    <string name="skip">건너뛰기</string>
+    <string name="tutorial">튜토리얼</string>
     <string name="action_settings">설정</string>
     <string name="action_bluetooth_status">블루투스 상태</string>
     <string name="action_previous_page">이전 페이지</string>
@@ -184,4 +187,22 @@
     <string name="status_message_discoverable_active">검색 허용 중입니다. HID가 등록된 상태에서 PC에서 페어링하세요.</string>
     <string name="status_message_discoverable_request_canceled">검색 허용 요청이 취소되었습니다.</string>
     <string name="status_message_discoverable_canceled">MobileDeck 안에서 검색 허용 상태를 취소했습니다. Android 시스템 검색 허용은 제한 시간까지 유지될 수 있습니다.</string>
+    <string name="classic_tutorial_title">클래식 UI 기본 사용법</string>
+    <string name="classic_tutorial_subtitle">휴대폰을 PC용 매크로 패드처럼 사용합니다.</string>
+    <string name="classic_tutorial_connect_title">먼저 Bluetooth HID 연결</string>
+    <string name="classic_tutorial_connect_body">블루투스 관리 박스에서 HID 등록, 페어링 검색 허용, PC에서 MobileDeck Keyboard 추가 순서로 진행합니다.</string>
+    <string name="classic_tutorial_order_register">HID 등록을 누릅니다.</string>
+    <string name="classic_tutorial_order_discoverable">페어링 검색 허용을 켭니다.</string>
+    <string name="classic_tutorial_order_pair_pc">PC 블루투스 화면에서 MobileDeck Keyboard를 페어링합니다.</string>
+    <string name="classic_tutorial_layout_title">덱 레이아웃 조정</string>
+    <string name="classic_tutorial_layout_body">덱 레이아웃에서 표시할 버튼 개수, 간격, 페이지 수, 페이지 방향, 페이지 전환 방식을 조정합니다.</string>
+    <string name="classic_tutorial_button_settings_title">버튼 동작 편집</string>
+    <string name="classic_tutorial_button_settings_body">버튼 설정에서 버튼 편집으로 들어가 각 키의 위치, 삭제, 단축키, 미디어 키, 앱 동작, 텍스트, 실행 명령, 아이콘과 이미지를 설정합니다.</string>
+    <string name="classic_tutorial_press_title">키를 눌러 동작 전송</string>
+    <string name="classic_tutorial_press_body">미디어 키, 단축키, 텍스트, 실행 명령이 연결된 호스트로 전송됩니다.</string>
+    <string name="classic_tutorial_edit_title">설정에서 덱 편집</string>
+    <string name="classic_tutorial_edit_body">가로, 세로, 간격을 조절하고 버튼 편집에서 키를 추가, 이동, 삭제합니다.</string>
+    <string name="classic_tutorial_pages_title">스와이프 또는 페이지 키 사용</string>
+    <string name="classic_tutorial_pages_body">설정한 스와이프 방식이나 페이지 버튼으로 덱 페이지를 이동합니다.</string>
+    <string name="classic_tutorial_done">MobileDeck 시작</string>
 </resources>

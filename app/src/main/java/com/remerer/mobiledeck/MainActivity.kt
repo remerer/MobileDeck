@@ -74,6 +74,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
@@ -219,213 +220,6 @@ class MainActivity : ComponentActivity() {
             hide(WindowInsetsCompat.Type.systemBars())
             systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         }
-    }
-}
-
-private enum class DeckActionType(@StringRes val labelRes: Int) {
-    Settings(R.string.action_settings),
-    BluetoothStatus(R.string.action_bluetooth_status),
-    PreviousPage(R.string.action_previous_page),
-    NextPage(R.string.action_next_page),
-    MediaKey(R.string.action_media_key),
-    Hotkey(R.string.action_hotkey),
-    Text(R.string.action_text),
-    RunCommand(R.string.action_run_command),
-    Utility(R.string.action_utility),
-    AppCommand(R.string.action_app_command)
-}
-
-private enum class EditActionPanel(@StringRes val labelRes: Int) {
-    AppCommand(R.string.app_command_target),
-    KeyboardInput(R.string.action_keyboard_input),
-    Widget(R.string.action_widget),
-    MediaKey(R.string.action_media_key),
-    RunCommand(R.string.action_run_command),
-    Utility(R.string.action_utility)
-}
-
-private enum class DeckDisplayMode(@StringRes val labelRes: Int) {
-    IconOnly(R.string.display_icon_only),
-    IconAndText(R.string.display_icon_and_text),
-    KeywordOnly(R.string.display_keyword_only)
-}
-
-private enum class PageSwipeAxis(@StringRes val labelRes: Int, @StringRes val shortLabelRes: Int) {
-    Horizontal(R.string.page_axis_horizontal, R.string.page_axis_horizontal_short),
-    Vertical(R.string.page_axis_vertical, R.string.page_axis_vertical_short)
-}
-
-private enum class PageSwipeMode(@StringRes val labelRes: Int) {
-    Disabled(R.string.page_swipe_mode_disabled),
-    SingleTouch(R.string.page_swipe_mode_single),
-    MultiTouch(R.string.page_swipe_mode_multi);
-
-    fun next(): PageSwipeMode {
-        val values = values()
-        return values[(ordinal + 1) % values.size]
-    }
-}
-
-private enum class DeckUiMode(@StringRes val labelRes: Int) {
-    Classic(R.string.deck_ui_classic),
-    Console(R.string.deck_ui_console)
-}
-
-private fun DeckUiMode.toThemeStyle(): MobileDeckThemeStyle {
-    return when (this) {
-        DeckUiMode.Classic -> MobileDeckThemeStyle.Classic
-        DeckUiMode.Console -> MobileDeckThemeStyle.Console
-    }
-}
-
-private data class DeckButton(
-    val id: Int,
-    val title: String,
-    val subtitle: String,
-    val icon: String,
-    val iconImageUri: String,
-    val displayMode: DeckDisplayMode,
-    val actionType: DeckActionType,
-    val payload: String,
-    val color: Color,
-    val position: Int = 0,
-    val spanColumns: Int = 1,
-    val spanRows: Int = 1,
-    val appWidgetId: Int = INVALID_APP_WIDGET_ID,
-    val appWidgetTouchable: Boolean = true
-)
-
-private data class UtilityChoice(
-    val payload: String,
-    @StringRes val labelRes: Int
-)
-
-private data class DeckPageConfig(
-    val id: Int,
-    val name: String,
-    val buttons: List<DeckButton>
-)
-
-private data class DragSwapCandidate(
-    val draggedButtonId: Int,
-    val targetButtonId: Int,
-    val sourcePosition: Int,
-    val targetPosition: Int
-)
-
-private data class ConsoleLayoutConfig(
-    val rows: List<List<Int>>
-)
-
-private data class ConsolePanelOptions(
-    val showConnection: Boolean = true,
-    val showMessage: Boolean = true,
-    val showClock: Boolean = true,
-    val showDate: Boolean = true
-)
-
-private data class ActivityLog(
-    val buttonTitle: String,
-    val payload: String,
-    val delivered: Boolean,
-    val note: String
-)
-
-private data class IconChoice(
-    val key: String,
-    @StringRes val labelRes: Int
-)
-
-private data class LaunchableAppChoice(
-    val label: String,
-    val packageName: String,
-    val icon: ImageBitmap?
-)
-
-private data class MediaKeyChoice(
-    val payload: String,
-    @StringRes val labelRes: Int
-)
-
-private data class PageAnimationTarget(
-    val pageId: Int,
-    val delta: Int,
-    val sequence: Int
-)
-
-private data class DeckThemeColors(
-    val backgroundGradient: List<Color>,
-    val sidebarBackground: Color,
-    val sidebarBorder: Color,
-    val cardBackground: Color,
-    val cardBorder: Color,
-    val textPrimary: Color,
-    val textSecondary: Color,
-    val textMuted: Color,
-    val toggleBackground: Color,
-    val actionStart: Color,
-    val actionEnd: Color,
-    val neutralIconBackground: Color,
-    val consoleSidebar: Color,
-    val consolePreviewBackground: Color,
-    val consoleButtonDefault: Color,
-    val consoleButtonFeatured: Color,
-    val consoleButtonSystem: Color
-)
-
-private val DefaultDeckThemeColors = DeckThemeColors(
-    backgroundGradient = listOf(Color(0xFF0F141A), Color(0xFF151B22), Color(0xFF10151B)),
-    sidebarBackground = Color(0xFF10171F).copy(alpha = 0.94f),
-    sidebarBorder = Color.White.copy(alpha = 0.08f),
-    cardBackground = Color(0xFF18212B).copy(alpha = 0.86f),
-    cardBorder = Color.White.copy(alpha = 0.08f),
-    textPrimary = Color.White,
-    textSecondary = Color.White.copy(alpha = 0.64f),
-    textMuted = Color.White.copy(alpha = 0.38f),
-    toggleBackground = Color(0xFF151D26),
-    actionStart = Color(0xFF18212B),
-    actionEnd = Color(0xFF131B24),
-    neutralIconBackground = Color(0xFF263342),
-    consoleSidebar = Color(0xFF17212B).copy(alpha = 0.86f),
-    consolePreviewBackground = Color(0xFF101820),
-    consoleButtonDefault = Color(0xFF24313D),
-    consoleButtonFeatured = Color(0xFF245B9D),
-    consoleButtonSystem = Color(0xFF1F5DAD)
-)
-
-private val LocalDeckThemeColors = staticCompositionLocalOf { DefaultDeckThemeColors }
-
-private val ClassicLayoutAccent = Color(0xFF9B5DE5)
-private val ClassicLayoutSecondaryAccent = Color(0xFF5F2AA0)
-private val ClassicButtonAccent = Color(0xFFE47B17)
-private val ClassicButtonSecondaryAccent = Color(0xFFB85B00)
-
-private enum class AppPage {
-    Deck,
-    LayoutEditor,
-    ConsoleLayoutEditor,
-    Settings
-}
-
-private enum class BluetoothPermissionAction {
-    RegisterHid,
-    MakeDiscoverable
-}
-
-private enum class ButtonVibrationLevel(
-    @StringRes val labelRes: Int,
-    @StringRes val shortLabelRes: Int,
-    val durationMillis: Long,
-    val amplitude: Int
-) {
-    Off(R.string.button_vibration_off, R.string.button_vibration_off_short, 0L, 0),
-    Weak(R.string.button_vibration_weak, R.string.button_vibration_weak_short, 10L, 55),
-    Medium(R.string.button_vibration_medium, R.string.button_vibration_medium_short, 14L, 115),
-    Strong(R.string.button_vibration_strong, R.string.button_vibration_strong_short, 18L, 190);
-
-    fun next(): ButtonVibrationLevel {
-        val values = values()
-        return values[(ordinal + 1) % values.size]
     }
 }
 
@@ -633,6 +427,7 @@ private fun MobileDeckApp() {
     var pendingWidgetId by remember { mutableStateOf<Int?>(null) }
     var logs by remember { mutableStateOf(emptyList<ActivityLog>()) }
     var page by remember { mutableStateOf(AppPage.Deck) }
+    var showClassicTutorial by remember { mutableStateOf(shouldShowClassicTutorial(context)) }
     var confirmSettingsButtonRestore by remember { mutableStateOf(false) }
     var confirmEmptyPageDeletePageId by remember { mutableStateOf<Int?>(null) }
     val activeDeckPage = deckPages.firstOrNull { it.id == activeDeckPageId } ?: deckPages.first()
@@ -645,6 +440,16 @@ private fun MobileDeckApp() {
             pairingDiscoverable = false
             pairingDiscoverableUntilMillis = null
             hidStatus = hidStatus.copy(message = discoverableFinishedMessage)
+        }
+    }
+
+    LaunchedEffect(showClassicTutorial) {
+        if (showClassicTutorial) {
+            page = AppPage.Settings
+            if (deckUiMode != DeckUiMode.Classic) {
+                deckUiMode = DeckUiMode.Classic
+                saveDeckUiMode(context, DeckUiMode.Classic)
+            }
         }
     }
 
@@ -1235,6 +1040,7 @@ private fun MobileDeckApp() {
                 deckUiMode = deckUiMode,
                 consolePanelOptions = consolePanelOptions,
                 pairingDiscoverable = pairingDiscoverable,
+                showClassicTutorial = showClassicTutorial,
                 onLayoutEditor = {
                     context.applicationContext.vibrateButtonPress(buttonVibrationLevel)
                     page = AppPage.LayoutEditor
@@ -1323,6 +1129,14 @@ private fun MobileDeckApp() {
                 onAddPage = {
                     context.applicationContext.vibrateButtonPress(buttonVibrationLevel)
                     addDeckPage()
+                },
+                onShowClassicTutorial = {
+                    context.applicationContext.vibrateButtonPress(buttonVibrationLevel)
+                    showClassicTutorial = true
+                },
+                onDismissClassicTutorial = {
+                    showClassicTutorial = false
+                    saveClassicTutorialSeen(context)
                 },
             )
         }
@@ -1421,6 +1235,7 @@ private fun MobileDeckApp() {
             }
         )
     }
+
     }
     }
 }
@@ -1444,6 +1259,7 @@ private fun SettingsPage(
     deckUiMode: DeckUiMode,
     consolePanelOptions: ConsolePanelOptions,
     pairingDiscoverable: Boolean,
+    showClassicTutorial: Boolean,
     pageName: String,
     pageCount: Int,
     pairedHosts: List<PairedHidHost>,
@@ -1468,94 +1284,106 @@ private fun SettingsPage(
     onRowsChange: (Int) -> Unit,
     onSpacingChange: (Int) -> Unit,
     onAddButton: () -> Unit,
-    onAddPage: () -> Unit
+    onAddPage: () -> Unit,
+    onShowClassicTutorial: () -> Unit,
+    onDismissClassicTutorial: () -> Unit
 ) {
     val colors = deckThemeColors(deckUiMode)
-    Row(
+    Box(
         modifier = modifier
             .fillMaxSize()
             .background(
                 Brush.linearGradient(colors.backgroundGradient)
             )
     ) {
-        SettingsSidebar(
-            modifier = Modifier
-                .width(300.dp)
-                .fillMaxHeight(),
-            status = status,
-            deckUiMode = deckUiMode,
-            pairedHosts = pairedHosts,
-            pairingDiscoverable = pairingDiscoverable,
-            onBack = onBack,
-            onDeckUiModeChange = onDeckUiModeChange,
-            onStart = onStart,
-            onStop = onStop,
-            onMakeDiscoverable = onMakeDiscoverable,
-            onCancelDiscoverable = onCancelDiscoverable,
-            onRefreshHosts = onRefreshHosts,
-            onConnectHost = onConnectHost
-        )
-        AnimatedContent(
-            targetState = deckUiMode,
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxHeight(),
-            transitionSpec = {
-                val direction = if (targetState == DeckUiMode.Console) 1 else -1
-                slideInHorizontally { width -> direction * width } togetherWith
-                    slideOutHorizontally { width -> -direction * width }
-            },
-            label = "settingsMode"
-        ) { mode ->
-            if (mode == DeckUiMode.Console) {
-                ConsoleSettingsContent(
-                    deckPages = deckPages,
-                    activePageId = activePageId,
-                    pageSwipeMode = pageSwipeMode,
-                    pageSwipeAnimation = pageSwipeAnimation,
-                    infinitePageSwipe = infinitePageSwipe,
-                    buttonVibrationLevel = buttonVibrationLevel,
-                    consolePanelOptions = consolePanelOptions,
-                    pageName = pageName,
-                    pageCount = pageCount,
-                    logs = logs,
-                    onPageSwipeModeChange = onPageSwipeModeChange,
-                    onPageSwipeAnimationChange = onPageSwipeAnimationChange,
-                    onInfinitePageSwipeChange = onInfinitePageSwipeChange,
-                    onButtonVibrationLevelChange = onButtonVibrationLevelChange,
-                    onConsolePanelOptionsChange = onConsolePanelOptionsChange,
-                    onConsoleLayoutEditor = onConsoleLayoutEditor,
-                    onAddPage = onAddPage
-                )
-            } else {
-                ClassicSettingsContent(
-                    deckPages = deckPages,
-                    activePageId = activePageId,
-                    columns = columns,
-                    rows = rows,
-                    spacing = spacing,
-                    pageSwipeAxis = pageSwipeAxis,
-                    pageSwipeMode = pageSwipeMode,
-                    pageSwipeAnimation = pageSwipeAnimation,
-                    infinitePageSwipe = infinitePageSwipe,
-                    buttonVibrationLevel = buttonVibrationLevel,
-                    classicSolidButtonBackground = classicSolidButtonBackground,
-                    pageName = pageName,
-                    pageCount = pageCount,
-                    logs = logs,
-                    onPageSwipeAxisChange = onPageSwipeAxisChange,
-                    onPageSwipeModeChange = onPageSwipeModeChange,
-                    onPageSwipeAnimationChange = onPageSwipeAnimationChange,
-                    onInfinitePageSwipeChange = onInfinitePageSwipeChange,
-                    onButtonVibrationLevelChange = onButtonVibrationLevelChange,
-                    onClassicSolidButtonBackgroundChange = onClassicSolidButtonBackgroundChange,
-                    onLayoutEditor = onLayoutEditor,
-                    onColumnsChange = onColumnsChange,
-                    onRowsChange = onRowsChange,
-                    onSpacingChange = onSpacingChange,
-                    onAddPage = onAddPage
-                )
+        Row(modifier = Modifier.fillMaxSize()) {
+            SettingsSidebar(
+                modifier = Modifier
+                    .width(300.dp)
+                    .fillMaxHeight(),
+                status = status,
+                deckUiMode = deckUiMode,
+                pairedHosts = pairedHosts,
+                pairingDiscoverable = pairingDiscoverable,
+                onBack = onBack,
+                onDeckUiModeChange = onDeckUiModeChange,
+                onStart = onStart,
+                onStop = onStop,
+                onMakeDiscoverable = onMakeDiscoverable,
+                onCancelDiscoverable = onCancelDiscoverable,
+                onRefreshHosts = onRefreshHosts,
+                onConnectHost = onConnectHost
+            )
+            AnimatedContent(
+                targetState = deckUiMode,
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight(),
+                transitionSpec = {
+                    val direction = if (targetState == DeckUiMode.Console) 1 else -1
+                    slideInHorizontally { width -> direction * width } togetherWith
+                        slideOutHorizontally { width -> -direction * width }
+                },
+                label = "settingsMode"
+            ) { mode ->
+                if (mode == DeckUiMode.Console) {
+                    ConsoleSettingsContent(
+                        deckPages = deckPages,
+                        activePageId = activePageId,
+                        pageSwipeMode = pageSwipeMode,
+                        pageSwipeAnimation = pageSwipeAnimation,
+                        infinitePageSwipe = infinitePageSwipe,
+                        buttonVibrationLevel = buttonVibrationLevel,
+                        consolePanelOptions = consolePanelOptions,
+                        pageName = pageName,
+                        pageCount = pageCount,
+                        logs = logs,
+                        onPageSwipeModeChange = onPageSwipeModeChange,
+                        onPageSwipeAnimationChange = onPageSwipeAnimationChange,
+                        onInfinitePageSwipeChange = onInfinitePageSwipeChange,
+                        onButtonVibrationLevelChange = onButtonVibrationLevelChange,
+                        onConsolePanelOptionsChange = onConsolePanelOptionsChange,
+                        onConsoleLayoutEditor = onConsoleLayoutEditor,
+                        onAddPage = onAddPage,
+                        onShowClassicTutorial = onShowClassicTutorial
+                    )
+                } else {
+                    ClassicSettingsContent(
+                        deckPages = deckPages,
+                        activePageId = activePageId,
+                        columns = columns,
+                        rows = rows,
+                        spacing = spacing,
+                        pageSwipeAxis = pageSwipeAxis,
+                        pageSwipeMode = pageSwipeMode,
+                        pageSwipeAnimation = pageSwipeAnimation,
+                        infinitePageSwipe = infinitePageSwipe,
+                        buttonVibrationLevel = buttonVibrationLevel,
+                        classicSolidButtonBackground = classicSolidButtonBackground,
+                        pageName = pageName,
+                        pageCount = pageCount,
+                        logs = logs,
+                        onPageSwipeAxisChange = onPageSwipeAxisChange,
+                        onPageSwipeModeChange = onPageSwipeModeChange,
+                        onPageSwipeAnimationChange = onPageSwipeAnimationChange,
+                        onInfinitePageSwipeChange = onInfinitePageSwipeChange,
+                        onButtonVibrationLevelChange = onButtonVibrationLevelChange,
+                        onClassicSolidButtonBackgroundChange = onClassicSolidButtonBackgroundChange,
+                        onLayoutEditor = onLayoutEditor,
+                        onColumnsChange = onColumnsChange,
+                        onRowsChange = onRowsChange,
+                        onSpacingChange = onSpacingChange,
+                        onAddPage = onAddPage,
+                        onShowClassicTutorial = onShowClassicTutorial
+                    )
+                }
             }
+        }
+        if (showClassicTutorial) {
+            ClassicSettingsTutorialOverlay(
+                modifier = Modifier.fillMaxSize(),
+                onDismiss = onDismissClassicTutorial
+            )
         }
     }
 }
@@ -2045,7 +1873,8 @@ private fun ClassicSettingsContent(
     onColumnsChange: (Int) -> Unit,
     onRowsChange: (Int) -> Unit,
     onSpacingChange: (Int) -> Unit,
-    onAddPage: () -> Unit
+    onAddPage: () -> Unit,
+    onShowClassicTutorial: () -> Unit
 ) {
     SettingsDetailContent(
         mode = DeckUiMode.Classic,
@@ -2090,7 +1919,10 @@ private fun ClassicSettingsContent(
             SettingsDiagnosticsCard(logs)
         }
         item {
-            SettingsAppInfoRow(mode = DeckUiMode.Classic)
+            SettingsAppInfoRow(
+                mode = DeckUiMode.Classic,
+                onShowClassicTutorial = onShowClassicTutorial
+            )
         }
     }
 }
@@ -2113,7 +1945,8 @@ private fun ConsoleSettingsContent(
     onButtonVibrationLevelChange: (ButtonVibrationLevel) -> Unit,
     onConsolePanelOptionsChange: (ConsolePanelOptions) -> Unit,
     onConsoleLayoutEditor: () -> Unit,
-    onAddPage: () -> Unit
+    onAddPage: () -> Unit,
+    onShowClassicTutorial: () -> Unit
 ) {
     SettingsDetailContent(
         mode = DeckUiMode.Console,
@@ -2203,7 +2036,10 @@ private fun ConsoleSettingsContent(
             SettingsDiagnosticsCard(logs)
         }
         item {
-            SettingsAppInfoRow(mode = DeckUiMode.Console)
+            SettingsAppInfoRow(
+                mode = DeckUiMode.Console,
+                onShowClassicTutorial = onShowClassicTutorial
+            )
         }
     }
 }
@@ -2288,7 +2124,10 @@ private fun SettingsDetailContent(
 }
 
 @Composable
-private fun SettingsAppInfoRow(mode: DeckUiMode) {
+private fun SettingsAppInfoRow(
+    mode: DeckUiMode,
+    onShowClassicTutorial: () -> Unit
+) {
     val colors = deckThemeColors(mode)
     val accent = settingsModeAccent(mode)
     SettingsCard(accent = accent, themeColors = colors) {
@@ -2309,6 +2148,23 @@ private fun SettingsAppInfoRow(mode: DeckUiMode) {
                     text = "${stringResource(R.string.app_name)} ${BuildConfig.VERSION_NAME}",
                     style = MaterialTheme.typography.bodySmall,
                     color = colors.textSecondary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            Button(
+                shape = RoundedCornerShape(8.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = accent,
+                    contentColor = Color.White
+                ),
+                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
+                onClick = onShowClassicTutorial
+            ) {
+                Text(
+                    text = stringResource(R.string.tutorial),
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -5300,48 +5156,6 @@ private fun Int.signOrOne(): Int = if (this < 0) -1 else 1
 
 private fun wrapIndex(value: Int, size: Int): Int = ((value % size) + size) % size
 
-private fun slotToButtonPosition(slot: Int, showTitle: Boolean): Int = if (showTitle) slot - 1 else slot
-
-private fun buttonToSlot(button: DeckButton, showTitle: Boolean): Int {
-    return if (showTitle) button.position + 1 else button.position
-}
-
-private fun DeckButton.effectiveSpanColumns(columns: Int, showTitle: Boolean): Int {
-    val column = buttonToSlot(this, showTitle).floorMod(columns.coerceAtLeast(1))
-    return spanColumns.coerceIn(1, minOf(MAX_BUTTON_SPAN_COLUMNS, columns - column).coerceAtLeast(1))
-}
-
-private fun DeckButton.effectiveSpanRows(columns: Int, rows: Int, showTitle: Boolean): Int {
-    val slot = buttonToSlot(this, showTitle)
-    val row = slot / columns.coerceAtLeast(1)
-    return spanRows.coerceIn(1, minOf(MAX_BUTTON_SPAN_ROWS, rows - row).coerceAtLeast(1))
-}
-
-private fun occupiedSlotsForButton(
-    button: DeckButton,
-    columns: Int,
-    rows: Int,
-    showTitle: Boolean
-): List<Int> {
-    val safeColumns = columns.coerceAtLeast(1)
-    val safeRows = rows.coerceAtLeast(1)
-    val anchorSlot = buttonToSlot(button, showTitle)
-    if (anchorSlot !in 0 until safeColumns * safeRows) return emptyList()
-    val anchorColumn = anchorSlot % safeColumns
-    val anchorRow = anchorSlot / safeColumns
-    val spanColumns = button.effectiveSpanColumns(safeColumns, showTitle)
-    val spanRows = button.effectiveSpanRows(safeColumns, safeRows, showTitle)
-    return buildList {
-        repeat(spanRows) { rowOffset ->
-            repeat(spanColumns) { columnOffset ->
-                add((anchorRow + rowOffset) * safeColumns + anchorColumn + columnOffset)
-            }
-        }
-    }
-}
-
-private fun Int.floorMod(divisor: Int): Int = ((this % divisor) + divisor) % divisor
-
 @Composable
 private fun ButtonGrid(
     modifier: Modifier = Modifier,
@@ -7004,6 +6818,250 @@ private fun EditButtonDialog(
         }
     }
 }
+
+private enum class SettingsTutorialStep {
+    Bluetooth,
+    Layout,
+    Buttons;
+
+    fun next(): SettingsTutorialStep? {
+        val values = values()
+        val nextIndex = ordinal + 1
+        return values.getOrNull(nextIndex)
+    }
+}
+
+@Composable
+private fun ClassicSettingsTutorialOverlay(
+    modifier: Modifier = Modifier,
+    onDismiss: () -> Unit
+) {
+    var step by remember { mutableStateOf(SettingsTutorialStep.Bluetooth) }
+    val colors = LocalDeckThemeColors.current
+    val accent = when (step) {
+        SettingsTutorialStep.Bluetooth -> Color(0xFF25B9FF)
+        SettingsTutorialStep.Layout -> ClassicLayoutAccent
+        SettingsTutorialStep.Buttons -> ClassicButtonAccent
+    }
+    val stepNumber = step.ordinal + 1
+    val title = when (step) {
+        SettingsTutorialStep.Bluetooth -> stringResource(R.string.classic_tutorial_connect_title)
+        SettingsTutorialStep.Layout -> stringResource(R.string.classic_tutorial_layout_title)
+        SettingsTutorialStep.Buttons -> stringResource(R.string.classic_tutorial_button_settings_title)
+    }
+    val body = when (step) {
+        SettingsTutorialStep.Bluetooth -> stringResource(R.string.classic_tutorial_connect_body)
+        SettingsTutorialStep.Layout -> stringResource(R.string.classic_tutorial_layout_body)
+        SettingsTutorialStep.Buttons -> stringResource(R.string.classic_tutorial_button_settings_body)
+    }
+
+    Surface(
+        modifier = modifier,
+        color = Color.Black.copy(alpha = 0.66f),
+        contentColor = Color.White,
+        onClick = {}
+    ) {
+        BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+            val sidebarWidth = 300.dp
+            val contentWidth = (maxWidth - sidebarWidth - 28.dp).coerceAtLeast(360.dp)
+            val highlightModifier = when (step) {
+                SettingsTutorialStep.Bluetooth -> Modifier
+                    .offset(x = 12.dp, y = 100.dp)
+                    .size(width = sidebarWidth - 24.dp, height = 430.dp)
+                SettingsTutorialStep.Layout -> Modifier
+                    .offset(x = sidebarWidth + 14.dp, y = 82.dp)
+                    .size(width = contentWidth, height = 252.dp)
+                SettingsTutorialStep.Buttons -> Modifier
+                    .offset(x = sidebarWidth + 14.dp, y = 342.dp)
+                    .size(width = contentWidth, height = 168.dp)
+            }
+            val calloutAlignment = when (step) {
+                SettingsTutorialStep.Bluetooth -> Alignment.CenterEnd
+                SettingsTutorialStep.Layout -> Alignment.BottomEnd
+                SettingsTutorialStep.Buttons -> Alignment.TopEnd
+            }
+            val calloutPadding = when (step) {
+                SettingsTutorialStep.Bluetooth -> PaddingValues(end = 34.dp)
+                SettingsTutorialStep.Layout -> PaddingValues(end = 34.dp, bottom = 28.dp)
+                SettingsTutorialStep.Buttons -> PaddingValues(end = 34.dp, top = 34.dp)
+            }
+
+            TutorialHighlightFrame(
+                modifier = highlightModifier,
+                accent = accent,
+                stepNumber = stepNumber,
+                title = title,
+                showBluetoothOrder = step == SettingsTutorialStep.Bluetooth
+            )
+
+            Surface(
+                modifier = Modifier
+                    .align(calloutAlignment)
+                    .padding(calloutPadding)
+                    .widthIn(max = 430.dp),
+                shape = RoundedCornerShape(12.dp),
+                color = colors.cardBackground.copy(alpha = 0.98f),
+                contentColor = colors.textPrimary,
+                shadowElevation = 16.dp,
+                tonalElevation = 8.dp
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(32.dp)
+                                .clip(CircleShape)
+                                .background(accent),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = stepNumber.toString(),
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                        }
+                        Text(
+                            text = title,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = colors.textPrimary
+                        )
+                    }
+                    Text(
+                        text = body,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = colors.textSecondary
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.End),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        TextButton(onClick = onDismiss) {
+                            Text(stringResource(R.string.skip))
+                        }
+                        Button(
+                            shape = RoundedCornerShape(8.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = accent,
+                                contentColor = Color.White
+                            ),
+                            onClick = {
+                                val next = step.next()
+                                if (next == null) onDismiss() else step = next
+                            }
+                        ) {
+                            Text(
+                                text = stringResource(
+                                    if (step.next() == null) R.string.classic_tutorial_done else R.string.next
+                                )
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TutorialHighlightFrame(
+    modifier: Modifier = Modifier,
+    accent: Color,
+    stepNumber: Int,
+    title: String,
+    showBluetoothOrder: Boolean
+) {
+    Surface(
+        modifier = modifier
+            .border(2.dp, accent, RoundedCornerShape(14.dp)),
+        shape = RoundedCornerShape(14.dp),
+        color = accent.copy(alpha = 0.10f),
+        contentColor = Color.White,
+        shadowElevation = 12.dp
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(26.dp)
+                        .clip(CircleShape)
+                        .background(accent),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = stepNumber.toString(),
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                    )
+                }
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            if (showBluetoothOrder) {
+                TutorialOrderChip(number = 1, text = stringResource(R.string.classic_tutorial_order_register))
+                TutorialOrderChip(number = 2, text = stringResource(R.string.classic_tutorial_order_discoverable))
+                TutorialOrderChip(number = 3, text = stringResource(R.string.classic_tutorial_order_pair_pc))
+            }
+        }
+    }
+}
+
+@Composable
+private fun TutorialOrderChip(number: Int, text: String) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(999.dp))
+            .background(Color.Black.copy(alpha = 0.32f))
+            .padding(horizontal = 10.dp, vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(22.dp)
+                .clip(CircleShape)
+                .background(Color.White),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = number.toString(),
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.Bold,
+                color = Color.Black
+            )
+        }
+        Text(
+            text = text,
+            style = MaterialTheme.typography.bodySmall,
+            color = Color.White,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+    }
+}
+
 @Composable
 private fun TrashDropTarget(active: Boolean) {
     val colors = LocalDeckThemeColors.current
@@ -7478,633 +7536,47 @@ private fun AppIconPickerDialog(
     )
 }
 
-private fun defaultDeckColors(): List<Color> {
-    return listOf(
-        Color(0xFF005A9C),
-        Color(0xFF6A4C93),
-        Color(0xFF006D77),
-        Color(0xFF9D4E15),
-        Color(0xFF4F772D),
-        Color(0xFF8A1C1C)
-    )
-}
-
-private fun defaultButtons(): List<DeckButton> {
-    val colors = defaultDeckColors()
-
-    return listOf(
-        DeckButton(1, "Bluetooth", "Connection", ICON_AUTO, "", DeckDisplayMode.IconAndText, DeckActionType.AppCommand, DeckActionType.BluetoothStatus.name, colors[0], position = 0),
-        DeckButton(2, "Play", "Pause", ICON_AUTO, "", DeckDisplayMode.IconAndText, DeckActionType.MediaKey, MEDIA_PLAY_PAUSE, colors[1], position = 1),
-        DeckButton(3, "Mute", "Media", ICON_AUTO, "", DeckDisplayMode.IconAndText, DeckActionType.MediaKey, MEDIA_MUTE, colors[0], position = 2),
-        DeckButton(4, "Vol -", "Media", ICON_AUTO, "", DeckDisplayMode.IconAndText, DeckActionType.MediaKey, MEDIA_VOLUME_DOWN, colors[0], position = 3),
-        DeckButton(5, "Vol +", "Media", ICON_AUTO, "", DeckDisplayMode.IconAndText, DeckActionType.MediaKey, MEDIA_VOLUME_UP, colors[2], position = 4),
-        DeckButton(6, "Previous", "Track", ICON_AUTO, "", DeckDisplayMode.IconAndText, DeckActionType.MediaKey, MEDIA_PREVIOUS, colors[3], position = 6),
-        DeckButton(7, "Stop", "Media", ICON_AUTO, "", DeckDisplayMode.IconAndText, DeckActionType.MediaKey, MEDIA_STOP, colors[5], position = 7),
-        DeckButton(8, "Next", "Track", ICON_AUTO, "", DeckDisplayMode.IconAndText, DeckActionType.MediaKey, MEDIA_NEXT, colors[4], position = 8),
-        DeckButton(9, "Desktop", "Win+D", ICON_AUTO, "", DeckDisplayMode.IconAndText, DeckActionType.Hotkey, "WIN+D", colors[4], position = 9),
-        DeckButton(10, "Explorer", "Win+E", ICON_AUTO, "", DeckDisplayMode.IconAndText, DeckActionType.Hotkey, "WIN+E", colors[2], position = 10),
-        DeckButton(11, "Task View", "Win+Tab", ICON_AUTO, "", DeckDisplayMode.IconAndText, DeckActionType.Hotkey, "WIN+TAB", colors[1], position = 11),
-        DeckButton(12, "Run", "Win+R", ICON_AUTO, "", DeckDisplayMode.IconAndText, DeckActionType.Hotkey, "WIN+R", colors[3], position = 12),
-        DeckButton(13, "Time", "Clock", ICON_AUTO, "", DeckDisplayMode.IconAndText, DeckActionType.Utility, UTILITY_TIME, colors[5], position = 13, spanColumns = 2),
-        DeckButton(14, "Weather", "Forecast", ICON_AUTO, "", DeckDisplayMode.IconAndText, DeckActionType.Utility, UTILITY_WEATHER, colors[2], position = 15),
-        DeckButton(15, "Settings", "Deck", ICON_SETTINGS, "", DeckDisplayMode.IconAndText, DeckActionType.Settings, "", colors[4], position = 16)
-    )
-}
-
-private fun defaultSecondPageButtons(): List<DeckButton> {
-    val colors = defaultDeckColors()
-
-    return listOf(
-        DeckButton(16, "Prev Page", "Deck", ICON_PREVIOUS, "", DeckDisplayMode.IconAndText, DeckActionType.AppCommand, DeckActionType.PreviousPage.name, colors[3], position = 0),
-        DeckButton(17, "Next Page", "Deck", ICON_NEXT, "", DeckDisplayMode.IconAndText, DeckActionType.AppCommand, DeckActionType.NextPage.name, colors[4], position = 1),
-        DeckButton(18, "Copy", "Ctrl+C", ICON_KEYBOARD, "", DeckDisplayMode.IconAndText, DeckActionType.Hotkey, "CTRL+C", colors[2], position = 2),
-        DeckButton(19, "Paste", "Ctrl+V", ICON_KEYBOARD, "", DeckDisplayMode.IconAndText, DeckActionType.Hotkey, "CTRL+V", colors[2], position = 3),
-        DeckButton(20, "Select All", "Ctrl+A", ICON_KEYBOARD, "", DeckDisplayMode.IconAndText, DeckActionType.Hotkey, "CTRL+A", colors[1], position = 4),
-        DeckButton(21, "Screenshot", "Win+Shift+S", ICON_KEYBOARD, "", DeckDisplayMode.IconAndText, DeckActionType.Hotkey, "WIN+SHIFT+S", colors[0], position = 5),
-        DeckButton(22, "Notepad", "Run", ICON_APPS, "", DeckDisplayMode.IconAndText, DeckActionType.RunCommand, "notepad", colors[3], position = 6),
-        DeckButton(23, "Calculator", "Run", ICON_APPS, "", DeckDisplayMode.IconAndText, DeckActionType.RunCommand, "calc", colors[5], position = 7),
-        DeckButton(24, "Paint", "Run", ICON_APPS, "", DeckDisplayMode.IconAndText, DeckActionType.RunCommand, "mspaint", colors[1], position = 8),
-        DeckButton(25, "Terminal", "Run", ICON_CODE, "", DeckDisplayMode.IconAndText, DeckActionType.RunCommand, "cmd", colors[0], position = 9),
-        DeckButton(26, "Lock", "Win+L", ICON_KEYBOARD, "", DeckDisplayMode.IconAndText, DeckActionType.Hotkey, "WIN+L", colors[4], position = 10),
-        DeckButton(27, "Task Manager", "Ctrl+Shift+Esc", ICON_KEYBOARD, "", DeckDisplayMode.IconAndText, DeckActionType.Hotkey, "CTRL+SHIFT+ESC", colors[5], position = 11),
-        DeckButton(28, "Hello", "Text", ICON_TEXT, "", DeckDisplayMode.IconAndText, DeckActionType.Text, "Hello from MobileDeck", colors[2], position = 12, spanColumns = 2),
-        DeckButton(29, "Control", "Panel", ICON_APPS, "", DeckDisplayMode.IconAndText, DeckActionType.RunCommand, "control", colors[3], position = 14),
-        DeckButton(30, "Refresh", "F5", ICON_KEYBOARD, "", DeckDisplayMode.IconAndText, DeckActionType.Hotkey, "F5", colors[0], position = 15)
-    )
-}
-
-private fun loadDeckButtons(context: Context): List<DeckButton> {
-    val raw = context.deckPrefs().getString(PREF_BUTTONS, null) ?: return defaultButtons()
-    return runCatching {
-        val array = JSONArray(raw)
-        List(array.length().coerceAtMost(MAX_PAGES)) { index ->
-            decodeDeckButton(array.getJSONObject(index), index)
-        }
-    }.map { normalizeDeckButtons(it) }.getOrDefault(defaultButtons())
-}
-
-private fun saveDeckButtons(context: Context, buttons: List<DeckButton>) {
-    val array = JSONArray()
-    buttons.forEach { button ->
-        array.put(encodeDeckButton(button))
-    }
-    context.deckPrefs().edit().putString(PREF_BUTTONS, array.toString()).apply()
-}
-
-private fun loadDeckPages(context: Context): List<DeckPageConfig> {
-    val raw = context.deckPrefs().getString(PREF_PAGES, null)
-        ?: return defaultDeckPages(loadDeckButtons(context))
-    return runCatching {
-        val array = JSONArray(raw)
-        val pages = List(array.length()) { index ->
-            val item = array.getJSONObject(index)
-            val buttons = item.optJSONArray("buttons") ?: JSONArray()
-            DeckPageConfig(
-                id = item.getInt("id"),
-                name = item.optString("name", "Page ${index + 1}"),
-                buttons = List(buttons.length()) { buttonIndex ->
-                    decodeDeckButton(buttons.getJSONObject(buttonIndex), buttonIndex)
-                }
-            )
-        }
-        if (pages.isEmpty()) {
-            defaultDeckPages()
-        } else {
-            ensureSettingsButton(pages)
-        }
-    }.getOrDefault(defaultDeckPages())
-}
-
-private fun defaultDeckPages(firstPageButtons: List<DeckButton> = defaultButtons()): List<DeckPageConfig> {
-    return listOf(
-        DeckPageConfig(1, "Page 1", firstPageButtons),
-        DeckPageConfig(2, "Page 2", defaultSecondPageButtons())
-    )
-}
-
-private fun saveDeckPages(context: Context, pages: List<DeckPageConfig>) {
-    val array = JSONArray()
-    pages.forEach { page ->
-        val buttons = JSONArray()
-        page.buttons.forEach { button ->
-            buttons.put(encodeDeckButton(button))
-        }
-        array.put(
-            JSONObject()
-                .put("id", page.id)
-                .put("name", page.name)
-                .put("buttons", buttons)
-        )
-    }
-    context.deckPrefs().edit().putString(PREF_PAGES, array.toString()).apply()
-}
-
-private fun loadConsoleLayout(context: Context): ConsoleLayoutConfig {
-    val raw = context.deckPrefs().getString(PREF_CONSOLE_LAYOUT, null) ?: return ConsoleLayoutConfig(emptyList())
-    return runCatching {
-        val array = JSONArray(raw)
-        ConsoleLayoutConfig(
-            rows = List(array.length()) { rowIndex ->
-                val row = array.getJSONArray(rowIndex)
-                List(row.length()) { index -> row.getInt(index) }
-            }
-        )
-    }.getOrDefault(ConsoleLayoutConfig(emptyList()))
-}
-
-private fun saveConsoleLayout(context: Context, layout: ConsoleLayoutConfig) {
-    val array = JSONArray()
-    layout.rows.forEach { row ->
-        val rowArray = JSONArray()
-        row.forEach { rowArray.put(it) }
-        array.put(rowArray)
-    }
-    context.deckPrefs().edit().putString(PREF_CONSOLE_LAYOUT, array.toString()).apply()
-}
-
-private fun loadConsolePanelOptions(context: Context): ConsolePanelOptions {
-    val prefs = context.deckPrefs()
-    return ConsolePanelOptions(
-        showConnection = prefs.getBoolean(PREF_CONSOLE_PANEL_CONNECTION, true),
-        showMessage = prefs.getBoolean(PREF_CONSOLE_PANEL_MESSAGE, true),
-        showClock = prefs.getBoolean(PREF_CONSOLE_PANEL_CLOCK, true),
-        showDate = prefs.getBoolean(PREF_CONSOLE_PANEL_DATE, true)
-    )
-}
-
-private fun saveConsolePanelOptions(context: Context, options: ConsolePanelOptions) {
-    context.deckPrefs().edit()
-        .putBoolean(PREF_CONSOLE_PANEL_CONNECTION, options.showConnection)
-        .putBoolean(PREF_CONSOLE_PANEL_MESSAGE, options.showMessage)
-        .putBoolean(PREF_CONSOLE_PANEL_CLOCK, options.showClock)
-        .putBoolean(PREF_CONSOLE_PANEL_DATE, options.showDate)
-        .apply()
-}
-
-private fun encodeDeckButton(button: DeckButton): JSONObject {
-    return JSONObject()
-        .put("id", button.id)
-        .put("title", button.title)
-        .put("subtitle", button.subtitle)
-        .put("icon", button.icon)
-        .put("iconImageUri", button.iconImageUri)
-        .put("displayMode", button.displayMode.name)
-        .put("actionType", button.actionType.name)
-        .put("payload", button.payload)
-        .put("color", button.color.toArgb())
-        .put("position", button.position)
-        .put("spanColumns", button.spanColumns)
-        .put("spanRows", button.spanRows)
-        .put("appWidgetId", button.appWidgetId)
-        .put("appWidgetTouchable", button.appWidgetTouchable)
-}
-
-private fun decodeDeckButton(item: JSONObject, fallbackPosition: Int): DeckButton {
-    return DeckButton(
-        id = item.getInt("id"),
-        title = item.getString("title"),
-        subtitle = item.optString("subtitle"),
-        icon = item.optString("icon"),
-        iconImageUri = item.optString("iconImageUri"),
-        displayMode = runCatching {
-            DeckDisplayMode.valueOf(item.optString("displayMode"))
-        }.getOrDefault(DeckDisplayMode.IconAndText),
-        actionType = runCatching {
-            DeckActionType.valueOf(item.getString("actionType"))
-        }.getOrDefault(DeckActionType.Hotkey),
-        payload = item.getString("payload"),
-        color = Color(item.getInt("color")),
-        position = item.optInt("position", fallbackPosition),
-        spanColumns = item.optInt("spanColumns", 1).coerceIn(1, MAX_BUTTON_SPAN_COLUMNS),
-        spanRows = item.optInt("spanRows", 1).coerceIn(1, MAX_BUTTON_SPAN_ROWS),
-        appWidgetId = item.optInt("appWidgetId", INVALID_APP_WIDGET_ID),
-        appWidgetTouchable = item.optBoolean("appWidgetTouchable", true)
-    )
-}
-
-private fun normalizeDeckButtons(buttons: List<DeckButton>): List<DeckButton> {
-    if (buttons.any { it.actionType == DeckActionType.Settings }) return buttons
-    val colors = defaultDeckColors()
-    val settingsButton = DeckButton(
-        id = nextDeckButtonId(buttons),
-        title = "Settings",
-        subtitle = "Deck",
-        icon = ICON_SETTINGS,
-        iconImageUri = "",
-        displayMode = DeckDisplayMode.IconAndText,
-        actionType = DeckActionType.Settings,
-        payload = "",
-        color = colors[4],
-        position = nextOpenPosition(buttons, DEFAULT_COLUMNS * DEFAULT_ROWS - 1)
-    )
-    return listOf(settingsButton) + buttons
-}
-
-private fun ensureSettingsButton(pages: List<DeckPageConfig>): List<DeckPageConfig> {
-    return if (hasSettingsButton(pages)) pages else restoreSettingsButton(pages, DEFAULT_COLUMNS, DEFAULT_ROWS)
-}
-
-private fun hasSettingsButton(pages: List<DeckPageConfig>): Boolean {
-    return pages.any { page -> page.buttons.any { buttonAppAction(it) == DeckActionType.Settings } }
-}
-
-private fun restoreSettingsButton(
-    pages: List<DeckPageConfig>,
-    columns: Int,
-    rows: Int
-): List<DeckPageConfig> {
-    if (hasSettingsButton(pages)) return pages
-    val firstPageId = pages.firstOrNull()?.id
-    val allButtons = pages.flatMap { it.buttons }
-
-    pages.forEach { page ->
-        val showTitle = page.id == firstPageId
-        val capacity = pageButtonCapacity(page.id, pages, columns, rows)
-        val position = nextOpenPosition(page.buttons, columns, rows, showTitle)
-        if (position < capacity) {
-            val settingsButton = settingsDeckButton(allButtons, position)
-            return pages.map { pageConfig ->
-                if (pageConfig.id == page.id) pageConfig.copy(buttons = pageConfig.buttons + settingsButton) else pageConfig
-            }
-        }
-    }
-
-    val lastPage = pages.lastOrNull() ?: return listOf(
-        DeckPageConfig(
-            id = 1,
-            name = "Page 1",
-            buttons = listOf(settingsDeckButton(emptyList(), 0))
-        )
-    )
-    val replacementIndex = lastPage.buttons.indices.maxWithOrNull(
-        compareBy<Int> { lastPage.buttons[it].position }.thenBy { it }
-    )
-    val replacementPosition = replacementIndex?.let { lastPage.buttons[it].position } ?: 0
-    val settingsButton = settingsDeckButton(allButtons, replacementPosition)
-    val replacementButtons = lastPage.buttons.toMutableList().apply {
-        if (replacementIndex != null) {
-            this[replacementIndex] = settingsButton
-        } else {
-            add(settingsButton)
-        }
-    }
-    return pages.map { page ->
-        if (page.id == lastPage.id) page.copy(buttons = replacementButtons) else page
-    }
-}
-
-private fun settingsDeckButton(existingButtons: List<DeckButton>, position: Int): DeckButton {
-    val colors = defaultDeckColors()
-    return DeckButton(
-        id = nextDeckButtonId(existingButtons),
-        title = "Settings",
-        subtitle = "Deck",
-        icon = ICON_SETTINGS,
-        iconImageUri = "",
-        displayMode = DeckDisplayMode.IconAndText,
-        actionType = DeckActionType.Settings,
-        payload = "",
-        color = colors[4],
-        position = position
-    )
-}
-
-private fun payloadRequired(actionType: DeckActionType): Boolean {
-    return when (actionType) {
-        DeckActionType.Settings,
-        DeckActionType.BluetoothStatus,
-        DeckActionType.PreviousPage,
-        DeckActionType.NextPage -> false
-        DeckActionType.Hotkey,
-        DeckActionType.Text,
-        DeckActionType.RunCommand -> true
-        DeckActionType.MediaKey,
-        DeckActionType.Utility,
-        DeckActionType.AppCommand -> false
-    }
-}
-
-private fun appCommandAction(payload: String): DeckActionType? {
-    return runCatching {
-        DeckActionType.valueOf(payload)
-    }.getOrNull()?.takeIf {
-        it == DeckActionType.Settings ||
-            it == DeckActionType.BluetoothStatus ||
-            it == DeckActionType.PreviousPage ||
-            it == DeckActionType.NextPage
-    }
-}
-
-private fun buttonAppAction(button: DeckButton): DeckActionType? {
-    return buttonAppAction(button.actionType, button.payload)
-}
-
-private fun buttonAppAction(actionType: DeckActionType, payload: String): DeckActionType? {
-    return when (actionType) {
-        DeckActionType.Settings,
-        DeckActionType.BluetoothStatus,
-        DeckActionType.PreviousPage,
-        DeckActionType.NextPage -> actionType
-        DeckActionType.AppCommand -> appCommandAction(payload)
-        else -> null
-    }
-}
-
-private fun loadDeckColumns(context: Context): Int {
-    return context.deckPrefs().getInt(PREF_COLUMNS, DEFAULT_COLUMNS).coerceIn(MIN_COLUMNS, MAX_COLUMNS)
-}
-
-private fun saveDeckColumns(context: Context, columns: Int) {
-    context.deckPrefs().edit().putInt(PREF_COLUMNS, columns.coerceIn(MIN_COLUMNS, MAX_COLUMNS)).apply()
-}
-
-private fun loadDeckRows(context: Context): Int {
-    return context.deckPrefs().getInt(PREF_ROWS, DEFAULT_ROWS).coerceIn(MIN_ROWS, MAX_ROWS)
-}
-
-private fun saveDeckRows(context: Context, rows: Int) {
-    context.deckPrefs().edit().putInt(PREF_ROWS, rows.coerceIn(MIN_ROWS, MAX_ROWS)).apply()
-}
-
-private fun loadDeckSpacing(context: Context): Int {
-    return context.deckPrefs().getInt(PREF_SPACING, DEFAULT_SPACING_DP).coerceIn(MIN_SPACING_DP, MAX_SPACING_DP)
-}
-
-private fun saveDeckSpacing(context: Context, spacing: Int) {
-    context.deckPrefs().edit().putInt(PREF_SPACING, spacing.coerceIn(MIN_SPACING_DP, MAX_SPACING_DP)).apply()
-}
-
-private fun loadPageSwipeAxis(context: Context): PageSwipeAxis {
-    return runCatching {
-        PageSwipeAxis.valueOf(context.deckPrefs().getString(PREF_PAGE_SWIPE_AXIS, null) ?: PageSwipeAxis.Horizontal.name)
-    }.getOrDefault(PageSwipeAxis.Horizontal)
-}
-
-private fun savePageSwipeAxis(context: Context, axis: PageSwipeAxis) {
-    context.deckPrefs().edit().putString(PREF_PAGE_SWIPE_AXIS, axis.name).apply()
-}
-
-private fun loadPageSwipeMode(context: Context): PageSwipeMode {
-    return runCatching {
-        PageSwipeMode.valueOf(context.deckPrefs().getString(PREF_PAGE_SWIPE_MODE, null) ?: "")
-    }.getOrElse {
-        if (context.deckPrefs().getBoolean(PREF_MULTI_TOUCH_PAGE_SWIPE, true)) {
-            PageSwipeMode.MultiTouch
-        } else {
-            PageSwipeMode.Disabled
-        }
-    }
-}
-
-private fun savePageSwipeMode(context: Context, mode: PageSwipeMode) {
-    context.deckPrefs().edit()
-        .putString(PREF_PAGE_SWIPE_MODE, mode.name)
-        .putBoolean(PREF_MULTI_TOUCH_PAGE_SWIPE, mode == PageSwipeMode.MultiTouch)
-        .apply()
-}
-
-private fun loadPageSwipeAnimation(context: Context): Boolean {
-    return context.deckPrefs().getBoolean(PREF_PAGE_SWIPE_ANIMATION, true)
-}
-
-private fun savePageSwipeAnimation(context: Context, enabled: Boolean) {
-    context.deckPrefs().edit().putBoolean(PREF_PAGE_SWIPE_ANIMATION, enabled).apply()
-}
-
-private fun loadInfinitePageSwipe(context: Context): Boolean {
-    return context.deckPrefs().getBoolean(PREF_INFINITE_PAGE_SWIPE, true)
-}
-
-private fun saveInfinitePageSwipe(context: Context, enabled: Boolean) {
-    context.deckPrefs().edit().putBoolean(PREF_INFINITE_PAGE_SWIPE, enabled).apply()
-}
-
-private fun loadButtonVibrationLevel(context: Context): ButtonVibrationLevel {
-    return runCatching {
-        ButtonVibrationLevel.valueOf(
-            context.deckPrefs().getString(PREF_BUTTON_VIBRATION_LEVEL, null) ?: ButtonVibrationLevel.Off.name
-        )
-    }.getOrDefault(ButtonVibrationLevel.Off)
-}
-
-private fun saveButtonVibrationLevel(context: Context, level: ButtonVibrationLevel) {
-    context.deckPrefs().edit().putString(PREF_BUTTON_VIBRATION_LEVEL, level.name).apply()
-}
-
-private fun loadClassicSolidButtonBackground(context: Context): Boolean {
-    return context.deckPrefs().getBoolean(PREF_CLASSIC_SOLID_BUTTON_BACKGROUND, true)
-}
-
-private fun saveClassicSolidButtonBackground(context: Context, enabled: Boolean) {
-    context.deckPrefs().edit().putBoolean(PREF_CLASSIC_SOLID_BUTTON_BACKGROUND, enabled).apply()
-}
-
-private fun loadDeckUiMode(context: Context): DeckUiMode {
-    return runCatching {
-        DeckUiMode.valueOf(context.deckPrefs().getString(PREF_DECK_UI_MODE, null) ?: DeckUiMode.Classic.name)
-    }.getOrDefault(DeckUiMode.Classic)
-}
-
-private fun saveDeckUiMode(context: Context, mode: DeckUiMode) {
-    context.deckPrefs().edit().putString(PREF_DECK_UI_MODE, mode.name).apply()
-}
-
-private fun Context.vibrateButtonPress(level: ButtonVibrationLevel) {
-    if (level == ButtonVibrationLevel.Off) return
-    val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-        getSystemService(VibratorManager::class.java)?.defaultVibrator
-    } else {
-        @Suppress("DEPRECATION")
-        getSystemService(Vibrator::class.java)
-    } ?: return
-    if (!vibrator.hasVibrator()) return
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-        vibrator.vibrate(VibrationEffect.createOneShot(level.durationMillis, level.amplitude))
-    } else {
-        @Suppress("DEPRECATION")
-        vibrator.vibrate(level.durationMillis)
-    }
-}
-
-private fun nextDeckButtonId(buttons: List<DeckButton>): Int {
-    return (buttons.maxOfOrNull { it.id } ?: 0) + 1
-}
-
-private fun nextDeckPageId(pages: List<DeckPageConfig>): Int {
-    return (pages.maxOfOrNull { it.id } ?: 0) + 1
-}
-
-private fun nextOpenPosition(buttons: List<DeckButton>, capacity: Int): Int {
-    val occupied = buttons.map { it.position }.toSet()
-    return (0 until capacity).firstOrNull { it !in occupied } ?: capacity
-}
-
-private fun nextOpenPosition(
-    buttons: List<DeckButton>,
-    columns: Int,
-    rows: Int,
-    showTitle: Boolean
-): Int {
-    val capacity = columns * rows - if (showTitle) 1 else 0
-    val occupied = buttons.flatMap { occupiedSlotsForButton(it, columns, rows, showTitle) }.toSet()
-    return (0 until capacity).firstOrNull { position ->
-        val slot = if (showTitle) position + 1 else position
-        slot !in occupied
-    } ?: capacity
-}
-
-private fun canPlaceButton(
-    button: DeckButton,
-    otherButtons: List<DeckButton>,
-    columns: Int,
-    rows: Int,
-    showTitle: Boolean
-): Boolean {
-    val slots = occupiedSlotsForButton(button, columns, rows, showTitle).toSet()
-    if (slots.isEmpty() || (showTitle && 0 in slots)) return false
-    val otherSlots = otherButtons.flatMap { occupiedSlotsForButton(it, columns, rows, showTitle) }.toSet()
-    return slots.intersect(otherSlots).isEmpty()
-}
-
-private fun buttonAtPosition(
-    buttons: List<DeckButton>,
-    targetPosition: Int,
-    columns: Int,
-    rows: Int,
-    showTitle: Boolean
-): DeckButton? {
-    val targetSlot = if (showTitle) targetPosition + 1 else targetPosition
-    return buttons.firstOrNull { button ->
-        targetSlot in occupiedSlotsForButton(button, columns, rows, showTitle)
-    }
-}
-
-private fun sameButtonSize(
-    first: DeckButton,
-    second: DeckButton,
-    columns: Int,
-    rows: Int,
-    showTitle: Boolean
-): Boolean {
-    return first.effectiveSpanColumns(columns, showTitle) == second.effectiveSpanColumns(columns, showTitle) &&
-        first.effectiveSpanRows(columns, rows, showTitle) == second.effectiveSpanRows(columns, rows, showTitle)
-}
-
-private fun shrinkButtonToAvailable(
-    button: DeckButton,
-    otherButtons: List<DeckButton>,
-    columns: Int,
-    rows: Int,
-    showTitle: Boolean
-): DeckButton {
-    var candidate = button.copy(
-        spanColumns = button.spanColumns.coerceIn(1, MAX_BUTTON_SPAN_COLUMNS),
-        spanRows = button.spanRows.coerceIn(1, MAX_BUTTON_SPAN_ROWS)
-    )
-    candidate = candidate.copy(
-        spanColumns = candidate.effectiveSpanColumns(columns, showTitle),
-        spanRows = candidate.effectiveSpanRows(columns, rows, showTitle)
-    )
-    while (!canPlaceButton(candidate, otherButtons, columns, rows, showTitle) &&
-        (candidate.spanColumns > 1 || candidate.spanRows > 1)
-    ) {
-        candidate = if (candidate.spanColumns >= candidate.spanRows && candidate.spanColumns > 1) {
-            candidate.copy(spanColumns = candidate.spanColumns - 1)
-        } else {
-            candidate.copy(spanRows = candidate.spanRows - 1)
-        }
-    }
-    return candidate
-}
-
-private fun pageButtonCapacity(pageId: Int, pages: List<DeckPageConfig>, columns: Int, rows: Int): Int {
-    val slotCount = columns * rows
-    return if (pageId == pages.firstOrNull()?.id) slotCount - 1 else slotCount
-}
-
-private fun updateDeckPage(
-    pages: List<DeckPageConfig>,
-    pageId: Int,
-    update: (DeckPageConfig) -> List<DeckButton>
-): List<DeckPageConfig> {
-    return pages.map { page ->
-        if (page.id == pageId) page.copy(buttons = update(page)) else page
-    }
-}
-
-private fun updateDeckButton(
-    pages: List<DeckPageConfig>,
-    button: DeckButton
-): List<DeckPageConfig> {
-    return pages.map { page ->
-        page.copy(buttons = page.buttons.map { if (it.id == button.id) button else it })
-    }
-}
-
-private fun Context.deckPrefs() = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-
-private const val PREFS_NAME = "mobile_deck"
-private const val PREF_PAGES = "pages"
-private const val PREF_BUTTONS = "buttons"
-private const val PREF_COLUMNS = "columns"
-private const val PREF_ROWS = "rows"
-private const val PREF_SPACING = "spacing"
-private const val PREF_PAGE_SWIPE_AXIS = "page_swipe_axis"
-private const val PREF_PAGE_SWIPE_MODE = "page_swipe_mode"
-private const val PREF_MULTI_TOUCH_PAGE_SWIPE = "multi_touch_page_swipe"
-private const val PREF_PAGE_SWIPE_ANIMATION = "page_swipe_animation"
-private const val PREF_INFINITE_PAGE_SWIPE = "infinite_page_swipe"
-private const val PREF_BUTTON_VIBRATION_LEVEL = "button_vibration_level"
-private const val PREF_CLASSIC_SOLID_BUTTON_BACKGROUND = "classic_solid_button_background"
-private const val PREF_DECK_UI_MODE = "deck_ui_mode"
-private const val PREF_CONSOLE_LAYOUT = "console_layout"
-private const val PREF_CONSOLE_PANEL_CONNECTION = "console_panel_connection"
-private const val PREF_CONSOLE_PANEL_MESSAGE = "console_panel_message"
-private const val PREF_CONSOLE_PANEL_CLOCK = "console_panel_clock"
-private const val PREF_CONSOLE_PANEL_DATE = "console_panel_date"
-private const val APP_WIDGET_HOST_ID = 4201
-private const val INVALID_APP_WIDGET_ID = -1
-private const val APP_ICON_URI_PREFIX = "app-icon:"
-private const val MAX_PAGES = 5
-private const val MIN_COLUMNS = 4
-private const val MAX_COLUMNS = 12
-private const val DEFAULT_COLUMNS = 6
-private const val MIN_ROWS = 2
-private const val MAX_ROWS = 6
-private const val DEFAULT_ROWS = 3
-private const val MAX_BUTTON_SPAN_COLUMNS = 3
-private const val MAX_BUTTON_SPAN_ROWS = 2
-private const val MIN_SPACING_DP = 2
-private const val MAX_SPACING_DP = 16
-private const val DEFAULT_SPACING_DP = 8
-private const val ICON_AUTO = "AUTO"
-private const val ICON_SETTINGS = "ICON_SETTINGS"
-private const val ICON_BLUETOOTH = "ICON_BLUETOOTH"
-private const val ICON_KEYBOARD = "ICON_KEYBOARD"
-private const val ICON_APPS = "ICON_APPS"
-private const val ICON_CODE = "ICON_CODE"
-private const val ICON_TEXT = "ICON_TEXT"
-private const val ICON_PLAY = "ICON_PLAY"
-private const val ICON_STOP = "ICON_STOP"
-private const val ICON_PREVIOUS = "ICON_PREVIOUS"
-private const val ICON_NEXT = "ICON_NEXT"
-private const val ICON_VOLUME_OFF = "ICON_VOLUME_OFF"
-private const val ICON_VOLUME_DOWN = "ICON_VOLUME_DOWN"
-private const val ICON_VOLUME_UP = "ICON_VOLUME_UP"
-private const val MEDIA_MUTE = "MUTE"
-private const val MEDIA_PLAY_PAUSE = "PLAY_PAUSE"
-private const val MEDIA_STOP = "STOP"
-private const val MEDIA_PREVIOUS = "PREVIOUS"
-private const val MEDIA_NEXT = "NEXT"
-private const val MEDIA_VOLUME_DOWN = "VOLUME_DOWN"
-private const val MEDIA_VOLUME_UP = "VOLUME_UP"
-private const val UTILITY_TIME = "TIME"
-private const val UTILITY_WEATHER = "WEATHER"
-
-@Preview(showBackground = true)
+@Preview(
+    name = "Classic Deck",
+    widthDp = 960,
+    heightDp = 432,
+    showBackground = true
+)
 @Composable
 private fun MobileDeckPreview() {
     MobileDeckTheme {
-        MobileDeckApp()
+        val pages = remember { defaultDeckPages() }
+        val colors = deckThemeColors(DeckUiMode.Classic)
+        CompositionLocalProvider(LocalDeckThemeColors provides colors) {
+            DeckPage(
+                modifier = Modifier.fillMaxSize(),
+                buttons = pages.first().buttons,
+                deckPages = pages,
+                activePageId = pages.first().id,
+                columns = DEFAULT_COLUMNS,
+                rows = DEFAULT_ROWS,
+                spacing = DEFAULT_SPACING_DP.dp,
+                status = HidStatus(HidConnectionState.Connected, "Preview"),
+                appWidgetHost = null,
+                appWidgetManager = null,
+                uiMode = DeckUiMode.Classic,
+                consoleLayout = ConsoleLayoutConfig(emptyList()),
+                consolePanelOptions = ConsolePanelOptions(),
+                classicSolidButtonBackground = true,
+                previewMode = false,
+                pageSwipeAxis = PageSwipeAxis.Horizontal,
+                pageSwipeMode = PageSwipeMode.Disabled,
+                pageSwipeAnimation = false,
+                pageSwipeDelta = 1,
+                pageAnimationSequence = 0,
+                onPageSwipe = {},
+                onAddPage = {},
+                onButtonPressed = {},
+                onButtonEdit = {},
+                onButtonMoved = { _, _ -> },
+                onEmptySlotPressed = {}
+            )
+        }
     }
 }
+
