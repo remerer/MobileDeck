@@ -55,6 +55,18 @@ enum class DeckUiMode(@StringRes val labelRes: Int) {
     Console(R.string.deck_ui_console)
 }
 
+enum class ClassicDeckBackgroundType(@StringRes val labelRes: Int) {
+    Default(R.string.classic_background_default),
+    Color(R.string.classic_background_color),
+    Image(R.string.classic_background_image)
+}
+
+data class ClassicDeckBackground(
+    val type: ClassicDeckBackgroundType = ClassicDeckBackgroundType.Default,
+    val color: Color = Color(0xFF10151B),
+    val imageUri: String = ""
+)
+
 fun DeckUiMode.toThemeStyle(): MobileDeckThemeStyle {
     return when (this) {
         DeckUiMode.Classic -> MobileDeckThemeStyle.Classic
@@ -181,6 +193,8 @@ val LocalDeckThemeColors = staticCompositionLocalOf { DefaultDeckThemeColors }
 
 val ClassicLayoutAccent = Color(0xFF9B5DE5)
 val ClassicLayoutSecondaryAccent = Color(0xFF5F2AA0)
+val ClassicBackgroundAccent = Color(0xFF008B8B)
+val ClassicBackgroundSecondaryAccent = Color(0xFF005F73)
 val ClassicButtonAccent = Color(0xFFE47B17)
 val ClassicButtonSecondaryAccent = Color(0xFFB85B00)
 

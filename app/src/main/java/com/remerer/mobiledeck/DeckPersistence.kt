@@ -374,7 +374,7 @@ fun savePageSwipeAxis(context: Context, axis: PageSwipeAxis) {
 
 fun loadPageSwipeMode(context: Context): PageSwipeMode {
     return runCatching {
-        PageSwipeMode.valueOf(context.deckPrefs().getString(PREF_PAGE_SWIPE_MODE, null) ?: "")
+        PageSwipeMode.valueOf(context.deckPrefs().getString(PREF_PAGE_SWIPE_MODE, null) ?: PageSwipeMode.SingleTouch.name)
     }.getOrElse {
         if (context.deckPrefs().getBoolean(PREF_MULTI_TOUCH_PAGE_SWIPE, true)) {
             PageSwipeMode.MultiTouch
@@ -410,9 +410,9 @@ fun saveInfinitePageSwipe(context: Context, enabled: Boolean) {
 fun loadButtonVibrationLevel(context: Context): ButtonVibrationLevel {
     return runCatching {
         ButtonVibrationLevel.valueOf(
-            context.deckPrefs().getString(PREF_BUTTON_VIBRATION_LEVEL, null) ?: ButtonVibrationLevel.Off.name
+            context.deckPrefs().getString(PREF_BUTTON_VIBRATION_LEVEL, null) ?: ButtonVibrationLevel.Strong.name
         )
-    }.getOrDefault(ButtonVibrationLevel.Off)
+    }.getOrDefault(ButtonVibrationLevel.Strong)
 }
 
 fun saveButtonVibrationLevel(context: Context, level: ButtonVibrationLevel) {
@@ -425,6 +425,28 @@ fun loadClassicSolidButtonBackground(context: Context): Boolean {
 
 fun saveClassicSolidButtonBackground(context: Context, enabled: Boolean) {
     context.deckPrefs().edit().putBoolean(PREF_CLASSIC_SOLID_BUTTON_BACKGROUND, enabled).apply()
+}
+
+fun loadClassicDeckBackground(context: Context): ClassicDeckBackground {
+    val prefs = context.deckPrefs()
+    val type = runCatching {
+        ClassicDeckBackgroundType.valueOf(
+            prefs.getString(PREF_CLASSIC_DECK_BACKGROUND_TYPE, null) ?: ClassicDeckBackgroundType.Default.name
+        )
+    }.getOrDefault(ClassicDeckBackgroundType.Default)
+    return ClassicDeckBackground(
+        type = type,
+        color = Color(prefs.getInt(PREF_CLASSIC_DECK_BACKGROUND_COLOR, 0xFF10151B.toInt())),
+        imageUri = prefs.getString(PREF_CLASSIC_DECK_BACKGROUND_IMAGE_URI, null).orEmpty()
+    )
+}
+
+fun saveClassicDeckBackground(context: Context, background: ClassicDeckBackground) {
+    context.deckPrefs().edit()
+        .putString(PREF_CLASSIC_DECK_BACKGROUND_TYPE, background.type.name)
+        .putInt(PREF_CLASSIC_DECK_BACKGROUND_COLOR, background.color.toArgb())
+        .putString(PREF_CLASSIC_DECK_BACKGROUND_IMAGE_URI, background.imageUri)
+        .apply()
 }
 
 fun loadDeckUiMode(context: Context): DeckUiMode {
@@ -460,6 +482,9 @@ const val PREF_PAGE_SWIPE_ANIMATION = "page_swipe_animation"
 const val PREF_INFINITE_PAGE_SWIPE = "infinite_page_swipe"
 const val PREF_BUTTON_VIBRATION_LEVEL = "button_vibration_level"
 const val PREF_CLASSIC_SOLID_BUTTON_BACKGROUND = "classic_solid_button_background"
+const val PREF_CLASSIC_DECK_BACKGROUND_TYPE = "classic_deck_background_type"
+const val PREF_CLASSIC_DECK_BACKGROUND_COLOR = "classic_deck_background_color"
+const val PREF_CLASSIC_DECK_BACKGROUND_IMAGE_URI = "classic_deck_background_image_uri"
 const val PREF_DECK_UI_MODE = "deck_ui_mode"
 const val PREF_CLASSIC_TUTORIAL_SEEN = "classic_tutorial_seen"
 const val PREF_CONSOLE_LAYOUT = "console_layout"

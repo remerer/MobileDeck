@@ -38,6 +38,17 @@
     <string name="button_editor">버튼 편집</string>
     <string name="button_settings">버튼 설정</string>
     <string name="button_settings_desc">터치 피드백과 클래식 버튼 표면 스타일을 설정합니다.</string>
+    <string name="classic_background_title">덱 배경</string>
+    <string name="classic_background_desc">클래식 UI 버튼 사이 간격으로 보일 배경을 설정합니다.</string>
+    <string name="classic_background_preview">배경 미리보기</string>
+    <string name="classic_background_default">기본</string>
+    <string name="classic_background_default_desc">현재 클래식 UI 배경을 사용합니다.</string>
+    <string name="classic_background_color">색상</string>
+    <string name="classic_background_color_desc">단일 색상 배경을 사용합니다.</string>
+    <string name="classic_background_image">사진/GIF</string>
+    <string name="classic_background_image_desc">선택한 이미지나 GIF를 덱 배경으로 사용합니다.</string>
+    <string name="classic_background_image_picker_desc">기기에서 사진 또는 GIF를 선택합니다.</string>
+    <string name="classic_background_pick_image">이미지 선택</string>
     <string name="deck_layout">덱 레이아웃</string>
     <string name="page_count_summary">%1$s - %2$d 페이지</string>
     <string name="page_axis_horizontal">가로 페이지</string>

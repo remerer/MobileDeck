@@ -14,10 +14,13 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.pm.ResolveInfo
 import android.graphics.BitmapFactory
+import android.graphics.ImageDecoder
+import android.graphics.drawable.AnimatedImageDrawable
 import android.net.Uri
 import android.util.Log
 import android.view.ViewGroup
 import android.widget.FrameLayout
+import android.widget.ImageView
 import android.view.WindowManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -414,6 +417,7 @@ private fun MobileDeckApp() {
     var infinitePageSwipe by remember { mutableStateOf(loadInfinitePageSwipe(context)) }
     var buttonVibrationLevel by remember { mutableStateOf(loadButtonVibrationLevel(context)) }
     var classicSolidButtonBackground by remember { mutableStateOf(loadClassicSolidButtonBackground(context)) }
+    var classicDeckBackground by remember { mutableStateOf(loadClassicDeckBackground(context)) }
     var deckUiMode by remember { mutableStateOf(loadDeckUiMode(context)) }
     var consoleLayout by remember { mutableStateOf(loadConsoleLayout(context)) }
     var consolePanelOptions by remember { mutableStateOf(loadConsolePanelOptions(context)) }
@@ -476,6 +480,21 @@ private fun MobileDeckApp() {
             ) ?: return
         updateButtonEverywhere(updated)
         editingButton = updated
+    }
+
+    val classicBackgroundImageLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        runCatching {
+            context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        val updated = classicDeckBackground.copy(
+            type = ClassicDeckBackgroundType.Image,
+            imageUri = uri.toString()
+        )
+        classicDeckBackground = updated
+        saveClassicDeckBackground(context, updated)
     }
 
     val configureWidgetLauncher = rememberLauncherForActivityResult(
@@ -916,6 +935,7 @@ private fun MobileDeckApp() {
                 consoleLayout = consoleLayout,
                 consolePanelOptions = consolePanelOptions,
                 classicSolidButtonBackground = classicSolidButtonBackground,
+                classicDeckBackground = classicDeckBackground,
                 previewMode = false,
                 pageSwipeAxis = pageSwipeAxis,
                 pageSwipeMode = pageSwipeMode,
@@ -947,6 +967,7 @@ private fun MobileDeckApp() {
                 appWidgetHost = appWidgetHost,
                 appWidgetManager = appWidgetManager,
                 classicSolidButtonBackground = classicSolidButtonBackground,
+                classicDeckBackground = classicDeckBackground,
                 pageSwipeAxis = pageSwipeAxis,
                 pageSwipeMode = pageSwipeMode,
                 pageSwipeAnimation = pageSwipeAnimation,
@@ -1037,6 +1058,7 @@ private fun MobileDeckApp() {
                 infinitePageSwipe = infinitePageSwipe,
                 buttonVibrationLevel = buttonVibrationLevel,
                 classicSolidButtonBackground = classicSolidButtonBackground,
+                classicDeckBackground = classicDeckBackground,
                 deckUiMode = deckUiMode,
                 consolePanelOptions = consolePanelOptions,
                 pairingDiscoverable = pairingDiscoverable,
@@ -1078,6 +1100,15 @@ private fun MobileDeckApp() {
                     context.applicationContext.vibrateButtonPress(buttonVibrationLevel)
                     classicSolidButtonBackground = enabled
                     saveClassicSolidButtonBackground(context, enabled)
+                },
+                onClassicDeckBackgroundChange = { background ->
+                    context.applicationContext.vibrateButtonPress(buttonVibrationLevel)
+                    classicDeckBackground = background
+                    saveClassicDeckBackground(context, background)
+                },
+                onPickClassicDeckBackgroundImage = {
+                    context.applicationContext.vibrateButtonPress(buttonVibrationLevel)
+                    classicBackgroundImageLauncher.launch(arrayOf("image/*"))
                 },
                 onDeckUiModeChange = { mode ->
                     context.applicationContext.vibrateButtonPress(buttonVibrationLevel)
@@ -1256,6 +1287,7 @@ private fun SettingsPage(
     infinitePageSwipe: Boolean,
     buttonVibrationLevel: ButtonVibrationLevel,
     classicSolidButtonBackground: Boolean,
+    classicDeckBackground: ClassicDeckBackground,
     deckUiMode: DeckUiMode,
     consolePanelOptions: ConsolePanelOptions,
     pairingDiscoverable: Boolean,
@@ -1272,6 +1304,8 @@ private fun SettingsPage(
     onInfinitePageSwipeChange: (Boolean) -> Unit,
     onButtonVibrationLevelChange: (ButtonVibrationLevel) -> Unit,
     onClassicSolidButtonBackgroundChange: (Boolean) -> Unit,
+    onClassicDeckBackgroundChange: (ClassicDeckBackground) -> Unit,
+    onPickClassicDeckBackgroundImage: () -> Unit,
     onDeckUiModeChange: (DeckUiMode) -> Unit,
     onConsolePanelOptionsChange: (ConsolePanelOptions) -> Unit,
     onStart: () -> Unit,
@@ -1360,6 +1394,7 @@ private fun SettingsPage(
                         infinitePageSwipe = infinitePageSwipe,
                         buttonVibrationLevel = buttonVibrationLevel,
                         classicSolidButtonBackground = classicSolidButtonBackground,
+                        classicDeckBackground = classicDeckBackground,
                         pageName = pageName,
                         pageCount = pageCount,
                         logs = logs,
@@ -1369,6 +1404,8 @@ private fun SettingsPage(
                         onInfinitePageSwipeChange = onInfinitePageSwipeChange,
                         onButtonVibrationLevelChange = onButtonVibrationLevelChange,
                         onClassicSolidButtonBackgroundChange = onClassicSolidButtonBackgroundChange,
+                        onClassicDeckBackgroundChange = onClassicDeckBackgroundChange,
+                        onPickClassicDeckBackgroundImage = onPickClassicDeckBackgroundImage,
                         onLayoutEditor = onLayoutEditor,
                         onColumnsChange = onColumnsChange,
                         onRowsChange = onRowsChange,
@@ -1860,6 +1897,7 @@ private fun ClassicSettingsContent(
     infinitePageSwipe: Boolean,
     buttonVibrationLevel: ButtonVibrationLevel,
     classicSolidButtonBackground: Boolean,
+    classicDeckBackground: ClassicDeckBackground,
     pageName: String,
     pageCount: Int,
     logs: List<ActivityLog>,
@@ -1869,6 +1907,8 @@ private fun ClassicSettingsContent(
     onInfinitePageSwipeChange: (Boolean) -> Unit,
     onButtonVibrationLevelChange: (ButtonVibrationLevel) -> Unit,
     onClassicSolidButtonBackgroundChange: (Boolean) -> Unit,
+    onClassicDeckBackgroundChange: (ClassicDeckBackground) -> Unit,
+    onPickClassicDeckBackgroundImage: () -> Unit,
     onLayoutEditor: () -> Unit,
     onColumnsChange: (Int) -> Unit,
     onRowsChange: (Int) -> Unit,
@@ -1913,6 +1953,13 @@ private fun ClassicSettingsContent(
                 onLayoutEditor = onLayoutEditor,
                 onButtonVibrationLevelChange = onButtonVibrationLevelChange,
                 onClassicSolidButtonBackgroundChange = onClassicSolidButtonBackgroundChange
+            )
+        }
+        item {
+            ClassicBackgroundSettingsCard(
+                background = classicDeckBackground,
+                onBackgroundChange = onClassicDeckBackgroundChange,
+                onPickImage = onPickClassicDeckBackgroundImage
             )
         }
         item {
@@ -2383,6 +2430,143 @@ private fun ClassicButtonSettingsCard(
                 )
             }
         )
+    }
+}
+
+@Composable
+private fun ClassicBackgroundSettingsCard(
+    background: ClassicDeckBackground,
+    onBackgroundChange: (ClassicDeckBackground) -> Unit,
+    onPickImage: () -> Unit
+) {
+    val swatches = remember {
+        listOf(
+            Color(0xFF10151B),
+            Color(0xFF073B4C),
+            Color(0xFF1B4332),
+            Color(0xFF3A0CA3),
+            Color(0xFF5F0F40),
+            Color(0xFF3D405B)
+        )
+    }
+    ClassicConceptSectionCard(
+        icon = Icons.Filled.Image,
+        title = stringResource(R.string.classic_background_title),
+        subtitle = stringResource(R.string.classic_background_desc),
+        accent = ClassicBackgroundAccent,
+        secondaryAccent = ClassicBackgroundSecondaryAccent,
+        trailing = {
+            SettingsSegmentedControl(
+                options = ClassicDeckBackgroundType.values().toList(),
+                selected = background.type,
+                label = { stringResource(it.labelRes) },
+                accent = ClassicBackgroundAccent,
+                onSelected = { type ->
+                    val nextBackground = when (type) {
+                        ClassicDeckBackgroundType.Default -> background.copy(type = type)
+                        ClassicDeckBackgroundType.Color -> background.copy(type = type)
+                        ClassicDeckBackgroundType.Image -> background.copy(type = type)
+                    }
+                    onBackgroundChange(nextBackground)
+                }
+            )
+        }
+    ) {
+        ClassicSettingsControlRow(
+            icon = Icons.Filled.Image,
+            iconColor = ClassicBackgroundAccent,
+            title = stringResource(R.string.classic_background_preview),
+            subtitle = stringResource(
+                when (background.type) {
+                    ClassicDeckBackgroundType.Default -> R.string.classic_background_default_desc
+                    ClassicDeckBackgroundType.Color -> R.string.classic_background_color_desc
+                    ClassicDeckBackgroundType.Image -> R.string.classic_background_image_desc
+                }
+            ),
+            trailing = {
+                ClassicBackgroundPreview(background = background)
+            }
+        )
+        ClassicSettingsControlRow(
+            icon = Icons.Filled.GridView,
+            iconColor = ClassicBackgroundAccent,
+            title = stringResource(R.string.classic_background_color),
+            subtitle = stringResource(R.string.classic_background_color_desc),
+            trailing = {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    swatches.forEach { swatch ->
+                        Surface(
+                            modifier = Modifier
+                                .size(34.dp)
+                                .border(
+                                    width = if (background.type == ClassicDeckBackgroundType.Color && background.color == swatch) 2.dp else 1.dp,
+                                    color = if (background.type == ClassicDeckBackgroundType.Color && background.color == swatch) Color.White else ClassicBackgroundAccent.copy(alpha = 0.5f),
+                                    shape = RoundedCornerShape(8.dp)
+                                ),
+                            shape = RoundedCornerShape(8.dp),
+                            color = swatch,
+                            onClick = {
+                                onBackgroundChange(
+                                    background.copy(
+                                        type = ClassicDeckBackgroundType.Color,
+                                        color = swatch
+                                    )
+                                )
+                            }
+                        ) {}
+                    }
+                }
+            }
+        )
+        ClassicSettingsControlRow(
+            icon = Icons.Filled.Image,
+            iconColor = ClassicBackgroundAccent,
+            title = stringResource(R.string.classic_background_image),
+            subtitle = stringResource(R.string.classic_background_image_picker_desc),
+            trailing = {
+                Button(
+                    shape = RoundedCornerShape(8.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = ClassicBackgroundAccent,
+                        contentColor = Color.White
+                    ),
+                    onClick = onPickImage
+                ) {
+                    Text(stringResource(R.string.classic_background_pick_image))
+                }
+            }
+        )
+    }
+}
+
+@Composable
+private fun ClassicBackgroundPreview(background: ClassicDeckBackground) {
+    Box(
+        modifier = Modifier
+            .size(width = 96.dp, height = 44.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .border(1.dp, ClassicBackgroundAccent.copy(alpha = 0.55f), RoundedCornerShape(8.dp))
+    ) {
+        ClassicDeckBackgroundLayer(
+            modifier = Modifier.fillMaxSize(),
+            background = background
+        )
+        Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(5.dp),
+            horizontalArrangement = Arrangement.spacedBy(5.dp)
+        ) {
+            repeat(3) {
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(Color.Black.copy(alpha = 0.45f))
+                )
+            }
+        }
     }
 }
 
@@ -3969,6 +4153,7 @@ private fun LayoutEditorPage(
     appWidgetHost: AppWidgetHost?,
     appWidgetManager: AppWidgetManager?,
     classicSolidButtonBackground: Boolean,
+    classicDeckBackground: ClassicDeckBackground,
     pageSwipeAxis: PageSwipeAxis,
     pageSwipeMode: PageSwipeMode,
     pageSwipeAnimation: Boolean,
@@ -4067,6 +4252,7 @@ private fun LayoutEditorPage(
                 consoleLayout = ConsoleLayoutConfig(emptyList()),
                 consolePanelOptions = ConsolePanelOptions(),
                 classicSolidButtonBackground = classicSolidButtonBackground,
+                classicDeckBackground = classicDeckBackground,
                 previewMode = true,
                 pageSwipeAxis = pageSwipeAxis,
                 pageSwipeMode = pageSwipeMode,
@@ -4237,6 +4423,7 @@ private fun DeckPage(
     consoleLayout: ConsoleLayoutConfig,
     consolePanelOptions: ConsolePanelOptions,
     classicSolidButtonBackground: Boolean,
+    classicDeckBackground: ClassicDeckBackground,
     previewMode: Boolean,
     pageSwipeAxis: PageSwipeAxis,
     pageSwipeMode: PageSwipeMode,
@@ -4307,6 +4494,10 @@ private fun DeckPage(
                 .fillMaxSize()
                 .then(swipeModifier)
         ) {
+            ClassicDeckBackgroundLayer(
+                modifier = Modifier.fillMaxSize(),
+                background = classicDeckBackground
+            )
             AnimatedContent(
                 targetState = PageAnimationTarget(activePageId, pageSwipeDelta, pageAnimationSequence),
                 modifier = Modifier.fillMaxSize(),
@@ -4369,6 +4560,57 @@ private fun DeckPage(
             )
         }
     }
+}
+
+@Composable
+private fun ClassicDeckBackgroundLayer(
+    modifier: Modifier = Modifier,
+    background: ClassicDeckBackground
+) {
+    when (background.type) {
+        ClassicDeckBackgroundType.Default -> Unit
+        ClassicDeckBackgroundType.Color -> Box(
+            modifier = modifier.background(background.color)
+        )
+        ClassicDeckBackgroundType.Image -> {
+            if (background.imageUri.isBlank()) {
+                Box(modifier = modifier.background(background.color))
+            } else {
+                AndroidView(
+                    modifier = modifier,
+                    factory = { context ->
+                        ImageView(context).apply {
+                            layoutParams = ViewGroup.LayoutParams(
+                                ViewGroup.LayoutParams.MATCH_PARENT,
+                                ViewGroup.LayoutParams.MATCH_PARENT
+                            )
+                            scaleType = ImageView.ScaleType.CENTER_CROP
+                        }
+                    },
+                    update = { imageView ->
+                        imageView.setClassicBackgroundImage(background.imageUri)
+                    }
+                )
+            }
+        }
+    }
+}
+
+private fun ImageView.setClassicBackgroundImage(uriString: String) {
+    val uri = Uri.parse(uriString)
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+        val drawable = runCatching {
+            ImageDecoder.decodeDrawable(ImageDecoder.createSource(context.contentResolver, uri))
+        }.getOrNull()
+        if (drawable != null) {
+            setImageDrawable(drawable)
+            if (drawable is AnimatedImageDrawable) {
+                drawable.start()
+            }
+            return
+        }
+    }
+    setImageURI(uri)
 }
 
 @Composable
@@ -7563,6 +7805,7 @@ private fun MobileDeckPreview() {
                 consoleLayout = ConsoleLayoutConfig(emptyList()),
                 consolePanelOptions = ConsolePanelOptions(),
                 classicSolidButtonBackground = true,
+                classicDeckBackground = ClassicDeckBackground(),
                 previewMode = false,
                 pageSwipeAxis = PageSwipeAxis.Horizontal,
                 pageSwipeMode = PageSwipeMode.Disabled,
