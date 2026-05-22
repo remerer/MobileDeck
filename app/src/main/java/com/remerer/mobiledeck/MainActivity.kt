@@ -51,11 +51,12 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectDragGestures
-import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -108,19 +109,25 @@ import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Bluetooth
 import androidx.compose.material.icons.filled.Code
+import androidx.compose.material.icons.filled.Computer
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.GridView
+import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.SwapHoriz
+import androidx.compose.material.icons.filled.TabletAndroid
 import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material.icons.filled.TouchApp
 import androidx.compose.material.icons.filled.Videocam
@@ -170,7 +177,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.zIndex
 import com.remerer.mobiledeck.ui.theme.MobileDeckTheme
 import com.remerer.mobiledeck.ui.theme.MobileDeckThemeStyle
 import kotlinx.coroutines.delay
@@ -295,6 +304,13 @@ private data class DeckPageConfig(
     val id: Int,
     val name: String,
     val buttons: List<DeckButton>
+)
+
+private data class DragSwapCandidate(
+    val draggedButtonId: Int,
+    val targetButtonId: Int,
+    val sourcePosition: Int,
+    val targetPosition: Int
 )
 
 private data class ConsoleLayoutConfig(
@@ -522,14 +538,18 @@ private fun MobileDeckApp() {
     ) { result ->
         val durationSeconds = result.resultCode.takeIf { it > 0 } ?: 0
         if (durationSeconds > 0) {
+            pairingDiscoverable = true
             pairingDiscoverableUntilMillis = System.currentTimeMillis() + durationSeconds * 1000L
+            hidStatus = hidStatus.copy(
+                message = "Discoverable mode is active. Pair from the PC while HID is registered."
+            )
         } else {
             pairingDiscoverable = false
             pairingDiscoverableUntilMillis = null
+            hidStatus = hidStatus.copy(
+                message = "Discoverable request was canceled."
+            )
         }
-        hidStatus = hidStatus.copy(
-            message = discoverableFinishedMessage
-        )
     }
 
     fun launchDiscoverableRequest(
@@ -599,18 +619,22 @@ private fun MobileDeckApp() {
     var pageSwipeAnimation by remember { mutableStateOf(loadPageSwipeAnimation(context)) }
     var infinitePageSwipe by remember { mutableStateOf(loadInfinitePageSwipe(context)) }
     var buttonVibrationLevel by remember { mutableStateOf(loadButtonVibrationLevel(context)) }
+    var classicSolidButtonBackground by remember { mutableStateOf(loadClassicSolidButtonBackground(context)) }
     var deckUiMode by remember { mutableStateOf(loadDeckUiMode(context)) }
     var consoleLayout by remember { mutableStateOf(loadConsoleLayout(context)) }
     var consolePanelOptions by remember { mutableStateOf(loadConsolePanelOptions(context)) }
     var lastPageDelta by remember { mutableStateOf(1) }
     var pageAnimationSequence by remember { mutableStateOf(0) }
     var editingButton by remember { mutableStateOf<DeckButton?>(null) }
+    var pendingNewButtonId by remember { mutableStateOf<Int?>(null) }
+    var pendingNewButtonCreatedPageId by remember { mutableStateOf<Int?>(null) }
     var consoleButtonPickerRow by remember { mutableStateOf<Int?>(null) }
     var pendingWidgetButtonId by remember { mutableStateOf<Int?>(null) }
     var pendingWidgetId by remember { mutableStateOf<Int?>(null) }
     var logs by remember { mutableStateOf(emptyList<ActivityLog>()) }
     var page by remember { mutableStateOf(AppPage.Deck) }
     var confirmSettingsButtonRestore by remember { mutableStateOf(false) }
+    var confirmEmptyPageDeletePageId by remember { mutableStateOf<Int?>(null) }
     val activeDeckPage = deckPages.firstOrNull { it.id == activeDeckPageId } ?: deckPages.first()
     val deckButtons = activeDeckPage.buttons
 
@@ -620,6 +644,7 @@ private fun MobileDeckApp() {
         if (pairingDiscoverableUntilMillis == until) {
             pairingDiscoverable = false
             pairingDiscoverableUntilMillis = null
+            hidStatus = hidStatus.copy(message = discoverableFinishedMessage)
         }
     }
 
@@ -645,6 +670,7 @@ private fun MobileDeckApp() {
                 spanRows = 2
             ) ?: return
         updateButtonEverywhere(updated)
+        editingButton = updated
     }
 
     val configureWidgetLauncher = rememberLauncherForActivityResult(
@@ -752,23 +778,25 @@ private fun MobileDeckApp() {
         val targetPosition = position ?: nextOpenPosition(deckButtons, deckColumns, deckRows, showTitle)
         val newButton = DeckButton(
             id = nextDeckButtonId(deckPages.flatMap { it.buttons }),
-            title = "New key",
-            subtitle = "Custom",
-            icon = "+",
+            title = "Explorer",
+            subtitle = "Win+E",
+            icon = ICON_AUTO,
             iconImageUri = "",
             displayMode = DeckDisplayMode.IconAndText,
             actionType = DeckActionType.Hotkey,
-            payload = "CTRL+F9",
+            payload = "WIN+E",
             color = colors[deckButtons.size % colors.size],
             position = targetPosition
         )
         if (position == null && targetPosition >= buttonCapacity && deckPages.size >= MAX_PAGES) return
+        var createdPageId: Int? = null
         val updatedPages = if (position == null && targetPosition >= buttonCapacity) {
             val newPage = DeckPageConfig(
                 id = nextDeckPageId(deckPages),
                 name = "Page ${deckPages.size + 1}",
                 buttons = listOf(newButton.copy(position = 0))
             )
+            createdPageId = newPage.id
             activeDeckPageId = newPage.id
             deckPages + newPage
         } else {
@@ -778,6 +806,8 @@ private fun MobileDeckApp() {
         saveDeckPages(context, updatedPages)
         if (editAfterCreate) {
             editingButton = newButton
+            pendingNewButtonId = newButton.id
+            pendingNewButtonCreatedPageId = createdPageId
         }
     }
 
@@ -795,14 +825,18 @@ private fun MobileDeckApp() {
         saveDeckPages(context, updatedPages)
     }
 
-    fun deleteActiveDeckPage() {
-        if (deckPages.size <= 1 || activeDeckPage.id == deckPages.first().id) return
-        val currentIndex = deckPages.indexOfFirst { it.id == activeDeckPage.id }.coerceAtLeast(0)
-        val updatedPages = deckPages.filterNot { it.id == activeDeckPage.id }
+    fun deleteDeckPage(pageId: Int) {
+        if (deckPages.size <= 1 || pageId == deckPages.first().id) return
+        val currentIndex = deckPages.indexOfFirst { it.id == pageId }.coerceAtLeast(0)
+        val updatedPages = deckPages.filterNot { it.id == pageId }
         val nextIndex = currentIndex.coerceAtMost(updatedPages.lastIndex)
         deckPages = updatedPages
         activeDeckPageId = updatedPages[nextIndex].id
         saveDeckPages(context, updatedPages)
+    }
+
+    fun deleteActiveDeckPage() {
+        deleteDeckPage(activeDeckPage.id)
     }
 
     fun resetFirstDeckPage() {
@@ -817,6 +851,61 @@ private fun MobileDeckApp() {
         deckPages = updatedPages
         activeDeckPageId = firstPage.id
         saveDeckPages(context, updatedPages)
+    }
+
+    fun deleteDeckButton(button: DeckButton) {
+        if (button.appWidgetId != INVALID_APP_WIDGET_ID) {
+            if (appWidgetHost != null) {
+                appWidgetHost.deleteAppWidgetId(button.appWidgetId)
+            }
+        }
+        val deletedPageId = deckPages.firstOrNull { pageConfig ->
+            pageConfig.buttons.any { existing -> existing.id == button.id }
+        }?.id
+        val updatedPages = deckPages.map { pageConfig ->
+            pageConfig.copy(buttons = pageConfig.buttons.filterNot { existing -> existing.id == button.id })
+        }
+        deckPages = updatedPages
+        saveDeckPages(context, updatedPages)
+        editingButton = null
+        val firstPageId = updatedPages.firstOrNull()?.id
+        val deletedPage = updatedPages.firstOrNull { it.id == deletedPageId }
+        if (page == AppPage.LayoutEditor &&
+            deletedPage != null &&
+            deletedPage.id != firstPageId &&
+            deletedPage.buttons.isEmpty()
+        ) {
+            confirmEmptyPageDeletePageId = deletedPage.id
+        }
+    }
+
+    fun cancelEditingButton(button: DeckButton) {
+        if (pendingNewButtonId != button.id) {
+            editingButton = null
+            return
+        }
+        if (button.appWidgetId != INVALID_APP_WIDGET_ID) {
+            appWidgetHost?.deleteAppWidgetId(button.appWidgetId)
+        }
+        val createdPageId = pendingNewButtonCreatedPageId
+        val currentPages = deckPages.map { pageConfig ->
+            pageConfig.copy(buttons = pageConfig.buttons.filterNot { existing -> existing.id == button.id })
+        }
+        val updatedPages = if (createdPageId != null && currentPages.size > 1) {
+            currentPages.filterNot { pageConfig ->
+                pageConfig.id == createdPageId && pageConfig.buttons.isEmpty()
+            }
+        } else {
+            currentPages
+        }
+        deckPages = updatedPages
+        if (updatedPages.none { it.id == activeDeckPageId }) {
+            activeDeckPageId = updatedPages.first().id
+        }
+        saveDeckPages(context, updatedPages)
+        pendingNewButtonId = null
+        pendingNewButtonCreatedPageId = null
+        editingButton = null
     }
 
     fun finishLayoutEditor() {
@@ -938,17 +1027,42 @@ private fun MobileDeckApp() {
     }
 
     fun moveDeckButtonToSlot(button: DeckButton, targetPosition: Int) {
-        val pageCapacity = pageButtonCapacity(activeDeckPage.id, deckPages, deckColumns, deckRows)
-        if (targetPosition !in 0 until pageCapacity || button.position == targetPosition) return
-        val movedButton = button.copy(position = targetPosition)
-        val showTitle = activeDeckPage.id == deckPages.firstOrNull()?.id
-        if (!canPlaceButton(movedButton, deckButtons.filterNot { it.id == button.id }, deckColumns, deckRows, showTitle)) {
-            return
-        }
-        val updatedPages = updateDeckPage(deckPages, activeDeckPage.id) { deckPage ->
-            deckPage.buttons.map { existing ->
-                if (existing.id == button.id) movedButton else existing
+        val currentPage = deckPages.firstOrNull { it.id == activeDeckPageId } ?: return
+        val currentButton = currentPage.buttons.firstOrNull { it.id == button.id } ?: return
+        val currentButtons = currentPage.buttons
+        val pageCapacity = pageButtonCapacity(currentPage.id, deckPages, deckColumns, deckRows)
+        if (targetPosition !in 0 until pageCapacity || currentButton.position == targetPosition) return
+        val showTitle = currentPage.id == deckPages.firstOrNull()?.id
+        val otherButtons = currentButtons.filterNot { it.id == currentButton.id }
+        val movedButton = currentButton.copy(position = targetPosition)
+        val updatedButtons = if (canPlaceButton(movedButton, otherButtons, deckColumns, deckRows, showTitle)) {
+            currentButtons.map { existing ->
+                if (existing.id == currentButton.id) movedButton else existing
             }
+        } else {
+            val targetButton = buttonAtPosition(
+                buttons = otherButtons,
+                targetPosition = targetPosition,
+                columns = deckColumns,
+                rows = deckRows,
+                showTitle = showTitle
+            ) ?: return
+            if (!sameButtonSize(currentButton, targetButton, deckColumns, deckRows, showTitle)) return
+            val swappedButton = currentButton.copy(position = targetButton.position)
+            val swappedTargetButton = targetButton.copy(position = currentButton.position)
+            val remainingButtons = currentButtons.filterNot { it.id == currentButton.id || it.id == targetButton.id }
+            if (!canPlaceButton(swappedButton, remainingButtons + swappedTargetButton, deckColumns, deckRows, showTitle)) return
+            if (!canPlaceButton(swappedTargetButton, remainingButtons + swappedButton, deckColumns, deckRows, showTitle)) return
+            currentButtons.map { existing ->
+                when (existing.id) {
+                    currentButton.id -> swappedButton
+                    targetButton.id -> swappedTargetButton
+                    else -> existing
+                }
+            }
+        }
+        val updatedPages = updateDeckPage(deckPages, currentPage.id) {
+            updatedButtons
         }
         deckPages = updatedPages
         saveDeckPages(context, updatedPages)
@@ -967,13 +1081,13 @@ private fun MobileDeckApp() {
         contentWindowInsets = WindowInsets(0, 0, 0, 0)
     ) { innerPadding ->
         val connectHost: (PairedHidHost) -> Unit = { host ->
-            val started = hidManager.connect(host.address)
+            val started = hidManager.connectOrRegister(host.address)
             logs = listOf(
                 ActivityLog(
                     buttonTitle = "Connect",
                     payload = host.name,
                     delivered = started,
-                    note = if (started) "connection requested" else "connection failed"
+                    note = if (started) "registration or connection requested" else "connection failed"
                 )
             ) + logs.take(9)
         }
@@ -996,6 +1110,7 @@ private fun MobileDeckApp() {
                 uiMode = deckUiMode,
                 consoleLayout = consoleLayout,
                 consolePanelOptions = consolePanelOptions,
+                classicSolidButtonBackground = classicSolidButtonBackground,
                 previewMode = false,
                 pageSwipeAxis = pageSwipeAxis,
                 pageSwipeMode = pageSwipeMode,
@@ -1026,6 +1141,7 @@ private fun MobileDeckApp() {
                 status = hidStatus,
                 appWidgetHost = appWidgetHost,
                 appWidgetManager = appWidgetManager,
+                classicSolidButtonBackground = classicSolidButtonBackground,
                 pageSwipeAxis = pageSwipeAxis,
                 pageSwipeMode = pageSwipeMode,
                 pageSwipeAnimation = pageSwipeAnimation,
@@ -1037,7 +1153,9 @@ private fun MobileDeckApp() {
                 onDeletePage = ::deleteActiveDeckPage,
                 onResetPage = ::resetFirstDeckPage,
                 onButtonEdit = { editingButton = it },
+                onButtonDragStarted = { context.applicationContext.vibrateButtonPress(buttonVibrationLevel) },
                 onButtonMoved = ::moveDeckButtonToSlot,
+                onButtonDeleted = ::deleteDeckButton,
                 onEmptySlotPressed = { slot -> addDeckButton(slot, editAfterCreate = true) }
             )
 
@@ -1113,6 +1231,7 @@ private fun MobileDeckApp() {
                 pageSwipeAnimation = pageSwipeAnimation,
                 infinitePageSwipe = infinitePageSwipe,
                 buttonVibrationLevel = buttonVibrationLevel,
+                classicSolidButtonBackground = classicSolidButtonBackground,
                 deckUiMode = deckUiMode,
                 consolePanelOptions = consolePanelOptions,
                 pairingDiscoverable = pairingDiscoverable,
@@ -1148,6 +1267,11 @@ private fun MobileDeckApp() {
                     buttonVibrationLevel = level
                     saveButtonVibrationLevel(context, level)
                     context.applicationContext.vibrateButtonPress(level)
+                },
+                onClassicSolidButtonBackgroundChange = { enabled ->
+                    context.applicationContext.vibrateButtonPress(buttonVibrationLevel)
+                    classicSolidButtonBackground = enabled
+                    saveClassicSolidButtonBackground(context, enabled)
                 },
                 onDeckUiModeChange = { mode ->
                     context.applicationContext.vibrateButtonPress(buttonVibrationLevel)
@@ -1228,7 +1352,8 @@ private fun MobileDeckApp() {
         EditButtonDialog(
             button = button,
             status = hidStatus,
-            onDismiss = { editingButton = null },
+            classicSolidButtonBackground = classicSolidButtonBackground,
+            onDismiss = { cancelEditingButton(button) },
             onSave = { updated ->
                 if (button.appWidgetId != INVALID_APP_WIDGET_ID && button.appWidgetId != updated.appWidgetId) {
                     if (appWidgetHost != null) {
@@ -1246,24 +1371,35 @@ private fun MobileDeckApp() {
                 val updatedPages = updateDeckButton(deckPages, adjustedButton)
                 deckPages = updatedPages
                 saveDeckPages(context, updatedPages)
+                pendingNewButtonId = null
+                pendingNewButtonCreatedPageId = null
                 editingButton = null
             },
             onPickWidget = { updated ->
-                editingButton = null
                 pickWidgetForButton(updated)
-            },
-            onDelete = {
-                if (button.appWidgetId != INVALID_APP_WIDGET_ID) {
-                    if (appWidgetHost != null) {
-                        appWidgetHost.deleteAppWidgetId(button.appWidgetId)
+            }
+        )
+    }
+
+    confirmEmptyPageDeletePageId?.let { pageId ->
+        AlertDialog(
+            onDismissRequest = { confirmEmptyPageDeletePageId = null },
+            title = { Text(stringResource(R.string.delete_current_page)) },
+            text = { Text(stringResource(R.string.confirm_delete_page)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        confirmEmptyPageDeletePageId = null
+                        deleteDeckPage(pageId)
                     }
+                ) {
+                    Text(stringResource(R.string.delete))
                 }
-                val updatedPages = deckPages.map { pageConfig ->
-                    pageConfig.copy(buttons = pageConfig.buttons.filterNot { existing -> existing.id == button.id })
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmEmptyPageDeletePageId = null }) {
+                    Text(stringResource(R.string.cancel))
                 }
-                deckPages = updatedPages
-                saveDeckPages(context, updatedPages)
-                editingButton = null
             }
         )
     }
@@ -1304,6 +1440,7 @@ private fun SettingsPage(
     pageSwipeAnimation: Boolean,
     infinitePageSwipe: Boolean,
     buttonVibrationLevel: ButtonVibrationLevel,
+    classicSolidButtonBackground: Boolean,
     deckUiMode: DeckUiMode,
     consolePanelOptions: ConsolePanelOptions,
     pairingDiscoverable: Boolean,
@@ -1318,6 +1455,7 @@ private fun SettingsPage(
     onPageSwipeAnimationChange: (Boolean) -> Unit,
     onInfinitePageSwipeChange: (Boolean) -> Unit,
     onButtonVibrationLevelChange: (ButtonVibrationLevel) -> Unit,
+    onClassicSolidButtonBackgroundChange: (Boolean) -> Unit,
     onDeckUiModeChange: (DeckUiMode) -> Unit,
     onConsolePanelOptionsChange: (ConsolePanelOptions) -> Unit,
     onStart: () -> Unit,
@@ -1401,6 +1539,7 @@ private fun SettingsPage(
                     pageSwipeAnimation = pageSwipeAnimation,
                     infinitePageSwipe = infinitePageSwipe,
                     buttonVibrationLevel = buttonVibrationLevel,
+                    classicSolidButtonBackground = classicSolidButtonBackground,
                     pageName = pageName,
                     pageCount = pageCount,
                     logs = logs,
@@ -1409,6 +1548,7 @@ private fun SettingsPage(
                     onPageSwipeAnimationChange = onPageSwipeAnimationChange,
                     onInfinitePageSwipeChange = onInfinitePageSwipeChange,
                     onButtonVibrationLevelChange = onButtonVibrationLevelChange,
+                    onClassicSolidButtonBackgroundChange = onClassicSolidButtonBackgroundChange,
                     onLayoutEditor = onLayoutEditor,
                     onColumnsChange = onColumnsChange,
                     onRowsChange = onRowsChange,
@@ -1820,17 +1960,36 @@ private fun PairedHostsInlineSection(
                     shape = RoundedCornerShape(6.dp),
                     onClick = { onConnectHost(host) }
                 ) {
-                    Text(
+                    Row(
                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
-                        text = host.name,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = colors.textPrimary,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = pairedHostIcon(host.type),
+                            contentDescription = null,
+                            tint = accent,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Text(
+                            text = host.name,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = colors.textPrimary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
                 }
             }
         }
+    }
+}
+
+private fun pairedHostIcon(type: PairedHidHostType): ImageVector {
+    return when (type) {
+        PairedHidHostType.Computer -> Icons.Filled.Computer
+        PairedHidHostType.Tablet -> Icons.Filled.TabletAndroid
+        PairedHidHostType.Phone -> Icons.Filled.PhoneAndroid
     }
 }
 
@@ -1872,6 +2031,7 @@ private fun ClassicSettingsContent(
     pageSwipeAnimation: Boolean,
     infinitePageSwipe: Boolean,
     buttonVibrationLevel: ButtonVibrationLevel,
+    classicSolidButtonBackground: Boolean,
     pageName: String,
     pageCount: Int,
     logs: List<ActivityLog>,
@@ -1880,6 +2040,7 @@ private fun ClassicSettingsContent(
     onPageSwipeAnimationChange: (Boolean) -> Unit,
     onInfinitePageSwipeChange: (Boolean) -> Unit,
     onButtonVibrationLevelChange: (ButtonVibrationLevel) -> Unit,
+    onClassicSolidButtonBackgroundChange: (Boolean) -> Unit,
     onLayoutEditor: () -> Unit,
     onColumnsChange: (Int) -> Unit,
     onRowsChange: (Int) -> Unit,
@@ -1918,9 +2079,11 @@ private fun ClassicSettingsContent(
         }
         item {
             ClassicButtonSettingsCard(
-                onLayoutEditor = onLayoutEditor,
                 buttonVibrationLevel = buttonVibrationLevel,
-                onButtonVibrationLevelChange = onButtonVibrationLevelChange
+                classicSolidButtonBackground = classicSolidButtonBackground,
+                onLayoutEditor = onLayoutEditor,
+                onButtonVibrationLevelChange = onButtonVibrationLevelChange,
+                onClassicSolidButtonBackgroundChange = onClassicSolidButtonBackgroundChange
             )
         }
         item {
@@ -2223,6 +2386,36 @@ private fun ClassicLayoutControlsCard(
             onSpacingChange = onSpacingChange
         )
         ClassicSettingsControlRow(
+            icon = Icons.Filled.Apps,
+            iconColor = ClassicLayoutAccent,
+            title = stringResource(R.string.add_page_count, pageCount, MAX_PAGES),
+            subtitle = pageLayoutSummary(
+                pageName = pageName,
+                pageCount = pageCount,
+                columns = columns,
+                rows = rows
+            ),
+            trailing = {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    PageIndicator(
+                        pageCount = pageCount,
+                        activeIndex = deckPages.indexOfFirst { it.id == activePageId }.coerceAtLeast(0)
+                    )
+                    Button(
+                        enabled = pageCount < MAX_PAGES,
+                        shape = RoundedCornerShape(8.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = ClassicLayoutAccent,
+                            contentColor = Color.White
+                        ),
+                        onClick = onAddPage
+                    ) {
+                        Text(stringResource(R.string.add_page))
+                    }
+                }
+            }
+        )
+        ClassicSettingsControlRow(
             icon = Icons.Filled.SwapHoriz,
             iconColor = ClassicLayoutAccent,
             title = stringResource(R.string.settings_page_direction),
@@ -2278,70 +2471,59 @@ private fun ClassicLayoutControlsCard(
                 )
             }
         )
-        ClassicSettingsControlRow(
-            icon = Icons.Filled.Apps,
-            iconColor = ClassicLayoutAccent,
-            title = stringResource(R.string.add_page_count, pageCount, MAX_PAGES),
-            subtitle = pageLayoutSummary(
-                pageName = pageName,
-                pageCount = pageCount,
-                columns = columns,
-                rows = rows
-            ),
-            trailing = {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    PageIndicator(
-                        pageCount = pageCount,
-                        activeIndex = deckPages.indexOfFirst { it.id == activePageId }.coerceAtLeast(0)
-                    )
-                    Button(
-                        enabled = pageCount < MAX_PAGES,
-                        shape = RoundedCornerShape(8.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = ClassicLayoutAccent,
-                            contentColor = Color.White
-                        ),
-                        onClick = onAddPage
-                    ) {
-                        Text(stringResource(R.string.add_page))
-                    }
-                }
-            }
-        )
     }
 }
 
 @Composable
 private fun ClassicButtonSettingsCard(
-    onLayoutEditor: () -> Unit,
     buttonVibrationLevel: ButtonVibrationLevel,
-    onButtonVibrationLevelChange: (ButtonVibrationLevel) -> Unit
+    classicSolidButtonBackground: Boolean,
+    onLayoutEditor: () -> Unit,
+    onButtonVibrationLevelChange: (ButtonVibrationLevel) -> Unit,
+    onClassicSolidButtonBackgroundChange: (Boolean) -> Unit
 ) {
     ClassicConceptSectionCard(
         icon = Icons.Filled.TouchApp,
-        title = stringResource(R.string.button_editor),
-        subtitle = stringResource(R.string.settings_classic_layout_desc),
+        title = stringResource(R.string.button_settings),
+        subtitle = stringResource(R.string.button_settings_desc),
         accent = ClassicButtonAccent,
-        secondaryAccent = ClassicButtonSecondaryAccent
+        secondaryAccent = ClassicButtonSecondaryAccent,
+        trailing = {
+            SettingsCycleButton(
+                text = stringResource(R.string.button_editor),
+                accent = ClassicButtonAccent,
+                onClick = onLayoutEditor
+            )
+        }
     ) {
-        ClassicSettingsActionRow(
-            icon = Icons.Filled.GridView,
-            iconColor = ClassicButtonAccent,
-            title = stringResource(R.string.button_editor),
-            subtitle = stringResource(R.string.settings_classic_layout_desc),
-            buttonText = stringResource(R.string.button_editor),
-            onClick = onLayoutEditor
-        )
         ClassicSettingsControlRow(
             icon = Icons.Filled.Vibration,
             iconColor = ClassicButtonAccent,
             title = stringResource(R.string.settings_vibration),
             subtitle = stringResource(R.string.settings_vibration_desc),
             trailing = {
-                SettingsCycleButton(
-                    text = stringResource(buttonVibrationLevel.shortLabelRes),
-                    accent = ClassicButtonAccent,
+                Button(
+                    shape = RoundedCornerShape(8.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = ClassicButtonAccent,
+                        contentColor = Color.White
+                    ),
                     onClick = { onButtonVibrationLevelChange(buttonVibrationLevel.next()) }
+                ) {
+                    Text(stringResource(buttonVibrationLevel.shortLabelRes))
+                }
+            }
+        )
+        ClassicSettingsControlRow(
+            icon = Icons.Filled.GridView,
+            iconColor = ClassicButtonAccent,
+            title = stringResource(R.string.settings_solid_button_background),
+            subtitle = stringResource(R.string.settings_solid_button_background_desc),
+            trailing = {
+                SettingsSwitch(
+                    checked = classicSolidButtonBackground,
+                    accent = ClassicButtonAccent,
+                    onCheckedChange = onClassicSolidButtonBackgroundChange
                 )
             }
         )
@@ -3864,6 +4046,12 @@ private fun Header(
                                 shape = RoundedCornerShape(8.dp),
                                 onClick = { onConnectHost(host) }
                             ) {
+                                Icon(
+                                    imageVector = pairedHostIcon(host.type),
+                                    contentDescription = null,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
                                 Text(
                                     text = stringResource(R.string.connect_host, host.name),
                                     maxLines = 1,
@@ -3924,6 +4112,7 @@ private fun LayoutEditorPage(
     status: HidStatus,
     appWidgetHost: AppWidgetHost?,
     appWidgetManager: AppWidgetManager?,
+    classicSolidButtonBackground: Boolean,
     pageSwipeAxis: PageSwipeAxis,
     pageSwipeMode: PageSwipeMode,
     pageSwipeAnimation: Boolean,
@@ -3935,7 +4124,9 @@ private fun LayoutEditorPage(
     onDeletePage: () -> Unit,
     onResetPage: () -> Unit,
     onButtonEdit: (DeckButton) -> Unit,
+    onButtonDragStarted: () -> Unit,
     onButtonMoved: (DeckButton, Int) -> Unit,
+    onButtonDeleted: (DeckButton) -> Unit,
     onEmptySlotPressed: (Int) -> Unit
 ) {
     var confirmPageAction by remember { mutableStateOf(false) }
@@ -4019,6 +4210,7 @@ private fun LayoutEditorPage(
                 uiMode = DeckUiMode.Classic,
                 consoleLayout = ConsoleLayoutConfig(emptyList()),
                 consolePanelOptions = ConsolePanelOptions(),
+                classicSolidButtonBackground = classicSolidButtonBackground,
                 previewMode = true,
                 pageSwipeAxis = pageSwipeAxis,
                 pageSwipeMode = pageSwipeMode,
@@ -4028,8 +4220,10 @@ private fun LayoutEditorPage(
                 onPageSwipe = onPageSwipe,
                 onAddPage = onAddPage,
                 onButtonPressed = onButtonEdit,
+                onButtonTouchStarted = onButtonDragStarted,
                 onButtonEdit = onButtonEdit,
                 onButtonMoved = onButtonMoved,
+                onButtonDeleted = onButtonDeleted,
                 onEmptySlotPressed = onEmptySlotPressed
             )
         }
@@ -4186,6 +4380,7 @@ private fun DeckPage(
     uiMode: DeckUiMode,
     consoleLayout: ConsoleLayoutConfig,
     consolePanelOptions: ConsolePanelOptions,
+    classicSolidButtonBackground: Boolean,
     previewMode: Boolean,
     pageSwipeAxis: PageSwipeAxis,
     pageSwipeMode: PageSwipeMode,
@@ -4199,6 +4394,7 @@ private fun DeckPage(
     onButtonTouchEnded: () -> Unit = {},
     onButtonEdit: (DeckButton) -> Unit,
     onButtonMoved: (DeckButton, Int) -> Unit,
+    onButtonDeleted: (DeckButton) -> Unit = {},
     onEmptySlotPressed: (Int) -> Unit
 ) {
     BoxWithConstraints(modifier = modifier) {
@@ -4284,6 +4480,7 @@ private fun DeckPage(
                     appWidgetHost = appWidgetHost,
                     appWidgetManager = appWidgetManager,
                     visualMode = DeckUiMode.Classic,
+                    classicSolidButtonBackground = classicSolidButtonBackground,
                     previewMode = previewMode,
                     showTitle = target.pageId == deckPages.firstOrNull()?.id,
                     onButtonPressed = onButtonPressed,
@@ -4291,6 +4488,7 @@ private fun DeckPage(
                     onButtonTouchEnded = onButtonTouchEnded,
                     onButtonEdit = onButtonEdit,
                     onButtonMoved = onButtonMoved,
+                    onButtonDeleted = onButtonDeleted,
                     onEmptySlotPressed = onEmptySlotPressed
                 )
             }
@@ -4490,6 +4688,7 @@ private fun ConsoleButtonRows(
                         appWidgetHost = appWidgetHost,
                         appWidgetManager = appWidgetManager,
                         visualMode = DeckUiMode.Console,
+                        classicSolidButtonBackground = true,
                         enabled = true,
                         previewMode = false,
                         columns = rowButtons.size.coerceAtLeast(1),
@@ -5156,6 +5355,7 @@ private fun ButtonGrid(
     appWidgetHost: AppWidgetHost?,
     appWidgetManager: AppWidgetManager?,
     visualMode: DeckUiMode,
+    classicSolidButtonBackground: Boolean,
     previewMode: Boolean,
     showTitle: Boolean,
     onButtonPressed: (DeckButton) -> Unit,
@@ -5163,6 +5363,7 @@ private fun ButtonGrid(
     onButtonTouchEnded: () -> Unit,
     onButtonEdit: (DeckButton) -> Unit,
     onButtonMoved: (DeckButton, Int) -> Unit,
+    onButtonDeleted: (DeckButton) -> Unit,
     onEmptySlotPressed: (Int) -> Unit
 ) {
     val safeColumns = columns.coerceAtLeast(1)
@@ -5172,6 +5373,76 @@ private fun ButtonGrid(
     val occupiedSlots = buttons.flatMap { occupiedSlotsForButton(it, safeColumns, safeRows, showTitle) }.toSet()
     val gridWidth = cellSize * safeColumns.toFloat() + spacing * (safeColumns - 1).coerceAtLeast(0).toFloat()
     val gridHeight = cellSize * safeRows.toFloat() + spacing * (safeRows - 1).coerceAtLeast(0).toFloat()
+    val density = LocalDensity.current
+    var swapHoverCandidate by remember { mutableStateOf<DragSwapCandidate?>(null) }
+    var activeSwapPreview by remember { mutableStateOf<DragSwapCandidate?>(null) }
+    var draggedButtonId by remember { mutableStateOf<Int?>(null) }
+    var trashArmed by remember { mutableStateOf(false) }
+    val trashWidth = 138.dp
+    val trashHeight = 58.dp
+
+    LaunchedEffect(swapHoverCandidate) {
+        activeSwapPreview = null
+        val candidate = swapHoverCandidate ?: return@LaunchedEffect
+        delay(260)
+        activeSwapPreview = candidate
+    }
+
+    fun isOverTrash(button: DeckButton, dragOffset: Offset): Boolean {
+        val slot = buttonToSlot(button, showTitle)
+        val columnIndex = slot.floorMod(safeColumns)
+        val rowIndex = slot / safeColumns
+        val spanColumns = button.effectiveSpanColumns(safeColumns, showTitle)
+        val spanRows = button.effectiveSpanRows(safeColumns, safeRows, showTitle)
+        return with(density) {
+            val stepPx = (cellSize + spacing).toPx()
+            val buttonWidthPx = (cellSize * spanColumns.toFloat() + spacing * (spanColumns - 1).coerceAtLeast(0).toFloat()).toPx()
+            val buttonHeightPx = (cellSize * spanRows.toFloat() + spacing * (spanRows - 1).coerceAtLeast(0).toFloat()).toPx()
+            val center = Offset(
+                x = stepPx * columnIndex + buttonWidthPx / 2f + dragOffset.x,
+                y = stepPx * rowIndex + buttonHeightPx / 2f + dragOffset.y
+            )
+            val trashWidthPx = trashWidth.toPx()
+            val trashHeightPx = trashHeight.toPx()
+            val trashLeft = gridWidth.toPx() / 2f - trashWidthPx / 2f
+            val trashRight = trashLeft + trashWidthPx
+            val trashTop = -trashHeightPx - 16.dp.toPx()
+            val trashBottom = 10.dp.toPx()
+            center.x in trashLeft..trashRight && center.y in trashTop..trashBottom
+        }
+    }
+
+    fun candidateForDrag(button: DeckButton, targetPosition: Int?): DragSwapCandidate? {
+        if (targetPosition == null || targetPosition == button.position) return null
+        val targetButton = buttonAtPosition(
+            buttons = buttons.filterNot { it.id == button.id },
+            targetPosition = targetPosition,
+            columns = safeColumns,
+            rows = safeRows,
+            showTitle = showTitle
+        ) ?: return null
+        if (!sameButtonSize(button, targetButton, safeColumns, safeRows, showTitle)) return null
+        return DragSwapCandidate(
+            draggedButtonId = button.id,
+            targetButtonId = targetButton.id,
+            sourcePosition = button.position,
+            targetPosition = targetButton.position
+        )
+    }
+
+    fun previewOffsetFor(button: DeckButton): Offset {
+        val preview = activeSwapPreview?.takeIf { it.targetButtonId == button.id } ?: return Offset.Zero
+        val sourceSlot = if (showTitle) preview.sourcePosition + 1 else preview.sourcePosition
+        val targetSlot = if (showTitle) preview.targetPosition + 1 else preview.targetPosition
+        val columnDelta = sourceSlot.floorMod(safeColumns) - targetSlot.floorMod(safeColumns)
+        val rowDelta = sourceSlot / safeColumns - targetSlot / safeColumns
+        return with(density) {
+            Offset(
+                x = (cellSize + spacing).toPx() * columnDelta,
+                y = (cellSize + spacing).toPx() * rowDelta
+            )
+        }
+    }
 
     Box(
         modifier = modifier.padding(contentPadding),
@@ -5206,16 +5477,47 @@ private fun ButtonGrid(
                         appWidgetHost = appWidgetHost,
                         appWidgetManager = appWidgetManager,
                         visualMode = visualMode,
+                        classicSolidButtonBackground = classicSolidButtonBackground,
                         enabled = true,
                         previewMode = previewMode,
                         columns = safeColumns,
                         slot = buttonPosition,
                         cellSize = cellSize,
                         spacing = spacing,
+                        swapPreviewOffset = previewOffsetFor(button),
                         onPressed = { onButtonPressed(button) },
                         onPressFeedback = onButtonTouchStarted,
                         onReleaseFeedback = onButtonTouchEnded,
                         onEdit = { onButtonEdit(button) },
+                        onDragStarted = {
+                            draggedButtonId = button.id
+                            trashArmed = false
+                        },
+                        onDragHover = { targetPosition ->
+                            swapHoverCandidate = candidateForDrag(button, targetPosition)
+                        },
+                        onDragOffsetChanged = { offset ->
+                            val overTrash = isOverTrash(button, offset)
+                            trashArmed = overTrash
+                            if (overTrash) {
+                                swapHoverCandidate = null
+                                activeSwapPreview = null
+                            }
+                        },
+                        onDropDelete = { offset ->
+                            if (isOverTrash(button, offset)) {
+                                onButtonDeleted(button)
+                                true
+                            } else {
+                                false
+                            }
+                        },
+                        onDragFinished = {
+                            swapHoverCandidate = null
+                            activeSwapPreview = null
+                            draggedButtonId = null
+                            trashArmed = false
+                        },
                         onMove = { targetSlot -> onButtonMoved(button, targetSlot.coerceIn(0, maxButtonPosition)) }
                     )
                 } else if (slot !in occupiedSlots) {
@@ -5226,6 +5528,15 @@ private fun ButtonGrid(
                             onCreate = { onEmptySlotPressed(slotToButtonPosition(slot, showTitle)) }
                         )
                 }
+            }
+            AnimatedVisibility(
+                visible = draggedButtonId != null,
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .offset(y = (-76).dp)
+                    .zIndex(4f)
+            ) {
+                TrashDropTarget(active = trashArmed)
             }
         }
     }
@@ -5242,24 +5553,46 @@ private fun TitleDeckSlot(
         tonalElevation = 0.dp,
         color = Color.Transparent
     ) {
-        Column(
-            modifier = Modifier.padding(4.dp),
-            verticalArrangement = Arrangement.Center
+        BoxWithConstraints(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(4.dp),
+            contentAlignment = Alignment.CenterStart
         ) {
-            Text(
-                text = stringResource(R.string.deck_title),
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis
-            )
-            Box(
-                modifier = Modifier
-                    .padding(top = 6.dp)
-                    .size(8.dp)
-                    .clip(CircleShape)
-                    .background(statusDotColor(status.state))
-            )
+            val compact = maxHeight < 58.dp || maxWidth < 74.dp
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.Center
+            ) {
+                Text(
+                    text = stringResource(R.string.deck_title),
+                    style = if (compact) MaterialTheme.typography.labelLarge else MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = if (compact) 1 else 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Row(
+                    modifier = Modifier
+                        .padding(top = if (compact) 3.dp else 6.dp)
+                        .fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(if (compact) 7.dp else 8.dp)
+                            .clip(CircleShape)
+                            .background(statusDotColor(status.state))
+                    )
+                    Text(
+                        text = stringResource(status.state.labelRes()),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
         }
     }
 }
@@ -5300,16 +5633,23 @@ private fun DeckKey(
     appWidgetHost: AppWidgetHost?,
     appWidgetManager: AppWidgetManager?,
     visualMode: DeckUiMode,
+    classicSolidButtonBackground: Boolean,
     enabled: Boolean,
     previewMode: Boolean,
     columns: Int,
     slot: Int,
     cellSize: Dp,
     spacing: Dp,
+    swapPreviewOffset: Offset = Offset.Zero,
     onPressed: () -> Unit,
     onPressFeedback: () -> Unit,
     onReleaseFeedback: () -> Unit,
     onEdit: () -> Unit,
+    onDragStarted: () -> Unit = {},
+    onDragHover: (Int?) -> Unit = {},
+    onDragOffsetChanged: (Offset) -> Unit = {},
+    onDropDelete: (Offset) -> Boolean = { false },
+    onDragFinished: () -> Unit = {},
     onMove: (Int) -> Unit
 ) {
     val isConsole = visualMode == DeckUiMode.Console
@@ -5317,27 +5657,35 @@ private fun DeckKey(
     val containerColor = when {
         !enabled -> MaterialTheme.colorScheme.surfaceVariant
         isConsole -> consoleButtonColor(button)
+        !classicSolidButtonBackground -> themeColors.cardBackground.copy(alpha = if (isSystemInDarkTheme()) 0.9f else 0.96f)
         else -> button.color
     }
     val contentColor = when {
         !enabled -> MaterialTheme.colorScheme.onSurfaceVariant
         isConsole && containerColor.luminance() > 0.5f -> themeColors.textPrimary
+        !isConsole && !classicSolidButtonBackground -> if (button.color.luminance() > 0.62f) {
+            themeColors.textPrimary
+        } else {
+            button.color
+        }
         else -> Color.White
     }
     val buttonShape = RoundedCornerShape(if (isConsole) 18.dp else 8.dp)
     val density = LocalDensity.current
     var dragOffset by remember(button.id) { mutableStateOf(Offset.Zero) }
+    var dragInProgress by remember(button.id) { mutableStateOf(false) }
     var touchPressed by remember(button.id) { mutableStateOf(false) }
     val moveThresholdPx = with(density) { ((cellSize + spacing) * 0.55f).toPx() }
-    val dragActive = abs(dragOffset.x) > moveThresholdPx || abs(dragOffset.y) > moveThresholdPx
+    val dragActive = dragInProgress && (abs(dragOffset.x) > moveThresholdPx || abs(dragOffset.y) > moveThresholdPx)
+    val displayOffset = dragOffset + swapPreviewOffset
     val animatedX by animateFloatAsState(
-        targetValue = dragOffset.x,
-        animationSpec = tween(durationMillis = if (dragOffset == Offset.Zero) 140 else 40),
+        targetValue = displayOffset.x,
+        animationSpec = tween(durationMillis = if (displayOffset == Offset.Zero) 140 else 80),
         label = "keyDragX"
     )
     val animatedY by animateFloatAsState(
-        targetValue = dragOffset.y,
-        animationSpec = tween(durationMillis = if (dragOffset == Offset.Zero) 140 else 40),
+        targetValue = displayOffset.y,
+        animationSpec = tween(durationMillis = if (displayOffset == Offset.Zero) 140 else 80),
         label = "keyDragY"
     )
     val animatedScale by animateFloatAsState(
@@ -5350,20 +5698,41 @@ private fun DeckKey(
     val letWidgetHandleTouch = hasWidget && button.appWidgetTouchable && !previewMode
     val dragModifier = if (previewMode) {
         Modifier.pointerInput(button.id, columns, slot, cellSize, spacing) {
-            detectDragGestures(
-                onDragStart = { dragOffset = Offset.Zero },
+            fun targetPositionFor(offset: Offset): Int? {
+                val stepPx = with(density) { (cellSize + spacing).toPx() }
+                val columnDelta = (offset.x / stepPx).roundToInt()
+                val rowDelta = (offset.y / stepPx).roundToInt()
+                val target = slot + columnDelta + rowDelta * columns
+                return target.takeIf { it >= 0 }
+            }
+            detectDragGesturesAfterLongPress(
+                onDragStart = {
+                    dragOffset = Offset.Zero
+                    dragInProgress = true
+                    onPressFeedback()
+                    onDragStarted()
+                    onDragHover(null)
+                    onDragOffsetChanged(Offset.Zero)
+                },
                 onDrag = { change, dragAmount ->
                     change.consume()
                     dragOffset += dragAmount
+                    onDragOffsetChanged(dragOffset)
+                    onDragHover(targetPositionFor(dragOffset))
                 },
                 onDragEnd = {
-                    val stepPx = with(density) { (cellSize + spacing).toPx() }
-                    val columnDelta = (dragOffset.x / stepPx).roundToInt()
-                    val rowDelta = (dragOffset.y / stepPx).roundToInt()
-                    onMove(slot + columnDelta + rowDelta * columns)
+                    if (!onDropDelete(dragOffset)) {
+                        targetPositionFor(dragOffset)?.let(onMove)
+                    }
                     dragOffset = Offset.Zero
+                    dragInProgress = false
+                    onDragFinished()
                 },
-                onDragCancel = { dragOffset = Offset.Zero }
+                onDragCancel = {
+                    dragOffset = Offset.Zero
+                    dragInProgress = false
+                    onDragFinished()
+                }
             )
         }
     } else {
@@ -5392,6 +5761,18 @@ private fun DeckKey(
     Surface(
         modifier = modifier
             .then(dragModifier)
+            .zIndex(
+                when {
+                    dragInProgress -> 2f
+                    swapPreviewOffset != Offset.Zero -> 1f
+                    else -> 0f
+                }
+            )
+            .border(
+                width = if (!isConsole && !classicSolidButtonBackground) 2.dp else 0.dp,
+                color = if (!isConsole && !classicSolidButtonBackground) button.color.copy(alpha = 0.95f) else Color.Transparent,
+                shape = buttonShape
+            )
             .graphicsLayer {
                 translationX = animatedX
                 translationY = animatedY
@@ -5725,7 +6106,7 @@ private fun DeckButtonIcon(
     large: Boolean = false
 ) {
     val image = rememberImageBitmap(button.iconImageUri)
-    val iconSize = if (large) 46.dp else 30.dp
+    val iconSize = if (large) 80.dp else 52.dp
     when {
         image != null -> {
             Image(
@@ -5747,7 +6128,7 @@ private fun DeckButtonIcon(
         else -> {
             Text(
                 text = button.icon.ifBlank { button.title.take(1).uppercase() },
-                style = if (large) MaterialTheme.typography.headlineMedium else MaterialTheme.typography.titleLarge,
+                style = if (large) MaterialTheme.typography.displayMedium else MaterialTheme.typography.headlineMedium,
                 fontWeight = FontWeight.Bold,
                 color = tint,
                 maxLines = 1,
@@ -5975,6 +6356,8 @@ private fun HidConnectionState.labelRes(): Int {
 private fun localizedStatusMessage(message: String): String {
     return when (message) {
         "Bluetooth permissions were denied" -> stringResource(R.string.status_message_permissions_denied)
+        "Discoverable mode is active. Pair from the PC while HID is registered." -> stringResource(R.string.status_message_discoverable_active)
+        "Discoverable request was canceled." -> stringResource(R.string.status_message_discoverable_request_canceled)
         "Discoverable request finished. Pair from the PC while HID is registered." -> stringResource(R.string.status_message_discoverable_finished)
         "Discoverable request finished." -> stringResource(R.string.status_message_discoverable_finished)
         "Discoverable request canceled in MobileDeck." -> stringResource(R.string.status_message_discoverable_canceled)
@@ -6038,10 +6421,10 @@ private fun DiagnosticsPanel(
 private fun EditButtonDialog(
     button: DeckButton,
     status: HidStatus,
+    classicSolidButtonBackground: Boolean,
     onDismiss: () -> Unit,
     onSave: (DeckButton) -> Unit,
-    onPickWidget: (DeckButton) -> Unit,
-    onDelete: () -> Unit
+    onPickWidget: (DeckButton) -> Unit
 ) {
     var title by remember(button.id) { mutableStateOf(button.title) }
     var subtitle by remember(button.id) { mutableStateOf(button.subtitle) }
@@ -6076,6 +6459,7 @@ private fun EditButtonDialog(
                 )
             }
             iconImageUri = uri.toString()
+            icon = ""
         }
     }
     LaunchedEffect(appPickerVisible) {
@@ -6093,37 +6477,67 @@ private fun EditButtonDialog(
     )
     val selectedAppCommand = appCommandAction(payload) ?: DeckActionType.BluetoothStatus
     val selectedIcon = selectedIconChoice(icon)
+    val selectedIconLabelRes = when {
+        iconImageUri.startsWith(APP_ICON_URI_PREFIX) -> R.string.pick_app_icon
+        iconImageUri.isNotBlank() -> R.string.pick_image
+        else -> selectedIcon.labelRes
+    }
     val selectedMedia = selectedMediaKeyChoice(payload)
     val selectedUtility = selectedUtilityChoice(payload)
-    val actionLocked = buttonAppAction(button) == DeckActionType.Settings
-    val canSave = title.isNotBlank() && (!payloadRequired(actionType) || payload.isNotBlank())
+    val canSave = (actionPanel == EditActionPanel.Widget || title.isNotBlank()) &&
+        (!payloadRequired(actionType) || payload.isNotBlank())
     val configuration = LocalConfiguration.current
-    val contentMaxHeight = (configuration.screenHeightDp.dp - 152.dp).coerceAtLeast(220.dp)
-    val dialogWidthFraction = if (configuration.screenWidthDp >= 900) 0.66f else 0.82f
+    val dialogWidthFraction = if (configuration.screenWidthDp >= 900) 0.94f else 0.96f
+    fun shouldReplaceDefaultTitle(): Boolean {
+        return title.isBlank() || title == "New key" || title == button.title
+    }
+    fun setDefaultTitleIfAllowed(newTitle: String, newSubtitle: String = "") {
+        if (shouldReplaceDefaultTitle()) {
+            title = newTitle
+            subtitle = newSubtitle
+        }
+    }
     fun selectActionPanel(panel: EditActionPanel) {
+        val previousActionType = actionType
         actionPanel = panel
         when (panel) {
             EditActionPanel.AppCommand -> {
                 actionType = DeckActionType.AppCommand
                 if (appCommandAction(payload) == null) payload = DeckActionType.BluetoothStatus.name
+                val command = appCommandAction(payload) ?: DeckActionType.BluetoothStatus
+                setDefaultTitleIfAllowed(context.getString(command.labelRes))
             }
             EditActionPanel.KeyboardInput -> {
                 actionType = DeckActionType.Hotkey
-                if (!payloadRequired(actionType) || payload.isBlank()) payload = "CTRL+F9"
+                if (previousActionType != DeckActionType.Hotkey &&
+                    previousActionType != DeckActionType.Text ||
+                    payload.isBlank() ||
+                    payload == "CTRL+F9"
+                ) {
+                    payload = "WIN+E"
+                }
+                setDefaultTitleIfAllowed("Explorer", "Win+E")
             }
             EditActionPanel.MediaKey -> {
                 actionType = DeckActionType.MediaKey
                 if (mediaKeyChoice(payload) == null) payload = MEDIA_MUTE
                 icon = ICON_AUTO
+                iconImageUri = ""
+                val media = mediaKeyChoice(payload) ?: mediaKeyChoice(MEDIA_MUTE)!!
+                setDefaultTitleIfAllowed(context.getString(media.labelRes))
             }
             EditActionPanel.RunCommand -> {
                 actionType = DeckActionType.RunCommand
-                if (!payloadRequired(actionType) || payload.isBlank()) payload = "notepad"
+                if (previousActionType != DeckActionType.RunCommand || payload.isBlank()) payload = "notepad"
+                setDefaultTitleIfAllowed("Notepad", "notepad")
             }
             EditActionPanel.Utility -> {
                 actionType = DeckActionType.Utility
                 if (utilityChoice(payload) == null) payload = UTILITY_TIME
                 icon = ICON_AUTO
+                iconImageUri = ""
+                val utility = utilityChoice(payload) ?: utilityChoice(UTILITY_TIME)!!
+                setDefaultTitleIfAllowed(context.getString(utility.labelRes))
             }
             EditActionPanel.Widget -> Unit
         }
@@ -6162,466 +6576,522 @@ private fun EditButtonDialog(
             onSelect = { app ->
                 title = app.label
                 subtitle = app.packageName
-                icon = ICON_APPS
+                icon = ""
                 iconImageUri = appIconUri(app.packageName)
                 appPickerVisible = false
             }
         )
     }
 
-    AlertDialog(
-        modifier = Modifier.fillMaxWidth(dialogWidthFraction),
+    Dialog(
         onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false),
-        containerColor = colors.cardBackground,
-        titleContentColor = colors.textPrimary,
-        textContentColor = colors.textPrimary,
-        shape = RoundedCornerShape(12.dp),
-        title = {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                SettingsIconTile(
-                    icon = iconVectorForKey(icon) ?: materialIconFor(button.copy(actionType = actionType, payload = payload)) ?: Icons.Filled.Keyboard,
-                    color = ClassicButtonAccent
-                )
-                Column {
-                    Text(
-                        text = stringResource(R.string.edit_key),
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold,
-                        color = colors.textPrimary
-                    )
-                    Text(
-                        text = title.ifBlank { stringResource(R.string.title) },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = colors.textSecondary,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-                EditActionPanelSlider(
-                    modifier = Modifier.weight(1f),
-                    selected = actionPanel,
-                    locked = actionLocked,
-                    accent = ClassicButtonAccent,
-                    onSelected = ::selectActionPanel
-                )
-            }
-        },
-        text = {
-            LazyColumn(
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        val dialogBackground = colors.cardBackground.compositeOver(colors.backgroundGradient.first())
+        val previewButton = button.copy(
+            title = title,
+            subtitle = subtitle,
+            icon = icon,
+            iconImageUri = iconImageUri,
+            displayMode = displayMode,
+            actionType = actionType,
+            payload = payload,
+            appWidgetId = appWidgetId,
+            spanColumns = spanColumns,
+            spanRows = spanRows
+        )
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth(dialogWidthFraction)
+                .fillMaxHeight(0.88f),
+            color = dialogBackground,
+            contentColor = colors.textPrimary,
+            shape = RoundedCornerShape(12.dp),
+            tonalElevation = 8.dp,
+            shadowElevation = 12.dp
+        ) {
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(max = contentMaxHeight),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+                    .padding(12.dp)
             ) {
-                item {
-                    EditDialogSection(title = stringResource(R.string.key_action)) {
-                        if (actionPanel == EditActionPanel.MediaKey) {
-                            ExposedDropdownMenuBox(
-                                expanded = mediaMenuExpanded,
-                                onExpandedChange = { mediaMenuExpanded = !mediaMenuExpanded }
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    EditActionPanelRail(
+                        selected = actionPanel,
+                        accent = ClassicButtonAccent,
+                        onSelected = ::selectActionPanel
+                    )
+
+                    KeyEditPreviewPane(
+                        modifier = Modifier.width(240.dp),
+                        previewButton = previewButton,
+                        status = status,
+                        classicSolidButtonBackground = classicSolidButtonBackground
+                    )
+
+                    LazyColumn(
+                        modifier = Modifier.weight(1f),
+                        contentPadding = PaddingValues(bottom = 8.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        item {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                OutlinedTextField(
-                                    modifier = Modifier
-                                        .menuAnchor()
-                                        .fillMaxWidth(),
-                                    value = stringResource(selectedMedia.labelRes),
-                                    onValueChange = {},
-                                    readOnly = true,
-                                    label = { Text(stringResource(R.string.media_key_target)) },
-                                    trailingIcon = {
-                                        ExposedDropdownMenuDefaults.TrailingIcon(expanded = mediaMenuExpanded)
-                                    }
+                                ClassicEditDialogButton(
+                                    modifier = Modifier.weight(1f),
+                                    text = stringResource(R.string.cancel),
+                                    onClick = onDismiss
                                 )
-                                ExposedDropdownMenu(
-                                    expanded = mediaMenuExpanded,
-                                    onDismissRequest = { mediaMenuExpanded = false }
-                                ) {
-                                    mediaKeyChoices().forEach { item ->
-                                        DropdownMenuItem(
-                                            text = { Text(stringResource(item.labelRes)) },
-                                            onClick = {
-                                                payload = item.payload
-                                                icon = ICON_AUTO
-                                                mediaMenuExpanded = false
-                                            }
-                                        )
-                                    }
-                                }
+                                ClassicEditDialogButton(
+                                    modifier = Modifier.weight(1.25f),
+                                    text = stringResource(R.string.save),
+                                    icon = Icons.Filled.Save,
+                                    highlighted = true,
+                                    enabled = canSave,
+                                    onClick = { onSave(editedButton()) }
+                                )
                             }
                         }
-                        if (actionPanel == EditActionPanel.Utility) {
-                            ExposedDropdownMenuBox(
-                                expanded = utilityMenuExpanded,
-                                onExpandedChange = { utilityMenuExpanded = !utilityMenuExpanded }
+                        item {
+                            KeyEditSettingRow(
+                                icon = Icons.Filled.TextFields,
+                                title = editActionValueLabel(actionPanel)
                             ) {
-                                OutlinedTextField(
-                                    modifier = Modifier
-                                        .menuAnchor()
-                                        .fillMaxWidth(),
-                                    value = stringResource(selectedUtility.labelRes),
-                                    onValueChange = {},
-                                    readOnly = true,
-                                    label = { Text(stringResource(R.string.utility_target)) },
-                                    trailingIcon = {
-                                        ExposedDropdownMenuDefaults.TrailingIcon(expanded = utilityMenuExpanded)
-                                    }
-                                )
-                                ExposedDropdownMenu(
-                                    expanded = utilityMenuExpanded,
-                                    onDismissRequest = { utilityMenuExpanded = false }
-                                ) {
-                                    utilityChoices().forEach { item ->
-                                        DropdownMenuItem(
-                                            text = { Text(stringResource(item.labelRes)) },
-                                            onClick = {
-                                                payload = item.payload
-                                                icon = ICON_AUTO
-                                                utilityMenuExpanded = false
-                                            }
+                                if (actionPanel == EditActionPanel.MediaKey) {
+                                    ExposedDropdownMenuBox(
+                                        expanded = mediaMenuExpanded,
+                                        onExpandedChange = { mediaMenuExpanded = !mediaMenuExpanded }
+                                    ) {
+                                        OutlinedTextField(
+                                            modifier = Modifier
+                                                .menuAnchor()
+                                                .fillMaxWidth(),
+                                            value = stringResource(selectedMedia.labelRes),
+                                            onValueChange = {},
+                                            readOnly = true,
+                                            trailingIcon = {
+                                                ExposedDropdownMenuDefaults.TrailingIcon(expanded = mediaMenuExpanded)
+                                            },
+                                            textStyle = MaterialTheme.typography.bodyMedium,
+                                            singleLine = true
                                         )
-                                    }
-                                }
-                            }
-                        }
-                        if (actionPanel == EditActionPanel.AppCommand) {
-                            ExposedDropdownMenuBox(
-                                expanded = appCommandMenuExpanded,
-                                onExpandedChange = { appCommandMenuExpanded = !appCommandMenuExpanded }
-                            ) {
-                                OutlinedTextField(
-                                    modifier = Modifier
-                                        .menuAnchor()
-                                        .fillMaxWidth(),
-                                    value = stringResource(selectedAppCommand.labelRes),
-                                    onValueChange = {},
-                                    readOnly = true,
-                                    label = { Text(stringResource(R.string.app_command_target)) },
-                                    trailingIcon = {
-                                        ExposedDropdownMenuDefaults.TrailingIcon(expanded = appCommandMenuExpanded)
-                                    }
-                                )
-                                ExposedDropdownMenu(
-                                    expanded = appCommandMenuExpanded,
-                                    onDismissRequest = { appCommandMenuExpanded = false }
-                                ) {
-                                    appCommandActions.forEach { item ->
-                                        DropdownMenuItem(
-                                            text = { Text(stringResource(item.labelRes)) },
-                                            onClick = {
-                                                payload = item.name
-                                                appCommandMenuExpanded = false
+                                        ExposedDropdownMenu(
+                                            expanded = mediaMenuExpanded,
+                                            onDismissRequest = { mediaMenuExpanded = false }
+                                        ) {
+                                            mediaKeyChoices().forEach { item ->
+                                                DropdownMenuItem(
+                                                    text = { Text(stringResource(item.labelRes)) },
+                                                    onClick = {
+                                                        payload = item.payload
+                                                        icon = ICON_AUTO
+                                                        iconImageUri = ""
+                                                        setDefaultTitleIfAllowed(context.getString(item.labelRes))
+                                                        mediaMenuExpanded = false
+                                                    }
+                                                )
                                             }
-                                        )
+                                        }
                                     }
+                                } else if (actionPanel == EditActionPanel.Utility) {
+                                    ExposedDropdownMenuBox(
+                                        expanded = utilityMenuExpanded,
+                                        onExpandedChange = { utilityMenuExpanded = !utilityMenuExpanded }
+                                    ) {
+                                        OutlinedTextField(
+                                            modifier = Modifier
+                                                .menuAnchor()
+                                                .fillMaxWidth(),
+                                            value = stringResource(selectedUtility.labelRes),
+                                            onValueChange = {},
+                                            readOnly = true,
+                                            trailingIcon = {
+                                                ExposedDropdownMenuDefaults.TrailingIcon(expanded = utilityMenuExpanded)
+                                            },
+                                            textStyle = MaterialTheme.typography.bodyMedium,
+                                            singleLine = true
+                                        )
+                                        ExposedDropdownMenu(
+                                            expanded = utilityMenuExpanded,
+                                            onDismissRequest = { utilityMenuExpanded = false }
+                                        ) {
+                                            utilityChoices().forEach { item ->
+                                                DropdownMenuItem(
+                                                    text = { Text(stringResource(item.labelRes)) },
+                                                    onClick = {
+                                                        payload = item.payload
+                                                        icon = ICON_AUTO
+                                                        iconImageUri = ""
+                                                        setDefaultTitleIfAllowed(context.getString(item.labelRes))
+                                                        utilityMenuExpanded = false
+                                                    }
+                                                )
+                                            }
+                                        }
+                                    }
+                                } else if (actionPanel == EditActionPanel.AppCommand) {
+                                    ExposedDropdownMenuBox(
+                                        expanded = appCommandMenuExpanded,
+                                        onExpandedChange = { appCommandMenuExpanded = !appCommandMenuExpanded }
+                                    ) {
+                                        OutlinedTextField(
+                                            modifier = Modifier
+                                                .menuAnchor()
+                                                .fillMaxWidth(),
+                                            value = stringResource(selectedAppCommand.labelRes),
+                                            onValueChange = {},
+                                            readOnly = true,
+                                            trailingIcon = {
+                                                ExposedDropdownMenuDefaults.TrailingIcon(expanded = appCommandMenuExpanded)
+                                            },
+                                            textStyle = MaterialTheme.typography.bodyMedium,
+                                            singleLine = true
+                                        )
+                                        ExposedDropdownMenu(
+                                            expanded = appCommandMenuExpanded,
+                                            onDismissRequest = { appCommandMenuExpanded = false }
+                                        ) {
+                                            appCommandActions.forEach { item ->
+                                                DropdownMenuItem(
+                                                    text = { Text(stringResource(item.labelRes)) },
+                                                    onClick = {
+                                                        payload = item.name
+                                                        setDefaultTitleIfAllowed(context.getString(item.labelRes))
+                                                        appCommandMenuExpanded = false
+                                                    }
+                                                )
+                                            }
+                                        }
+                                    }
+                                } else if (actionPanel == EditActionPanel.Widget) {
+                                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            OutlinedButton(
+                                                modifier = Modifier.weight(1f),
+                                                shape = RoundedCornerShape(8.dp),
+                                                onClick = { onPickWidget(editedButton()) }
+                                            ) {
+                                                Text(
+                                                    text = stringResource(if (appWidgetId == INVALID_APP_WIDGET_ID) R.string.pick_widget else R.string.change_widget),
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            }
+                                            OutlinedButton(
+                                                modifier = Modifier.weight(1f),
+                                                shape = RoundedCornerShape(8.dp),
+                                                enabled = appWidgetId != INVALID_APP_WIDGET_ID,
+                                                onClick = { appWidgetId = INVALID_APP_WIDGET_ID }
+                                            ) {
+                                                Text(
+                                                    text = stringResource(R.string.clear_widget),
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            }
+                                        }
+                                        OutlinedButton(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            shape = RoundedCornerShape(8.dp),
+                                            enabled = appWidgetId != INVALID_APP_WIDGET_ID,
+                                            onClick = { appWidgetTouchable = !appWidgetTouchable }
+                                        ) {
+                                            Text(
+                                                text = stringResource(if (appWidgetTouchable) R.string.widget_touch_on else R.string.widget_touch_off),
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+                                    }
+                                } else {
+                                    OutlinedTextField(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        value = payload,
+                                        onValueChange = { payload = it },
+                                        enabled = payloadRequired(actionType),
+                                        textStyle = MaterialTheme.typography.bodyMedium,
+                                        singleLine = true
+                                    )
                                 }
                             }
                         }
                         if (buttonAppAction(actionType, payload) == DeckActionType.BluetoothStatus) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(colors.toggleBackground.copy(alpha = 0.5f))
-                                    .padding(horizontal = 10.dp, vertical = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                Box(
+                            item {
+                                Row(
                                     modifier = Modifier
-                                        .size(10.dp)
-                                        .clip(RoundedCornerShape(50))
-                                        .background(statusDotColor(status.state))
-                                )
-                                Text(
-                                    text = stringResource(status.state.labelRes()),
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = colors.textSecondary,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-                        }
-                        if (actionPanel == EditActionPanel.Widget) {
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                OutlinedButton(
-                                    modifier = Modifier.weight(1f),
-                                    shape = RoundedCornerShape(8.dp),
-                                    onClick = { onPickWidget(editedButton()) }
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(colors.toggleBackground.copy(alpha = 0.5f))
+                                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
-                                    Text(
-                                        text = stringResource(if (appWidgetId == INVALID_APP_WIDGET_ID) R.string.pick_widget else R.string.change_widget),
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
+                                    Box(
+                                        modifier = Modifier
+                                            .size(10.dp)
+                                            .clip(CircleShape)
+                                            .background(statusDotColor(status.state))
                                     )
-                                }
-                                OutlinedButton(
-                                    modifier = Modifier.weight(1f),
-                                    shape = RoundedCornerShape(8.dp),
-                                    enabled = appWidgetId != INVALID_APP_WIDGET_ID,
-                                    onClick = { appWidgetId = INVALID_APP_WIDGET_ID }
-                                ) {
                                     Text(
-                                        text = stringResource(R.string.clear_widget),
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                }
-                                OutlinedButton(
-                                    modifier = Modifier.weight(1f),
-                                    shape = RoundedCornerShape(8.dp),
-                                    enabled = appWidgetId != INVALID_APP_WIDGET_ID,
-                                    onClick = { appWidgetTouchable = !appWidgetTouchable }
-                                ) {
-                                    Text(
-                                        text = stringResource(if (appWidgetTouchable) R.string.widget_touch_on else R.string.widget_touch_off),
+                                        text = stringResource(status.state.labelRes()),
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = colors.textSecondary,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
                                     )
                                 }
                             }
                         }
-                        if (actionPanel != EditActionPanel.AppCommand &&
-                            actionPanel != EditActionPanel.MediaKey &&
-                            actionPanel != EditActionPanel.Utility &&
-                            actionPanel != EditActionPanel.Widget
-                        ) {
-                            OutlinedTextField(
-                                modifier = Modifier.fillMaxWidth(),
-                                value = payload,
-                                onValueChange = { payload = it },
-                                label = { Text(stringResource(R.string.payload)) },
-                                enabled = payloadRequired(actionType),
-                                singleLine = true
-                            )
-                        }
-                    }
-                }
-                item {
-                    EditDialogSection(title = stringResource(R.string.key_content)) {
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            OutlinedTextField(
-                                modifier = Modifier.weight(1f),
-                                value = title,
-                                onValueChange = { title = it },
-                                label = { Text(stringResource(R.string.title)) },
-                                singleLine = true
-                            )
-                            OutlinedTextField(
-                                modifier = Modifier.weight(1f),
-                                value = subtitle,
-                                onValueChange = { subtitle = it },
-                                label = { Text(stringResource(R.string.subtitle)) },
-                                singleLine = true
-                            )
-                        }
-                    }
-                }
-                item {
-                    EditDialogSection(title = stringResource(R.string.key_appearance)) {
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            ExposedDropdownMenuBox(
-                                expanded = iconMenuExpanded,
-                                onExpandedChange = { iconMenuExpanded = !iconMenuExpanded }
-                            ) {
-                                OutlinedTextField(
-                                    modifier = Modifier
-                                        .menuAnchor()
-                                        .weight(1f),
-                                    value = stringResource(selectedIcon.labelRes),
-                                    onValueChange = {},
-                                    readOnly = true,
-                                    label = { Text(stringResource(R.string.icon)) },
-                                    singleLine = true,
-                                    trailingIcon = {
-                                        ExposedDropdownMenuDefaults.TrailingIcon(expanded = iconMenuExpanded)
+                        if (actionPanel != EditActionPanel.Widget) {
+                            item {
+                                KeyEditSettingRow(
+                                    icon = Icons.Filled.Code,
+                                    title = stringResource(R.string.key_content)
+                                ) {
+                                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        OutlinedTextField(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            value = title,
+                                            onValueChange = { title = it },
+                                            label = { Text(stringResource(R.string.title)) },
+                                            textStyle = MaterialTheme.typography.bodyMedium,
+                                            singleLine = true
+                                        )
+                                        OutlinedTextField(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            value = subtitle,
+                                            onValueChange = { subtitle = it },
+                                            label = { Text(stringResource(R.string.subtitle)) },
+                                            textStyle = MaterialTheme.typography.bodyMedium,
+                                            singleLine = true
+                                        )
                                     }
-                                )
-                                ExposedDropdownMenu(
-                                    expanded = iconMenuExpanded,
-                                    onDismissRequest = { iconMenuExpanded = false }
+                                }
+                            }
+                            item {
+                                KeyEditSettingRow(
+                                    icon = if (iconImageUri.isBlank()) Icons.Filled.Keyboard else Icons.Filled.Image,
+                                    title = stringResource(R.string.key_appearance)
                                 ) {
-                                    iconChoices().forEach { item ->
-                                        DropdownMenuItem(
-                                            text = {
-                                                Row(
-                                                    verticalAlignment = Alignment.CenterVertically,
-                                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                                                ) {
-                                                    iconVectorForKey(item.key)?.let { vector ->
+                                    ExposedDropdownMenuBox(
+                                        expanded = iconMenuExpanded,
+                                        onExpandedChange = { iconMenuExpanded = !iconMenuExpanded }
+                                    ) {
+                                        OutlinedTextField(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .menuAnchor(),
+                                            value = stringResource(selectedIconLabelRes),
+                                            onValueChange = {},
+                                            readOnly = true,
+                                            textStyle = MaterialTheme.typography.bodyMedium,
+                                            singleLine = true,
+                                            trailingIcon = {
+                                                ExposedDropdownMenuDefaults.TrailingIcon(expanded = iconMenuExpanded)
+                                            }
+                                        )
+                                        ExposedDropdownMenu(
+                                            expanded = iconMenuExpanded,
+                                            onDismissRequest = { iconMenuExpanded = false }
+                                        ) {
+                                            DropdownMenuItem(
+                                                text = {
+                                                    Row(
+                                                        verticalAlignment = Alignment.CenterVertically,
+                                                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                                    ) {
                                                         Icon(
-                                                            imageVector = vector,
+                                                            imageVector = Icons.Filled.Image,
                                                             contentDescription = null,
                                                             modifier = Modifier.size(22.dp)
                                                         )
-                                                    } ?: Box(modifier = Modifier.size(22.dp))
-                                                    Text(stringResource(item.labelRes))
+                                                        Text(
+                                                            stringResource(
+                                                                if (iconImageUri.isBlank()) R.string.pick_image else R.string.change_image
+                                                            )
+                                                        )
+                                                    }
+                                                },
+                                                onClick = {
+                                                    iconMenuExpanded = false
+                                                    imagePicker.launch(arrayOf("image/*"))
                                                 }
-                                            },
-                                            onClick = {
-                                                icon = item.key
-                                                iconMenuExpanded = false
+                                            )
+                                            DropdownMenuItem(
+                                                text = {
+                                                    Row(
+                                                        verticalAlignment = Alignment.CenterVertically,
+                                                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                                    ) {
+                                                        Icon(
+                                                            imageVector = Icons.Filled.Apps,
+                                                            contentDescription = null,
+                                                            modifier = Modifier.size(22.dp)
+                                                        )
+                                                        Text(stringResource(R.string.pick_app_icon))
+                                                    }
+                                                },
+                                                onClick = {
+                                                    iconMenuExpanded = false
+                                                    appPickerVisible = true
+                                                }
+                                            )
+                                            iconChoices().forEach { item ->
+                                                DropdownMenuItem(
+                                                    text = {
+                                                        Row(
+                                                            verticalAlignment = Alignment.CenterVertically,
+                                                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                                        ) {
+                                                            iconVectorForKey(item.key)?.let { vector ->
+                                                                Icon(
+                                                                    imageVector = vector,
+                                                                    contentDescription = null,
+                                                                    modifier = Modifier.size(22.dp)
+                                                                )
+                                                            } ?: Box(modifier = Modifier.size(22.dp))
+                                                            Text(stringResource(item.labelRes))
+                                                        }
+                                                    },
+                                                    onClick = {
+                                                        icon = item.key
+                                                        iconImageUri = ""
+                                                        iconMenuExpanded = false
+                                                    }
+                                                )
                                             }
-                                        )
+                                        }
                                     }
                                 }
                             }
-
-                            Row(
-                                modifier = Modifier.weight(1.2f),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                DeckDisplayMode.values().forEach { mode ->
-                                    OutlinedButton(
-                                        modifier = Modifier.weight(1f),
-                                        shape = RoundedCornerShape(8.dp),
-                                        onClick = { displayMode = mode }
-                                    ) {
-                                        Text(
-                                            text = stringResource(mode.labelRes),
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
+                            item {
+                                KeyEditSettingRow(
+                                    icon = Icons.Filled.GridView,
+                                    title = stringResource(R.string.icon)
+                                ) {
+                                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            DeckDisplayMode.values().forEach { mode ->
+                                                OutlinedButton(
+                                                    modifier = Modifier.weight(1f),
+                                                    shape = RoundedCornerShape(8.dp),
+                                                    onClick = { displayMode = mode }
+                                                ) {
+                                                    Text(
+                                                        text = stringResource(mode.labelRes),
+                                                        style = MaterialTheme.typography.labelMedium,
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Ellipsis
+                                                    )
+                                                }
+                                            }
+                                        }
                                     }
                                 }
-                            }
-                        }
-
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            SpanStepper(
-                                modifier = Modifier.weight(1f),
-                                label = stringResource(R.string.span_columns),
-                                value = spanColumns,
-                                range = 1..MAX_BUTTON_SPAN_COLUMNS,
-                                onValueChange = { spanColumns = it }
-                            )
-                            SpanStepper(
-                                modifier = Modifier.weight(1f),
-                                label = stringResource(R.string.span_rows),
-                                value = spanRows,
-                                range = 1..MAX_BUTTON_SPAN_ROWS,
-                                onValueChange = { spanRows = it }
-                            )
-                        }
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            OutlinedButton(
-                                modifier = Modifier.weight(1f),
-                                shape = RoundedCornerShape(8.dp),
-                                onClick = { imagePicker.launch(arrayOf("image/*")) }
-                            ) {
-                                Text(
-                                    text = stringResource(if (iconImageUri.isBlank()) R.string.pick_image else R.string.change_image),
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-                            OutlinedButton(
-                                modifier = Modifier.weight(1f),
-                                shape = RoundedCornerShape(8.dp),
-                                onClick = {
-                                    appPickerVisible = true
-                                }
-                            ) {
-                                Text(
-                                    text = stringResource(R.string.pick_app_icon),
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-                        }
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            OutlinedButton(
-                                modifier = Modifier.weight(1f),
-                                shape = RoundedCornerShape(8.dp),
-                                enabled = iconImageUri.isNotBlank(),
-                                onClick = { iconImageUri = "" }
-                            ) {
-                                Text(
-                                    text = stringResource(R.string.clear_image),
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
                             }
                         }
                     }
                 }
             }
-        },
-        confirmButton = {
-            TextButton(
-                enabled = canSave,
-                onClick = {
-                    onSave(editedButton())
-                }
-            ) {
-                Text(stringResource(R.string.save))
-            }
-        },
-        dismissButton = {
-            Row {
-                TextButton(
-                    onClick = onDelete
-                ) {
-                    Text(stringResource(R.string.delete))
-                }
-                TextButton(onClick = onDismiss) {
-                    Text(stringResource(R.string.cancel))
-                }
-            }
         }
+    }
+}
+@Composable
+private fun TrashDropTarget(active: Boolean) {
+    val colors = LocalDeckThemeColors.current
+    val background by animateColorAsState(
+        targetValue = if (active) Color(0xFFE5484D) else colors.cardBackground.copy(alpha = 0.96f),
+        label = "trashDropBackground"
     )
+    val border by animateColorAsState(
+        targetValue = if (active) Color(0xFFFF9A9E) else ClassicButtonAccent.copy(alpha = 0.5f),
+        label = "trashDropBorder"
+    )
+    val iconTint by animateColorAsState(
+        targetValue = if (active) Color.White else colors.textPrimary,
+        label = "trashDropIcon"
+    )
+    Surface(
+        modifier = Modifier
+            .size(width = 138.dp, height = 58.dp)
+            .border(1.dp, border, RoundedCornerShape(14.dp)),
+        shape = RoundedCornerShape(14.dp),
+        color = background,
+        tonalElevation = 8.dp,
+        shadowElevation = 10.dp
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center
+        ) {
+            Icon(
+                imageVector = Icons.Filled.Delete,
+                contentDescription = stringResource(R.string.delete),
+                tint = iconTint,
+                modifier = Modifier.size(if (active) 30.dp else 26.dp)
+            )
+        }
+    }
 }
 
 @Composable
-private fun EditActionPanelSlider(
-    modifier: Modifier = Modifier,
+private fun EditActionPanelRail(
     selected: EditActionPanel,
-    locked: Boolean,
     accent: Color,
     onSelected: (EditActionPanel) -> Unit
 ) {
     val colors = LocalDeckThemeColors.current
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .horizontalScroll(rememberScrollState()),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    Column(
+        modifier = Modifier
+            .width(88.dp)
+            .fillMaxHeight()
+            .clip(RoundedCornerShape(12.dp))
+            .background(colors.toggleBackground.copy(alpha = 0.46f))
+            .border(1.dp, colors.cardBorder, RoundedCornerShape(12.dp))
+            .verticalScroll(rememberScrollState())
+            .padding(6.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
         EditActionPanel.values().forEach { panel ->
             val active = panel == selected
-            val enabled = !locked || active
             Surface(
-                modifier = Modifier.width(118.dp),
-                shape = RoundedCornerShape(8.dp),
-                color = if (active) {
-                    accent.copy(alpha = if (isSystemInDarkTheme()) 0.36f else 0.18f)
-                } else {
-                    colors.toggleBackground.copy(alpha = 0.58f)
-                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(78.dp),
+                shape = RoundedCornerShape(10.dp),
+                color = if (active) accent.copy(alpha = if (isSystemInDarkTheme()) 0.30f else 0.22f) else Color.Transparent,
                 contentColor = if (active) accent else colors.textSecondary,
-                enabled = enabled,
+                enabled = true,
                 onClick = { onSelected(panel) }
             ) {
-                Row(
+                Column(
                     modifier = Modifier
+                        .fillMaxSize()
                         .border(
                             1.dp,
-                            if (active) accent.copy(alpha = 0.56f) else colors.cardBorder,
-                            RoundedCornerShape(8.dp)
+                            if (active) accent.copy(alpha = 0.75f) else Color.Transparent,
+                            RoundedCornerShape(10.dp)
                         )
-                        .padding(horizontal = 10.dp, vertical = 9.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        .padding(horizontal = 4.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
                 ) {
                     Icon(
                         imageVector = editActionPanelIcon(panel),
                         contentDescription = null,
                         tint = if (active) accent else colors.textSecondary,
-                        modifier = Modifier.size(18.dp)
+                        modifier = Modifier.size(28.dp)
                     )
+                    Spacer(modifier = Modifier.height(8.dp))
                     Text(
                         text = stringResource(panel.labelRes),
                         style = MaterialTheme.typography.labelMedium,
@@ -6632,6 +7102,130 @@ private fun EditActionPanelSlider(
                     )
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun KeyEditPreviewPane(
+    modifier: Modifier = Modifier,
+    previewButton: DeckButton,
+    status: HidStatus,
+    classicSolidButtonBackground: Boolean
+) {
+    val colors = LocalDeckThemeColors.current
+    val previewRatio = previewButton.spanColumns.coerceAtLeast(1).toFloat() /
+        previewButton.spanRows.coerceAtLeast(1).toFloat()
+    val paneBackground = colors.toggleBackground.compositeOver(colors.backgroundGradient.first())
+    Column(
+        modifier = modifier
+            .fillMaxHeight()
+            .clip(RoundedCornerShape(12.dp))
+            .background(paneBackground)
+            .border(1.dp, colors.cardBorder, RoundedCornerShape(12.dp))
+            .padding(16.dp),
+        verticalArrangement = Arrangement.Center
+    ) {
+        Text(
+            text = stringResource(R.string.edit_key),
+            style = MaterialTheme.typography.headlineSmall,
+            fontWeight = FontWeight.Bold,
+            color = colors.textPrimary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+        Spacer(modifier = Modifier.height(6.dp))
+        Text(
+            text = previewButton.title.ifBlank { stringResource(R.string.title) },
+            style = MaterialTheme.typography.bodyMedium,
+            color = colors.textSecondary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+        Spacer(modifier = Modifier.height(18.dp))
+        Text(
+            text = stringResource(R.string.preview),
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = ClassicButtonAccent
+        )
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f)
+                .padding(top = 8.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+                val spanColumns = previewButton.spanColumns.coerceAtLeast(1)
+                val spanRows = previewButton.spanRows.coerceAtLeast(1)
+                val previewWidth: Dp
+                val previewHeight: Dp
+                if (maxWidth / maxHeight > previewRatio) {
+                    previewHeight = maxHeight
+                    previewWidth = maxHeight * previewRatio
+                } else {
+                    previewWidth = maxWidth
+                    previewHeight = maxWidth / previewRatio
+                }
+                val previewCellSize = previewWidth / spanColumns.toFloat()
+                DeckKey(
+                    modifier = Modifier.size(width = previewWidth, height = previewHeight),
+                    button = previewButton,
+                    status = status,
+                    appWidgetHost = null,
+                    appWidgetManager = null,
+                    visualMode = DeckUiMode.Classic,
+                    classicSolidButtonBackground = classicSolidButtonBackground,
+                    enabled = true,
+                    previewMode = false,
+                    columns = spanColumns,
+                    slot = 0,
+                    cellSize = previewCellSize,
+                    spacing = 0.dp,
+                    onPressed = {},
+                    onPressFeedback = {},
+                    onReleaseFeedback = {},
+                    onEdit = {},
+                    onMove = {}
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun KeyEditSettingRow(
+    icon: ImageVector,
+    title: String,
+    content: @Composable () -> Unit
+) {
+    val colors = LocalDeckThemeColors.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(colors.toggleBackground.copy(alpha = 0.48f))
+            .border(1.dp, colors.cardBorder, RoundedCornerShape(10.dp))
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        SettingsIconTile(icon, ClassicButtonAccent)
+        Text(
+            modifier = Modifier.width(92.dp),
+            text = title,
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold,
+            color = colors.textPrimary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+        Box(
+            modifier = Modifier.weight(1f),
+            contentAlignment = Alignment.CenterEnd
+        ) {
+            content()
         }
     }
 }
@@ -6664,18 +7258,97 @@ private fun editActionPanelIcon(panel: EditActionPanel): ImageVector {
 }
 
 @Composable
+private fun editActionValueLabel(panel: EditActionPanel): String {
+    return when (panel) {
+        EditActionPanel.AppCommand -> stringResource(R.string.edit_value_app)
+        EditActionPanel.KeyboardInput -> stringResource(R.string.edit_value_keyboard)
+        EditActionPanel.Widget -> stringResource(R.string.edit_value_widget)
+        EditActionPanel.MediaKey -> stringResource(R.string.edit_value_media)
+        EditActionPanel.RunCommand -> stringResource(R.string.edit_value_command)
+        EditActionPanel.Utility -> stringResource(R.string.edit_value_utility)
+    }
+}
+
+@Composable
 private fun EditDialogSection(
+    icon: ImageVector,
     title: String,
     content: @Composable ColumnScope.() -> Unit
 ) {
-    SettingsCard(accent = ClassicButtonAccent) {
+    val colors = LocalDeckThemeColors.current
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(colors.toggleBackground.copy(alpha = 0.42f))
+            .border(1.dp, ClassicButtonAccent.copy(alpha = 0.22f), RoundedCornerShape(8.dp)),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(colors.cardBackground.copy(alpha = 0.55f))
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            SettingsIconTile(icon, ClassicButtonAccent)
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = colors.textPrimary
+            )
+        }
+        Column(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            content()
+        }
+    }
+}
+
+@Composable
+private fun ClassicEditDialogButton(
+    modifier: Modifier = Modifier,
+    text: String,
+    icon: ImageVector? = null,
+    highlighted: Boolean = false,
+    enabled: Boolean = true,
+    onClick: () -> Unit
+) {
+    val colors = LocalDeckThemeColors.current
+    val background = if (highlighted) ClassicButtonAccent else colors.toggleBackground.copy(alpha = 0.48f)
+    val contentColor = if (highlighted) Color.White else colors.textPrimary
+    Button(
+        modifier = modifier,
+        enabled = enabled,
+        onClick = onClick,
+        shape = RoundedCornerShape(8.dp),
+        colors = ButtonDefaults.buttonColors(
+            containerColor = background,
+            contentColor = contentColor,
+            disabledContainerColor = colors.toggleBackground.copy(alpha = 0.25f),
+            disabledContentColor = colors.textSecondary.copy(alpha = 0.45f)
+        ),
+        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp)
+    ) {
+        if (icon != null) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                modifier = Modifier.size(19.dp)
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+        }
         Text(
-            text = title,
+            text = text,
             style = MaterialTheme.typography.titleSmall,
             fontWeight = FontWeight.SemiBold,
-            color = ClassicButtonAccent
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
         )
-        content()
     }
 }
 
@@ -6820,23 +7493,44 @@ private fun defaultButtons(): List<DeckButton> {
     val colors = defaultDeckColors()
 
     return listOf(
-        DeckButton(1, "Settings", "Deck", "SET", "", DeckDisplayMode.IconAndText, DeckActionType.Settings, "", colors[4]),
-        DeckButton(2, "Bluetooth", "Status", "BT", "", DeckDisplayMode.IconAndText, DeckActionType.BluetoothStatus, "", colors[0]),
-        DeckButton(3, "Mute", "Media", "M", "", DeckDisplayMode.IconOnly, DeckActionType.MediaKey, "MUTE", colors[0]),
-        DeckButton(4, "Play", "Pause", "P", "", DeckDisplayMode.IconOnly, DeckActionType.MediaKey, "PLAY_PAUSE", colors[1]),
-        DeckButton(5, "Vol -", "Media", "-", "", DeckDisplayMode.IconOnly, DeckActionType.MediaKey, "VOLUME_DOWN", colors[0]),
-        DeckButton(6, "Vol +", "Media", "+", "", DeckDisplayMode.IconOnly, DeckActionType.MediaKey, "VOLUME_UP", colors[2]),
-        DeckButton(7, "Previous", "Page", "<<", "", DeckDisplayMode.IconOnly, DeckActionType.PreviousPage, "", colors[3]),
-        DeckButton(8, "Next", "Page", ">>", "", DeckDisplayMode.IconOnly, DeckActionType.NextPage, "", colors[4]),
-        DeckButton(9, "Desktop", "Win+D", "DES", "", DeckDisplayMode.IconAndText, DeckActionType.Hotkey, "WIN+D", colors[4]),
-        DeckButton(10, "Explorer", "Win+E", "EXP", "", DeckDisplayMode.IconAndText, DeckActionType.Hotkey, "WIN+E", colors[2]),
-        DeckButton(11, "Task View", "Win+Tab", "TAB", "", DeckDisplayMode.IconAndText, DeckActionType.Hotkey, "WIN+TAB", colors[1]),
-        DeckButton(12, "Run", "Win+R", "RUN", "", DeckDisplayMode.IconAndText, DeckActionType.Hotkey, "WIN+R", colors[3]),
-        DeckButton(13, "Time", "Android clock", "TIME", "", DeckDisplayMode.KeywordOnly, DeckActionType.Utility, UTILITY_TIME, colors[5], spanColumns = 2),
-        DeckButton(14, "Weather", "Open forecast", "WX", "", DeckDisplayMode.IconAndText, DeckActionType.Utility, UTILITY_WEATHER, colors[2], position = 14, spanColumns = 2)
-    ).mapIndexed { index, button ->
-        if (button.id == 14) button else button.copy(position = index)
-    }
+        DeckButton(1, "Bluetooth", "Connection", ICON_AUTO, "", DeckDisplayMode.IconAndText, DeckActionType.AppCommand, DeckActionType.BluetoothStatus.name, colors[0], position = 0),
+        DeckButton(2, "Play", "Pause", ICON_AUTO, "", DeckDisplayMode.IconAndText, DeckActionType.MediaKey, MEDIA_PLAY_PAUSE, colors[1], position = 1),
+        DeckButton(3, "Mute", "Media", ICON_AUTO, "", DeckDisplayMode.IconAndText, DeckActionType.MediaKey, MEDIA_MUTE, colors[0], position = 2),
+        DeckButton(4, "Vol -", "Media", ICON_AUTO, "", DeckDisplayMode.IconAndText, DeckActionType.MediaKey, MEDIA_VOLUME_DOWN, colors[0], position = 3),
+        DeckButton(5, "Vol +", "Media", ICON_AUTO, "", DeckDisplayMode.IconAndText, DeckActionType.MediaKey, MEDIA_VOLUME_UP, colors[2], position = 4),
+        DeckButton(6, "Previous", "Track", ICON_AUTO, "", DeckDisplayMode.IconAndText, DeckActionType.MediaKey, MEDIA_PREVIOUS, colors[3], position = 6),
+        DeckButton(7, "Stop", "Media", ICON_AUTO, "", DeckDisplayMode.IconAndText, DeckActionType.MediaKey, MEDIA_STOP, colors[5], position = 7),
+        DeckButton(8, "Next", "Track", ICON_AUTO, "", DeckDisplayMode.IconAndText, DeckActionType.MediaKey, MEDIA_NEXT, colors[4], position = 8),
+        DeckButton(9, "Desktop", "Win+D", ICON_AUTO, "", DeckDisplayMode.IconAndText, DeckActionType.Hotkey, "WIN+D", colors[4], position = 9),
+        DeckButton(10, "Explorer", "Win+E", ICON_AUTO, "", DeckDisplayMode.IconAndText, DeckActionType.Hotkey, "WIN+E", colors[2], position = 10),
+        DeckButton(11, "Task View", "Win+Tab", ICON_AUTO, "", DeckDisplayMode.IconAndText, DeckActionType.Hotkey, "WIN+TAB", colors[1], position = 11),
+        DeckButton(12, "Run", "Win+R", ICON_AUTO, "", DeckDisplayMode.IconAndText, DeckActionType.Hotkey, "WIN+R", colors[3], position = 12),
+        DeckButton(13, "Time", "Clock", ICON_AUTO, "", DeckDisplayMode.IconAndText, DeckActionType.Utility, UTILITY_TIME, colors[5], position = 13, spanColumns = 2),
+        DeckButton(14, "Weather", "Forecast", ICON_AUTO, "", DeckDisplayMode.IconAndText, DeckActionType.Utility, UTILITY_WEATHER, colors[2], position = 15),
+        DeckButton(15, "Settings", "Deck", ICON_SETTINGS, "", DeckDisplayMode.IconAndText, DeckActionType.Settings, "", colors[4], position = 16)
+    )
+}
+
+private fun defaultSecondPageButtons(): List<DeckButton> {
+    val colors = defaultDeckColors()
+
+    return listOf(
+        DeckButton(16, "Prev Page", "Deck", ICON_PREVIOUS, "", DeckDisplayMode.IconAndText, DeckActionType.AppCommand, DeckActionType.PreviousPage.name, colors[3], position = 0),
+        DeckButton(17, "Next Page", "Deck", ICON_NEXT, "", DeckDisplayMode.IconAndText, DeckActionType.AppCommand, DeckActionType.NextPage.name, colors[4], position = 1),
+        DeckButton(18, "Copy", "Ctrl+C", ICON_KEYBOARD, "", DeckDisplayMode.IconAndText, DeckActionType.Hotkey, "CTRL+C", colors[2], position = 2),
+        DeckButton(19, "Paste", "Ctrl+V", ICON_KEYBOARD, "", DeckDisplayMode.IconAndText, DeckActionType.Hotkey, "CTRL+V", colors[2], position = 3),
+        DeckButton(20, "Select All", "Ctrl+A", ICON_KEYBOARD, "", DeckDisplayMode.IconAndText, DeckActionType.Hotkey, "CTRL+A", colors[1], position = 4),
+        DeckButton(21, "Screenshot", "Win+Shift+S", ICON_KEYBOARD, "", DeckDisplayMode.IconAndText, DeckActionType.Hotkey, "WIN+SHIFT+S", colors[0], position = 5),
+        DeckButton(22, "Notepad", "Run", ICON_APPS, "", DeckDisplayMode.IconAndText, DeckActionType.RunCommand, "notepad", colors[3], position = 6),
+        DeckButton(23, "Calculator", "Run", ICON_APPS, "", DeckDisplayMode.IconAndText, DeckActionType.RunCommand, "calc", colors[5], position = 7),
+        DeckButton(24, "Paint", "Run", ICON_APPS, "", DeckDisplayMode.IconAndText, DeckActionType.RunCommand, "mspaint", colors[1], position = 8),
+        DeckButton(25, "Terminal", "Run", ICON_CODE, "", DeckDisplayMode.IconAndText, DeckActionType.RunCommand, "cmd", colors[0], position = 9),
+        DeckButton(26, "Lock", "Win+L", ICON_KEYBOARD, "", DeckDisplayMode.IconAndText, DeckActionType.Hotkey, "WIN+L", colors[4], position = 10),
+        DeckButton(27, "Task Manager", "Ctrl+Shift+Esc", ICON_KEYBOARD, "", DeckDisplayMode.IconAndText, DeckActionType.Hotkey, "CTRL+SHIFT+ESC", colors[5], position = 11),
+        DeckButton(28, "Hello", "Text", ICON_TEXT, "", DeckDisplayMode.IconAndText, DeckActionType.Text, "Hello from MobileDeck", colors[2], position = 12, spanColumns = 2),
+        DeckButton(29, "Control", "Panel", ICON_APPS, "", DeckDisplayMode.IconAndText, DeckActionType.RunCommand, "control", colors[3], position = 14),
+        DeckButton(30, "Refresh", "F5", ICON_KEYBOARD, "", DeckDisplayMode.IconAndText, DeckActionType.Hotkey, "F5", colors[0], position = 15)
+    )
 }
 
 private fun loadDeckButtons(context: Context): List<DeckButton> {
@@ -6862,20 +7556,21 @@ private fun loadDeckPages(context: Context): List<DeckPageConfig> {
         ?: return defaultDeckPages(loadDeckButtons(context))
     return runCatching {
         val array = JSONArray(raw)
-        List(array.length()) { index ->
+        val pages = List(array.length()) { index ->
             val item = array.getJSONObject(index)
             val buttons = item.optJSONArray("buttons") ?: JSONArray()
             DeckPageConfig(
                 id = item.getInt("id"),
                 name = item.optString("name", "Page ${index + 1}"),
-                buttons = normalizeDeckButtons(
-                    List(buttons.length()) { buttonIndex ->
-                        decodeDeckButton(buttons.getJSONObject(buttonIndex), buttonIndex)
-                    }
-                )
+                buttons = List(buttons.length()) { buttonIndex ->
+                    decodeDeckButton(buttons.getJSONObject(buttonIndex), buttonIndex)
+                }
             )
-        }.ifEmpty {
+        }
+        if (pages.isEmpty()) {
             defaultDeckPages()
+        } else {
+            ensureSettingsButton(pages)
         }
     }.getOrDefault(defaultDeckPages())
 }
@@ -6883,7 +7578,7 @@ private fun loadDeckPages(context: Context): List<DeckPageConfig> {
 private fun defaultDeckPages(firstPageButtons: List<DeckButton> = defaultButtons()): List<DeckPageConfig> {
     return listOf(
         DeckPageConfig(1, "Page 1", firstPageButtons),
-        DeckPageConfig(2, "Page 2", emptyList())
+        DeckPageConfig(2, "Page 2", defaultSecondPageButtons())
     )
 }
 
@@ -6994,7 +7689,7 @@ private fun normalizeDeckButtons(buttons: List<DeckButton>): List<DeckButton> {
         id = nextDeckButtonId(buttons),
         title = "Settings",
         subtitle = "Deck",
-        icon = "SET",
+        icon = ICON_SETTINGS,
         iconImageUri = "",
         displayMode = DeckDisplayMode.IconAndText,
         actionType = DeckActionType.Settings,
@@ -7003,6 +7698,10 @@ private fun normalizeDeckButtons(buttons: List<DeckButton>): List<DeckButton> {
         position = nextOpenPosition(buttons, DEFAULT_COLUMNS * DEFAULT_ROWS - 1)
     )
     return listOf(settingsButton) + buttons
+}
+
+private fun ensureSettingsButton(pages: List<DeckPageConfig>): List<DeckPageConfig> {
+    return if (hasSettingsButton(pages)) pages else restoreSettingsButton(pages, DEFAULT_COLUMNS, DEFAULT_ROWS)
 }
 
 private fun hasSettingsButton(pages: List<DeckPageConfig>): Boolean {
@@ -7060,7 +7759,7 @@ private fun settingsDeckButton(existingButtons: List<DeckButton>, position: Int)
         id = nextDeckButtonId(existingButtons),
         title = "Settings",
         subtitle = "Deck",
-        icon = "SET",
+        icon = ICON_SETTINGS,
         iconImageUri = "",
         displayMode = DeckDisplayMode.IconAndText,
         actionType = DeckActionType.Settings,
@@ -7192,6 +7891,14 @@ private fun saveButtonVibrationLevel(context: Context, level: ButtonVibrationLev
     context.deckPrefs().edit().putString(PREF_BUTTON_VIBRATION_LEVEL, level.name).apply()
 }
 
+private fun loadClassicSolidButtonBackground(context: Context): Boolean {
+    return context.deckPrefs().getBoolean(PREF_CLASSIC_SOLID_BUTTON_BACKGROUND, true)
+}
+
+private fun saveClassicSolidButtonBackground(context: Context, enabled: Boolean) {
+    context.deckPrefs().edit().putBoolean(PREF_CLASSIC_SOLID_BUTTON_BACKGROUND, enabled).apply()
+}
+
 private fun loadDeckUiMode(context: Context): DeckUiMode {
     return runCatching {
         DeckUiMode.valueOf(context.deckPrefs().getString(PREF_DECK_UI_MODE, null) ?: DeckUiMode.Classic.name)
@@ -7259,6 +7966,30 @@ private fun canPlaceButton(
     return slots.intersect(otherSlots).isEmpty()
 }
 
+private fun buttonAtPosition(
+    buttons: List<DeckButton>,
+    targetPosition: Int,
+    columns: Int,
+    rows: Int,
+    showTitle: Boolean
+): DeckButton? {
+    val targetSlot = if (showTitle) targetPosition + 1 else targetPosition
+    return buttons.firstOrNull { button ->
+        targetSlot in occupiedSlotsForButton(button, columns, rows, showTitle)
+    }
+}
+
+private fun sameButtonSize(
+    first: DeckButton,
+    second: DeckButton,
+    columns: Int,
+    rows: Int,
+    showTitle: Boolean
+): Boolean {
+    return first.effectiveSpanColumns(columns, showTitle) == second.effectiveSpanColumns(columns, showTitle) &&
+        first.effectiveSpanRows(columns, rows, showTitle) == second.effectiveSpanRows(columns, rows, showTitle)
+}
+
 private fun shrinkButtonToAvailable(
     button: DeckButton,
     otherButtons: List<DeckButton>,
@@ -7324,6 +8055,7 @@ private const val PREF_MULTI_TOUCH_PAGE_SWIPE = "multi_touch_page_swipe"
 private const val PREF_PAGE_SWIPE_ANIMATION = "page_swipe_animation"
 private const val PREF_INFINITE_PAGE_SWIPE = "infinite_page_swipe"
 private const val PREF_BUTTON_VIBRATION_LEVEL = "button_vibration_level"
+private const val PREF_CLASSIC_SOLID_BUTTON_BACKGROUND = "classic_solid_button_background"
 private const val PREF_DECK_UI_MODE = "deck_ui_mode"
 private const val PREF_CONSOLE_LAYOUT = "console_layout"
 private const val PREF_CONSOLE_PANEL_CONNECTION = "console_panel_connection"

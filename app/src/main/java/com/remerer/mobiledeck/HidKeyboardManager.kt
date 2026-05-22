@@ -3,6 +3,7 @@ package com.remerer.mobiledeck
 import android.Manifest
 import android.annotation.SuppressLint
 import android.bluetooth.BluetoothAdapter
+import android.bluetooth.BluetoothClass
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothHidDevice
 import android.bluetooth.BluetoothHidDeviceAppSdpSettings
@@ -24,8 +25,15 @@ data class HidStatus(
 
 data class PairedHidHost(
     val name: String,
-    val address: String
+    val address: String,
+    val type: PairedHidHostType
 )
+
+enum class PairedHidHostType {
+    Computer,
+    Tablet,
+    Phone
+}
 
 enum class HidConnectionState(val label: String) {
     Disconnected("Disconnected"),
@@ -52,6 +60,8 @@ class HidKeyboardManager(
     private val mainHandler = Handler(Looper.getMainLooper())
     private var hidDevice: BluetoothHidDevice? = null
     private var host: BluetoothDevice? = null
+    private var appRegistered: Boolean = false
+    private var pendingConnectAddress: String? = null
     private var previousAdapterName: String? = null
 
     private val hidDescriptor = intArrayOf(
@@ -107,12 +117,18 @@ class HidKeyboardManager(
             override fun onAppStatusChanged(pluggedDevice: BluetoothDevice?, registered: Boolean) {
                 Log.d(TAG, "onAppStatusChanged registered=$registered plugged=${pluggedDevice?.safeName()}")
                 if (registered) {
+                    appRegistered = true
                     host = pluggedDevice
                     publish(
                         HidConnectionState.Registered,
                         "Registered as Android HID Keyboard. Pair this phone from the PC Bluetooth settings."
                     )
+                    pendingConnectAddress?.let { address ->
+                        pendingConnectAddress = null
+                        connect(address)
+                    }
                 } else {
+                    appRegistered = false
                     host = null
                     publish(HidConnectionState.Disconnected, "Bluetooth HID keyboard unregistered")
                 }
@@ -161,6 +177,7 @@ class HidKeyboardManager(
         hidDevice?.unregisterApp()
         hidDevice = null
         host = null
+        appRegistered = false
 
         renameAdapterForPairing()
         Log.d(TAG, "Requesting HID_DEVICE profile proxy")
@@ -211,6 +228,8 @@ class HidKeyboardManager(
         hidDevice?.unregisterApp()
         hidDevice = null
         host = null
+        appRegistered = false
+        pendingConnectAddress = null
         restoreAdapterName()
         publish(HidConnectionState.Disconnected, "Bluetooth HID keyboard stopped")
     }
@@ -220,22 +239,30 @@ class HidKeyboardManager(
         val adapter = adapter
         if (adapter == null || !hasRequiredPermissions()) return emptyList()
         return adapter.bondedDevices
+            .filter { device -> device.isKeyboardCapableHost() }
             .map { device ->
                 PairedHidHost(
                     name = device.name ?: "Unknown Bluetooth device",
-                    address = device.address
+                    address = device.address,
+                    type = device.hostType()
                 )
             }
             .sortedBy { it.name.lowercase(Locale.US) }
     }
 
     @SuppressLint("MissingPermission")
-    fun connect(address: String): Boolean {
-        val hid = hidDevice
-        if (hid == null) {
-            publish(HidConnectionState.Disconnected, "Register HID before connecting to a PC")
-            return false
+    fun connectOrRegister(address: String): Boolean {
+        if (hidDevice == null || !appRegistered) {
+            pendingConnectAddress = address
+            start()
+            return true
         }
+        return connect(address)
+    }
+
+    @SuppressLint("MissingPermission")
+    fun connect(address: String): Boolean {
+        val hid = hidDevice ?: return connectOrRegister(address)
         if (!hasRequiredPermissions()) {
             publish(HidConnectionState.PermissionMissing, "Bluetooth permission approval is required")
             return false
@@ -252,6 +279,38 @@ class HidKeyboardManager(
             if (started) "Connecting HID profile to ${device.safeName()}" else "Could not start HID connection"
         )
         return started
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun BluetoothDevice.isKeyboardCapableHost(): Boolean {
+        val bluetoothClass = bluetoothClass ?: return false
+        val major = bluetoothClass.majorDeviceClass
+        if (major == BluetoothClass.Device.Major.COMPUTER || major == BluetoothClass.Device.Major.PHONE) {
+            return true
+        }
+        if (major == BluetoothClass.Device.Major.AUDIO_VIDEO ||
+            major == BluetoothClass.Device.Major.PERIPHERAL ||
+            major == BluetoothClass.Device.Major.WEARABLE ||
+            major == BluetoothClass.Device.Major.TOY ||
+            major == BluetoothClass.Device.Major.HEALTH
+        ) {
+            return false
+        }
+        val lowerName = (name ?: "").lowercase(Locale.US)
+        return listOf("pc", "desktop", "laptop", "notebook", "tablet", "tab", "ipad", "surface", "windows", "macbook").any {
+            lowerName.contains(it)
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun BluetoothDevice.hostType(): PairedHidHostType {
+        val lowerName = (name ?: "").lowercase(Locale.US)
+        val bluetoothClass = bluetoothClass
+        return when {
+            lowerName.contains("tablet") || lowerName.contains("tab") || lowerName.contains("ipad") -> PairedHidHostType.Tablet
+            bluetoothClass?.majorDeviceClass == BluetoothClass.Device.Major.PHONE -> PairedHidHostType.Phone
+            else -> PairedHidHostType.Computer
+        }
     }
 
     @SuppressLint("MissingPermission")
@@ -287,14 +346,14 @@ class HidKeyboardManager(
         val device = host ?: return false
         val hid = hidDevice ?: return false
         val openRunDialog = hotkeyReport("WIN+R") ?: return false
-        var sent = sendReportTap(hid, device, KEYBOARD_REPORT_ID, openRunDialog, KEYBOARD_REPORT_SIZE)
-        Thread.sleep(250)
+        var sent = sendReportTap(hid, device, KEYBOARD_REPORT_ID, openRunDialog, KEYBOARD_REPORT_SIZE, RUN_COMMAND_KEY_HOLD_MS)
+        Thread.sleep(RUN_COMMAND_DIALOG_DELAY_MS)
         command.forEach { char ->
             val report = charReport(char) ?: return@forEach
-            sent = sendReportTap(hid, device, KEYBOARD_REPORT_ID, report, KEYBOARD_REPORT_SIZE) && sent
+            sent = sendReportTap(hid, device, KEYBOARD_REPORT_ID, report, KEYBOARD_REPORT_SIZE, RUN_COMMAND_KEY_HOLD_MS) && sent
         }
         val enter = hotkeyReport("ENTER") ?: return false
-        return sendReportTap(hid, device, KEYBOARD_REPORT_ID, enter, KEYBOARD_REPORT_SIZE) && sent
+        return sendReportTap(hid, device, KEYBOARD_REPORT_ID, enter, KEYBOARD_REPORT_SIZE, RUN_COMMAND_KEY_HOLD_MS) && sent
     }
 
     fun hasRequiredPermissions(): Boolean {
@@ -345,10 +404,11 @@ class HidKeyboardManager(
         device: BluetoothDevice,
         reportId: Int,
         report: ByteArray,
-        releaseSize: Int
+        releaseSize: Int,
+        holdMillis: Long = DEFAULT_KEY_HOLD_MS
     ): Boolean {
         val pressed = hid.sendReport(device, reportId, report)
-        Thread.sleep(30)
+        Thread.sleep(holdMillis)
         val released = hid.sendReport(device, reportId, ByteArray(releaseSize))
         Log.d(
             TAG,
@@ -372,6 +432,9 @@ class HidKeyboardManager(
         private const val DEVICE_NAME = "MobileDeck Keyboard"
         private const val KEYBOARD_REPORT_SIZE = 8
         private const val MEDIA_REPORT_SIZE = 2
+        private const val DEFAULT_KEY_HOLD_MS = 30L
+        private const val RUN_COMMAND_KEY_HOLD_MS = 6L
+        private const val RUN_COMMAND_DIALOG_DELAY_MS = 120L
         private const val MOD_LEFT_CTRL = 0x01
         private const val MOD_LEFT_SHIFT = 0x02
         private const val MOD_LEFT_ALT = 0x04

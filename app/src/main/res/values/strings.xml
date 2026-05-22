@@ -30,10 +30,14 @@
     <string name="settings_page_animation_desc">Animate page changes.</string>
     <string name="settings_vibration">Button vibration</string>
     <string name="settings_vibration_desc">Set touch feedback intensity for deck buttons.</string>
+    <string name="settings_solid_button_background">Solid button background</string>
+    <string name="settings_solid_button_background_desc">Use filled button colors. Turn off to keep only a bright color border.</string>
     <string name="settings_drag_more">Drag down for more</string>
     <string name="deck">Deck</string>
     <string name="layout_editor">Layout editor</string>
     <string name="button_editor">Button editor</string>
+    <string name="button_settings">Button settings</string>
+    <string name="button_settings_desc">Configure touch feedback and classic button surface style.</string>
     <string name="deck_layout">Deck layout</string>
     <string name="page_count_summary">%1$s - %2$d pages</string>
     <string name="page_axis_horizontal">Horizontal pages</string>
@@ -96,6 +100,7 @@
     <string name="key_content">Content</string>
     <string name="key_appearance">Appearance</string>
     <string name="key_action">Action</string>
+    <string name="preview">Preview</string>
     <string name="title">Title</string>
     <string name="subtitle">Subtitle</string>
     <string name="icon">Icon</string>
@@ -117,6 +122,12 @@
     <string name="app_command_target">App command</string>
     <string name="media_key_target">Media key</string>
     <string name="utility_target">Utility</string>
+    <string name="edit_value_app">App</string>
+    <string name="edit_value_keyboard">Input</string>
+    <string name="edit_value_widget">Widget</string>
+    <string name="edit_value_media">Media</string>
+    <string name="edit_value_command">Command</string>
+    <string name="edit_value_utility">Utility</string>
     <string name="span_columns">Width</string>
     <string name="span_rows">Height</string>
     <string name="save">Save</string>
@@ -171,5 +182,7 @@
     <string name="status_error">Error</string>
     <string name="status_message_permissions_denied">Bluetooth permissions were denied</string>
     <string name="status_message_discoverable_finished">Discoverable request finished.</string>
+    <string name="status_message_discoverable_active">Discoverable mode is active. Pair from the PC while HID is registered.</string>
+    <string name="status_message_discoverable_request_canceled">Discoverable request was canceled.</string>
     <string name="status_message_discoverable_canceled">Discoverable mode was canceled in MobileDeck. Android may keep the device visible until the system timeout.</string>
 </resources>

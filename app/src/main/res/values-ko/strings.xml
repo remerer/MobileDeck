@@ -30,10 +30,14 @@
     <string name="settings_page_animation_desc">페이지 전환 시 애니메이션 효과를 적용합니다.</string>
     <string name="settings_vibration">버튼 진동</string>
     <string name="settings_vibration_desc">덱 버튼 터치 피드백 강도를 설정합니다.</string>
+    <string name="settings_solid_button_background">단색 버튼 배경</string>
+    <string name="settings_solid_button_background_desc">버튼 색상을 배경으로 채웁니다. 끄면 밝은 색상 테두리만 남깁니다.</string>
     <string name="settings_drag_more">아래로 드래그하여 더 보기</string>
     <string name="deck">덱</string>
     <string name="layout_editor">레이아웃 편집</string>
     <string name="button_editor">버튼 편집</string>
+    <string name="button_settings">버튼 설정</string>
+    <string name="button_settings_desc">터치 피드백과 클래식 버튼 표면 스타일을 설정합니다.</string>
     <string name="deck_layout">덱 레이아웃</string>
     <string name="page_count_summary">%1$s - %2$d 페이지</string>
     <string name="page_axis_horizontal">가로 페이지</string>
@@ -96,6 +100,7 @@
     <string name="key_content">내용</string>
     <string name="key_appearance">표시</string>
     <string name="key_action">동작</string>
+    <string name="preview">미리보기</string>
     <string name="title">제목</string>
     <string name="subtitle">부제목</string>
     <string name="icon">아이콘</string>
@@ -117,6 +122,12 @@
     <string name="app_command_target">앱 동작</string>
     <string name="media_key_target">미디어 키</string>
     <string name="utility_target">편의 기능</string>
+    <string name="edit_value_app">앱</string>
+    <string name="edit_value_keyboard">키 입력</string>
+    <string name="edit_value_widget">위젯</string>
+    <string name="edit_value_media">미디어</string>
+    <string name="edit_value_command">명령</string>
+    <string name="edit_value_utility">기능</string>
     <string name="span_columns">너비</string>
     <string name="span_rows">높이</string>
     <string name="save">저장</string>
@@ -170,5 +181,7 @@
     <string name="status_error">오류</string>
     <string name="status_message_permissions_denied">블루투스 권한이 거부되었습니다.</string>
     <string name="status_message_discoverable_finished">검색 허용 요청이 끝났습니다.</string>
+    <string name="status_message_discoverable_active">검색 허용 중입니다. HID가 등록된 상태에서 PC에서 페어링하세요.</string>
+    <string name="status_message_discoverable_request_canceled">검색 허용 요청이 취소되었습니다.</string>
     <string name="status_message_discoverable_canceled">MobileDeck 안에서 검색 허용 상태를 취소했습니다. Android 시스템 검색 허용은 제한 시간까지 유지될 수 있습니다.</string>
 </resources>
