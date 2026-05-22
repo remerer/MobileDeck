@@ -20,7 +20,7 @@ import java.util.concurrent.Executors
 
 data class HidStatus(
     val state: HidConnectionState = HidConnectionState.Disconnected,
-    val message: String = "Ready to register Bluetooth HID keyboard"
+    val message: String = "Ready to register Bluetooth keyboard"
 )
 
 data class PairedHidHost(
@@ -121,7 +121,7 @@ class HidKeyboardManager(
                     host = pluggedDevice
                     publish(
                         HidConnectionState.Registered,
-                        "Registered as Android HID Keyboard. Pair this phone from the PC Bluetooth settings."
+                        "Registered as a Bluetooth keyboard. Pair this phone from the PC Bluetooth settings."
                     )
                     pendingConnectAddress?.let { address ->
                         pendingConnectAddress = null
@@ -130,7 +130,7 @@ class HidKeyboardManager(
                 } else {
                     appRegistered = false
                     host = null
-                    publish(HidConnectionState.Disconnected, "Bluetooth HID keyboard unregistered")
+                    publish(HidConnectionState.Disconnected, "Bluetooth keyboard registration stopped")
                 }
             }
 
@@ -160,7 +160,7 @@ class HidKeyboardManager(
         val adapter = adapter
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
             Log.w(TAG, "HID Device unsupported: sdk=${Build.VERSION.SDK_INT}")
-            publish(HidConnectionState.Unsupported, "Bluetooth HID Device requires Android 9 or newer")
+            publish(HidConnectionState.Unsupported, "Bluetooth keyboard mode requires Android 9 or newer")
             return
         }
         if (adapter == null) {
@@ -181,7 +181,7 @@ class HidKeyboardManager(
 
         renameAdapterForPairing()
         Log.d(TAG, "Requesting HID_DEVICE profile proxy")
-        publish(HidConnectionState.Registering, "Registering Bluetooth HID keyboard")
+        publish(HidConnectionState.Registering, "Registering Bluetooth keyboard")
         adapter.getProfileProxy(
             context,
             object : BluetoothProfile.ServiceListener {
@@ -191,7 +191,7 @@ class HidKeyboardManager(
 
                     val sdp = BluetoothHidDeviceAppSdpSettings(
                         "MobileDeck Keyboard",
-                        "Android Bluetooth HID keyboard",
+                        "Android Bluetooth keyboard",
                         "MobileDeck",
                         BluetoothHidDevice.SUBCLASS1_KEYBOARD,
                         hidDescriptor
@@ -207,7 +207,7 @@ class HidKeyboardManager(
 
                     Log.d(TAG, "registerApp returned $registered")
                     if (!registered) {
-                        publish(HidConnectionState.Error, "Bluetooth HID registration failed")
+                        publish(HidConnectionState.Error, "Bluetooth keyboard registration failed")
                     }
                 }
 
@@ -215,7 +215,7 @@ class HidKeyboardManager(
                     if (profile == BluetoothProfile.HID_DEVICE) {
                         hidDevice = null
                         host = null
-                        publish(HidConnectionState.Disconnected, "Bluetooth HID service disconnected")
+                        publish(HidConnectionState.Disconnected, "Bluetooth keyboard service disconnected")
                     }
                 }
             },
@@ -231,7 +231,7 @@ class HidKeyboardManager(
         appRegistered = false
         pendingConnectAddress = null
         restoreAdapterName()
-        publish(HidConnectionState.Disconnected, "Bluetooth HID keyboard stopped")
+        publish(HidConnectionState.Disconnected, "Bluetooth keyboard stopped")
     }
 
     @SuppressLint("MissingPermission")
@@ -276,7 +276,7 @@ class HidKeyboardManager(
         Log.d(TAG, "connect(${device.safeName()}) returned $started")
         publish(
             HidConnectionState.Registering,
-            if (started) "Connecting HID profile to ${device.safeName()}" else "Could not start HID connection"
+            if (started) "Connecting Bluetooth keyboard to ${device.safeName()}" else "Could not start Bluetooth keyboard connection"
         )
         return started
     }

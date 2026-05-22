@@ -1,24 +1,66 @@
 package com.remerer.mobiledeck
 
 import android.content.Context
+import android.content.res.Configuration
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import org.json.JSONArray
 import org.json.JSONObject
 
-fun defaultDeckColors(): List<Color> {
-    return listOf(
-        Color(0xFF005A9C),
-        Color(0xFF6A4C93),
-        Color(0xFF006D77),
-        Color(0xFF9D4E15),
-        Color(0xFF4F772D),
-        Color(0xFF8A1C1C)
-    )
+fun Context.isNightMode(): Boolean {
+    return (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
 }
 
-fun defaultButtons(): List<DeckButton> {
-    val colors = defaultDeckColors()
+fun classicButtonPalette(darkTheme: Boolean): List<Color> {
+    return if (darkTheme) {
+        listOf(
+            Color(0xFF005A9C),
+            Color(0xFF6A4C93),
+            Color(0xFF006D77),
+            Color(0xFF9D4E15),
+            Color(0xFF4F772D),
+            Color(0xFF8A1C1C)
+        )
+    } else {
+        listOf(
+            Color(0xFF2F7FC1),
+            Color(0xFF8B6BB6),
+            Color(0xFF2B9098),
+            Color(0xFFC07635),
+            Color(0xFF6FA34A),
+            Color(0xFFC15353)
+        )
+    }
+}
+
+fun classicBackgroundPalette(darkTheme: Boolean): List<Color> {
+    return if (darkTheme) {
+        listOf(
+            Color(0xFF10151B),
+            Color(0xFF073B4C),
+            Color(0xFF1B4332),
+            Color(0xFF3A0CA3),
+            Color(0xFF5F0F40),
+            Color(0xFF3D405B)
+        )
+    } else {
+        listOf(
+            Color(0xFFEAF1F7),
+            Color(0xFFD9EEF4),
+            Color(0xFFDDEFE4),
+            Color(0xFFE8E1F6),
+            Color(0xFFF2DDE9),
+            Color(0xFFE4E6F2)
+        )
+    }
+}
+
+fun defaultDeckColors(darkTheme: Boolean = true): List<Color> {
+    return classicButtonPalette(darkTheme)
+}
+
+fun defaultButtons(darkTheme: Boolean = true): List<DeckButton> {
+    val colors = defaultDeckColors(darkTheme)
 
     return listOf(
         DeckButton(1, "Bluetooth", "Connection", ICON_AUTO, "", DeckDisplayMode.IconAndText, DeckActionType.AppCommand, DeckActionType.BluetoothStatus.name, colors[0], position = 0),
@@ -39,8 +81,8 @@ fun defaultButtons(): List<DeckButton> {
     )
 }
 
-fun defaultSecondPageButtons(): List<DeckButton> {
-    val colors = defaultDeckColors()
+fun defaultSecondPageButtons(darkTheme: Boolean = true): List<DeckButton> {
+    val colors = defaultDeckColors(darkTheme)
 
     return listOf(
         DeckButton(16, "Prev Page", "Deck", ICON_PREVIOUS, "", DeckDisplayMode.IconAndText, DeckActionType.AppCommand, DeckActionType.PreviousPage.name, colors[3], position = 0),
@@ -62,13 +104,14 @@ fun defaultSecondPageButtons(): List<DeckButton> {
 }
 
 fun loadDeckButtons(context: Context): List<DeckButton> {
-    val raw = context.deckPrefs().getString(PREF_BUTTONS, null) ?: return defaultButtons()
+    val darkTheme = context.isNightMode()
+    val raw = context.deckPrefs().getString(PREF_BUTTONS, null) ?: return defaultButtons(darkTheme)
     return runCatching {
         val array = JSONArray(raw)
         List(array.length().coerceAtMost(MAX_PAGES)) { index ->
             decodeDeckButton(array.getJSONObject(index), index)
         }
-    }.map { normalizeDeckButtons(it) }.getOrDefault(defaultButtons())
+    }.map { normalizeDeckButtons(it, darkTheme) }.getOrDefault(defaultButtons(darkTheme))
 }
 
 fun saveDeckButtons(context: Context, buttons: List<DeckButton>) {
@@ -80,8 +123,9 @@ fun saveDeckButtons(context: Context, buttons: List<DeckButton>) {
 }
 
 fun loadDeckPages(context: Context): List<DeckPageConfig> {
+    val darkTheme = context.isNightMode()
     val raw = context.deckPrefs().getString(PREF_PAGES, null)
-        ?: return defaultDeckPages(loadDeckButtons(context))
+        ?: return defaultDeckPages(loadDeckButtons(context), darkTheme)
     return runCatching {
         val array = JSONArray(raw)
         val pages = List(array.length()) { index ->
@@ -96,17 +140,20 @@ fun loadDeckPages(context: Context): List<DeckPageConfig> {
             )
         }
         if (pages.isEmpty()) {
-            defaultDeckPages()
+            defaultDeckPages(darkTheme = darkTheme)
         } else {
-            ensureSettingsButton(pages)
+            ensureSettingsButton(pages, darkTheme)
         }
-    }.getOrDefault(defaultDeckPages())
+    }.getOrDefault(defaultDeckPages(darkTheme = darkTheme))
 }
 
-fun defaultDeckPages(firstPageButtons: List<DeckButton> = defaultButtons()): List<DeckPageConfig> {
+fun defaultDeckPages(
+    firstPageButtons: List<DeckButton>? = null,
+    darkTheme: Boolean = true
+): List<DeckPageConfig> {
     return listOf(
-        DeckPageConfig(1, "Page 1", firstPageButtons),
-        DeckPageConfig(2, "Page 2", defaultSecondPageButtons())
+        DeckPageConfig(1, "Page 1", firstPageButtons ?: defaultButtons(darkTheme)),
+        DeckPageConfig(2, "Page 2", defaultSecondPageButtons(darkTheme))
     )
 }
 
@@ -210,9 +257,9 @@ fun decodeDeckButton(item: JSONObject, fallbackPosition: Int): DeckButton {
     )
 }
 
-fun normalizeDeckButtons(buttons: List<DeckButton>): List<DeckButton> {
+fun normalizeDeckButtons(buttons: List<DeckButton>, darkTheme: Boolean = true): List<DeckButton> {
     if (buttons.any { it.actionType == DeckActionType.Settings }) return buttons
-    val colors = defaultDeckColors()
+    val colors = defaultDeckColors(darkTheme)
     val settingsButton = DeckButton(
         id = nextDeckButtonId(buttons),
         title = "Settings",
@@ -228,8 +275,8 @@ fun normalizeDeckButtons(buttons: List<DeckButton>): List<DeckButton> {
     return listOf(settingsButton) + buttons
 }
 
-fun ensureSettingsButton(pages: List<DeckPageConfig>): List<DeckPageConfig> {
-    return if (hasSettingsButton(pages)) pages else restoreSettingsButton(pages, DEFAULT_COLUMNS, DEFAULT_ROWS)
+fun ensureSettingsButton(pages: List<DeckPageConfig>, darkTheme: Boolean = true): List<DeckPageConfig> {
+    return if (hasSettingsButton(pages)) pages else restoreSettingsButton(pages, DEFAULT_COLUMNS, DEFAULT_ROWS, darkTheme)
 }
 
 fun hasSettingsButton(pages: List<DeckPageConfig>): Boolean {
@@ -239,7 +286,8 @@ fun hasSettingsButton(pages: List<DeckPageConfig>): Boolean {
 fun restoreSettingsButton(
     pages: List<DeckPageConfig>,
     columns: Int,
-    rows: Int
+    rows: Int,
+    darkTheme: Boolean = true
 ): List<DeckPageConfig> {
     if (hasSettingsButton(pages)) return pages
     val firstPageId = pages.firstOrNull()?.id
@@ -250,7 +298,7 @@ fun restoreSettingsButton(
         val capacity = pageButtonCapacity(page.id, pages, columns, rows)
         val position = nextOpenPosition(page.buttons, columns, rows, showTitle)
         if (position < capacity) {
-            val settingsButton = settingsDeckButton(allButtons, position)
+            val settingsButton = settingsDeckButton(allButtons, position, darkTheme)
             return pages.map { pageConfig ->
                 if (pageConfig.id == page.id) pageConfig.copy(buttons = pageConfig.buttons + settingsButton) else pageConfig
             }
@@ -261,14 +309,14 @@ fun restoreSettingsButton(
         DeckPageConfig(
             id = 1,
             name = "Page 1",
-            buttons = listOf(settingsDeckButton(emptyList(), 0))
+            buttons = listOf(settingsDeckButton(emptyList(), 0, darkTheme))
         )
     )
     val replacementIndex = lastPage.buttons.indices.maxWithOrNull(
         compareBy<Int> { lastPage.buttons[it].position }.thenBy { it }
     )
     val replacementPosition = replacementIndex?.let { lastPage.buttons[it].position } ?: 0
-    val settingsButton = settingsDeckButton(allButtons, replacementPosition)
+    val settingsButton = settingsDeckButton(allButtons, replacementPosition, darkTheme)
     val replacementButtons = lastPage.buttons.toMutableList().apply {
         if (replacementIndex != null) {
             this[replacementIndex] = settingsButton
@@ -281,8 +329,8 @@ fun restoreSettingsButton(
     }
 }
 
-fun settingsDeckButton(existingButtons: List<DeckButton>, position: Int): DeckButton {
-    val colors = defaultDeckColors()
+fun settingsDeckButton(existingButtons: List<DeckButton>, position: Int, darkTheme: Boolean = true): DeckButton {
+    val colors = defaultDeckColors(darkTheme)
     return DeckButton(
         id = nextDeckButtonId(existingButtons),
         title = "Settings",
@@ -429,6 +477,7 @@ fun saveClassicSolidButtonBackground(context: Context, enabled: Boolean) {
 
 fun loadClassicDeckBackground(context: Context): ClassicDeckBackground {
     val prefs = context.deckPrefs()
+    val fallbackColor = classicBackgroundPalette(context.isNightMode()).first()
     val type = runCatching {
         ClassicDeckBackgroundType.valueOf(
             prefs.getString(PREF_CLASSIC_DECK_BACKGROUND_TYPE, null) ?: ClassicDeckBackgroundType.Default.name
@@ -436,7 +485,7 @@ fun loadClassicDeckBackground(context: Context): ClassicDeckBackground {
     }.getOrDefault(ClassicDeckBackgroundType.Default)
     return ClassicDeckBackground(
         type = type,
-        color = Color(prefs.getInt(PREF_CLASSIC_DECK_BACKGROUND_COLOR, 0xFF10151B.toInt())),
+        color = Color(prefs.getInt(PREF_CLASSIC_DECK_BACKGROUND_COLOR, fallbackColor.toArgb())),
         imageUri = prefs.getString(PREF_CLASSIC_DECK_BACKGROUND_IMAGE_URI, null).orEmpty()
     )
 }
@@ -521,6 +570,17 @@ const val ICON_NEXT = "ICON_NEXT"
 const val ICON_VOLUME_OFF = "ICON_VOLUME_OFF"
 const val ICON_VOLUME_DOWN = "ICON_VOLUME_DOWN"
 const val ICON_VOLUME_UP = "ICON_VOLUME_UP"
+const val ICON_IMAGE = "ICON_IMAGE"
+const val ICON_COMPUTER = "ICON_COMPUTER"
+const val ICON_PHONE = "ICON_PHONE"
+const val ICON_TABLET = "ICON_TABLET"
+const val ICON_LINK = "ICON_LINK"
+const val ICON_SEARCH = "ICON_SEARCH"
+const val ICON_REFRESH = "ICON_REFRESH"
+const val ICON_SAVE = "ICON_SAVE"
+const val ICON_TOUCH = "ICON_TOUCH"
+const val ICON_VIDEO = "ICON_VIDEO"
+const val ICON_INFO = "ICON_INFO"
 const val MEDIA_MUTE = "MUTE"
 const val MEDIA_PLAY_PAUSE = "PLAY_PAUSE"
 const val MEDIA_STOP = "STOP"
