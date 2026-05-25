@@ -12,10 +12,14 @@ import android.os.VibratorManager
 import android.bluetooth.BluetoothAdapter
 import android.content.Context
 import android.content.Intent
+import android.content.res.Configuration
 import android.content.pm.PackageManager
 import android.content.pm.ResolveInfo
 import android.graphics.BitmapFactory
+import android.graphics.Color as AndroidColor
 import android.graphics.Movie
+import android.graphics.RuntimeShader
+import android.graphics.drawable.ColorDrawable
 import android.net.Uri
 import android.util.Log
 import android.view.ViewGroup
@@ -144,6 +148,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -155,19 +160,31 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.draw.dropShadow
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.Shader
+import androidx.compose.ui.graphics.ShaderBrush
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.shadow.Shadow as DropShadow
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.PointerEventPass
@@ -177,12 +194,14 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalInspectionMode
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpSize
+import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
@@ -207,7 +226,11 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        window.setBackgroundDrawable(ColorDrawable(AndroidColor.BLACK))
+        window.decorView.setBackgroundColor(AndroidColor.BLACK)
         enableEdgeToEdge()
+        window.statusBarColor = AndroidColor.TRANSPARENT
+        window.navigationBarColor = AndroidColor.TRANSPARENT
         WindowCompat.setDecorFitsSystemWindows(window, false)
         hideSystemBars()
         setContent {
@@ -229,89 +252,6 @@ class MainActivity : ComponentActivity() {
             hide(WindowInsetsCompat.Type.systemBars())
             systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         }
-    }
-}
-
-@Composable
-private fun deckThemeColors(mode: DeckUiMode = DeckUiMode.Classic): DeckThemeColors {
-    val dark = isSystemInDarkTheme()
-    return when {
-        mode == DeckUiMode.Console && dark -> DeckThemeColors(
-            backgroundGradient = listOf(Color(0xFF050A10), Color(0xFF0D1721), Color(0xFF06111A)),
-            sidebarBackground = Color(0xFF071018).copy(alpha = 0.92f),
-            sidebarBorder = Color.White.copy(alpha = 0.08f),
-            cardBackground = Color(0xFF111D27).copy(alpha = 0.86f),
-            cardBorder = Color.White.copy(alpha = 0.08f),
-            textPrimary = Color.White,
-            textSecondary = Color.White.copy(alpha = 0.64f),
-            textMuted = Color.White.copy(alpha = 0.38f),
-            toggleBackground = Color(0xFF101B25),
-            actionStart = Color(0xFF111D27),
-            actionEnd = Color(0xFF0D1720),
-            neutralIconBackground = Color(0xFF233342),
-            consoleSidebar = Color(0xFF17212B).copy(alpha = 0.86f),
-            consolePreviewBackground = Color(0xFF08131D),
-            consoleButtonDefault = Color(0xFF1B2630),
-            consoleButtonFeatured = Color(0xFF245B9D),
-            consoleButtonSystem = Color(0xFF1F5DAD)
-        )
-        mode == DeckUiMode.Console -> DeckThemeColors(
-            backgroundGradient = listOf(Color(0xFFF2F8FC), Color(0xFFE6F2FA), Color(0xFFDCEAF4)),
-            sidebarBackground = Color(0xFFF8FCFF).copy(alpha = 0.96f),
-            sidebarBorder = Color(0xFFB8D2E4),
-            cardBackground = Color.White.copy(alpha = 0.88f),
-            cardBorder = Color(0xFFC8DCE8),
-            textPrimary = Color(0xFF10202B),
-            textSecondary = Color(0xFF51616D),
-            textMuted = Color(0xFF7A8A95),
-            toggleBackground = Color(0xFFE4F0F8),
-            actionStart = Color(0xFFF8FCFF),
-            actionEnd = Color(0xFFEAF5FB),
-            neutralIconBackground = Color(0xFFD7E8F3),
-            consoleSidebar = Color(0xFFFFFFFF).copy(alpha = 0.9f),
-            consolePreviewBackground = Color(0xFFEAF5FB),
-            consoleButtonDefault = Color(0xFFDBE8F1),
-            consoleButtonFeatured = Color(0xFF1976B7),
-            consoleButtonSystem = Color(0xFF1D82BE)
-        )
-        dark -> DeckThemeColors(
-            backgroundGradient = listOf(Color(0xFF0F141A), Color(0xFF151B22), Color(0xFF10151B)),
-            sidebarBackground = Color(0xFF10171F).copy(alpha = 0.94f),
-            sidebarBorder = Color.White.copy(alpha = 0.08f),
-            cardBackground = Color(0xFF18212B).copy(alpha = 0.86f),
-            cardBorder = Color.White.copy(alpha = 0.08f),
-            textPrimary = Color.White,
-            textSecondary = Color.White.copy(alpha = 0.64f),
-            textMuted = Color.White.copy(alpha = 0.38f),
-            toggleBackground = Color(0xFF151D26),
-            actionStart = Color(0xFF18212B),
-            actionEnd = Color(0xFF131B24),
-            neutralIconBackground = Color(0xFF263342),
-            consoleSidebar = Color(0xFF17212B).copy(alpha = 0.86f),
-            consolePreviewBackground = Color(0xFF101820),
-            consoleButtonDefault = Color(0xFF24313D),
-            consoleButtonFeatured = Color(0xFF245B9D),
-            consoleButtonSystem = Color(0xFF1F5DAD)
-        )
-        else -> DeckThemeColors(
-            backgroundGradient = listOf(Color(0xFFF7F9FC), Color(0xFFEFF4FA), Color(0xFFE6EDF5)),
-            sidebarBackground = Color.White.copy(alpha = 0.95f),
-            sidebarBorder = Color(0xFFD0DAE5),
-            cardBackground = Color.White.copy(alpha = 0.9f),
-            cardBorder = Color(0xFFD7E0EA),
-            textPrimary = Color(0xFF17202A),
-            textSecondary = Color(0xFF56616D),
-            textMuted = Color(0xFF838E99),
-            toggleBackground = Color(0xFFE8EEF5),
-            actionStart = Color(0xFFFFFFFF),
-            actionEnd = Color(0xFFF0F5FA),
-            neutralIconBackground = Color(0xFFDDE7F2),
-            consoleSidebar = Color.White.copy(alpha = 0.9f),
-            consolePreviewBackground = Color(0xFFEFF4FA),
-            consoleButtonDefault = Color(0xFFE1E8F0),
-            consoleButtonFeatured = Color(0xFF276DB4),
-            consoleButtonSystem = Color(0xFF2369B0)
-        )
     }
 }
 
@@ -975,12 +915,21 @@ private fun MobileDeckApp() {
         onDispose { hidManager.stop() }
     }
 
-    val appColors = deckThemeColors(deckUiMode)
+    val appColors = deckThemeColors(deckUiMode, darkTheme)
+    SideEffect {
+        (context as? Activity)?.window?.let { activityWindow ->
+            val backgroundColor = appColors.backgroundGradient.first().toArgb()
+            activityWindow.setBackgroundDrawable(ColorDrawable(backgroundColor))
+            activityWindow.decorView.setBackgroundColor(backgroundColor)
+        }
+    }
     MobileDeckTheme(style = deckUiMode.toThemeStyle()) {
     CompositionLocalProvider(LocalDeckThemeColors provides appColors) {
     Scaffold(
-        modifier = Modifier.fillMaxSize(),
-        containerColor = MaterialTheme.colorScheme.background,
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Brush.linearGradient(appColors.backgroundGradient)),
+        containerColor = Color.Transparent,
         contentWindowInsets = WindowInsets(0, 0, 0, 0)
     ) { innerPadding ->
         val connectHost: (PairedHidHost) -> Unit = { host ->
@@ -994,17 +943,31 @@ private fun MobileDeckApp() {
                 )
             ) + logs.take(9)
         }
-
         when (page) {
             AppPage.Deck -> Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(innerPadding)
             ) {
+                if (
+                    deckUiMode == DeckUiMode.Classic &&
+                    classicDeckBackground.type != ClassicDeckBackgroundType.Default
+                ) {
+                    ClassicDeckBackgroundLayer(
+                        modifier = Modifier.fillMaxSize(),
+                        background = classicDeckBackground
+                    )
+                }
                 DeckPage(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(10.dp),
+                        .then(
+                            if (deckUiMode == DeckUiMode.Console) {
+                                Modifier
+                            } else {
+                                Modifier.padding(10.dp)
+                            }
+                        ),
                     buttons = deckButtons,
                     deckPages = deckPages,
                     activePageId = activeDeckPage.id,
@@ -1017,6 +980,7 @@ private fun MobileDeckApp() {
                     uiMode = deckUiMode,
                     consoleLayout = consoleLayout,
                     consolePanelOptions = consolePanelOptions,
+                    onConsoleSettings = { page = AppPage.Settings },
                     classicSolidButtonBackground = classicSolidButtonBackground,
                     classicDeckBackground = classicDeckBackground,
                     previewMode = false,
@@ -1053,38 +1017,49 @@ private fun MobileDeckApp() {
                 }
             }
 
-            AppPage.LayoutEditor -> LayoutEditorPage(
+            AppPage.LayoutEditor -> Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(innerPadding)
-                    .padding(10.dp),
-                buttons = deckButtons,
-                deckPages = deckPages,
-                activePageId = activeDeckPage.id,
-                columns = deckColumns,
-                rows = deckRows,
-                spacing = deckSpacing.dp,
-                status = hidStatus,
-                appWidgetHost = appWidgetHost,
-                appWidgetManager = appWidgetManager,
-                classicSolidButtonBackground = classicSolidButtonBackground,
-                classicDeckBackground = classicDeckBackground,
-                pageSwipeAxis = pageSwipeAxis,
-                pageSwipeMode = pageSwipeMode,
-                pageSwipeAnimation = pageSwipeAnimation,
-                pageSwipeDelta = lastPageDelta,
-                pageAnimationSequence = pageAnimationSequence,
-                onBack = ::finishLayoutEditor,
-                onPageSwipe = ::switchDeckPage,
-                onAddPage = ::addDeckPage,
-                onDeletePage = ::deleteActiveDeckPage,
-                onResetPage = ::resetFirstDeckPage,
-                onButtonEdit = { editingButton = it },
-                onButtonDragStarted = { context.applicationContext.vibrateButtonPress(buttonVibrationLevel) },
-                onButtonMoved = ::moveDeckButtonToSlot,
-                onButtonDeleted = ::deleteDeckButton,
-                onEmptySlotPressed = { slot -> addDeckButton(slot, editAfterCreate = true) }
-            )
+            ) {
+                if (classicDeckBackground.type != ClassicDeckBackgroundType.Default) {
+                    ClassicDeckBackgroundLayer(
+                        modifier = Modifier.fillMaxSize(),
+                        background = classicDeckBackground
+                    )
+                }
+                LayoutEditorPage(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(10.dp),
+                    buttons = deckButtons,
+                    deckPages = deckPages,
+                    activePageId = activeDeckPage.id,
+                    columns = deckColumns,
+                    rows = deckRows,
+                    spacing = deckSpacing.dp,
+                    status = hidStatus,
+                    appWidgetHost = appWidgetHost,
+                    appWidgetManager = appWidgetManager,
+                    classicSolidButtonBackground = classicSolidButtonBackground,
+                    classicDeckBackground = classicDeckBackground,
+                    pageSwipeAxis = pageSwipeAxis,
+                    pageSwipeMode = pageSwipeMode,
+                    pageSwipeAnimation = pageSwipeAnimation,
+                    pageSwipeDelta = lastPageDelta,
+                    pageAnimationSequence = pageAnimationSequence,
+                    onBack = ::finishLayoutEditor,
+                    onPageSwipe = ::switchDeckPage,
+                    onAddPage = ::addDeckPage,
+                    onDeletePage = ::deleteActiveDeckPage,
+                    onResetPage = ::resetFirstDeckPage,
+                    onButtonEdit = { editingButton = it },
+                    onButtonDragStarted = { context.applicationContext.vibrateButtonPress(buttonVibrationLevel) },
+                    onButtonMoved = ::moveDeckButtonToSlot,
+                    onButtonDeleted = ::deleteDeckButton,
+                    onEmptySlotPressed = { slot -> addDeckButton(slot, editAfterCreate = true) }
+                )
+            }
 
             AppPage.ConsoleLayoutEditor -> ConsoleLayoutEditorPage(
                 modifier = Modifier
@@ -1101,6 +1076,10 @@ private fun MobileDeckApp() {
                 },
                 onReset = {
                     val updated = defaultConsoleLayout(deckButtons)
+                    consoleLayout = updated
+                    saveConsoleLayout(context, updated)
+                },
+                onLayoutChange = { updated ->
                     consoleLayout = updated
                     saveConsoleLayout(context, updated)
                 },
@@ -1133,6 +1112,13 @@ private fun MobileDeckApp() {
                     }
                 },
                 onEditButton = { button -> editingButton = button }
+            )
+
+            AppPage.IconStyleTest -> ConsoleIconStyleTestPage(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding),
+                onBack = { page = AppPage.Settings }
             )
 
             AppPage.Settings -> SettingsPage(
@@ -1172,6 +1158,10 @@ private fun MobileDeckApp() {
                 onConsoleLayoutEditor = {
                     context.applicationContext.vibrateButtonPress(buttonVibrationLevel)
                     page = AppPage.ConsoleLayoutEditor
+                },
+                onOpenIconStyleTest = {
+                    context.applicationContext.vibrateButtonPress(buttonVibrationLevel)
+                    page = AppPage.IconStyleTest
                 },
                 onPageSwipeAxisChange = { axis ->
                     context.applicationContext.vibrateButtonPress(buttonVibrationLevel)
@@ -1292,7 +1282,9 @@ private fun MobileDeckApp() {
                 val updated = ConsoleLayoutConfig(
                     rows = rows.mapIndexed { index, row ->
                         if (index == safeRowIndex) row + button.id else row
-                    }
+                    },
+                    rowWeights = normalizedConsoleRowWeights(consoleLayout, rows.size),
+                    sidebarFraction = consoleLayout.sidebarFraction
                 )
                 consoleLayout = updated
                 saveConsoleLayout(context, updated)
@@ -1409,6 +1401,7 @@ private fun SettingsPage(
     onBack: () -> Unit,
     onLayoutEditor: () -> Unit,
     onConsoleLayoutEditor: () -> Unit,
+    onOpenIconStyleTest: () -> Unit,
     onPageSwipeAxisChange: (PageSwipeAxis) -> Unit,
     onPageSwipeModeChange: (PageSwipeMode) -> Unit,
     onPageSwipeAnimationChange: (Boolean) -> Unit,
@@ -1434,7 +1427,7 @@ private fun SettingsPage(
     onDismissClassicTutorial: () -> Unit,
     onClassicTutorialStepChange: (SettingsTutorialStep) -> Unit
 ) {
-    val colors = deckThemeColors(deckUiMode)
+    val colors = deckThemeColors(deckUiMode, isSystemInDarkTheme())
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -1491,6 +1484,7 @@ private fun SettingsPage(
                         onConsolePanelOptionsChange = onConsolePanelOptionsChange,
                         onConsoleLayoutEditor = onConsoleLayoutEditor,
                         onAddPage = onAddPage,
+                        onOpenIconStyleTest = onOpenIconStyleTest,
                         onShowClassicTutorial = onShowClassicTutorial
                     )
                 } else {
@@ -1519,6 +1513,7 @@ private fun SettingsPage(
                         onClassicDeckBackgroundChange = onClassicDeckBackgroundChange,
                         onPickClassicDeckBackgroundImage = onPickClassicDeckBackgroundImage,
                         onLayoutEditor = onLayoutEditor,
+                        onOpenIconStyleTest = onOpenIconStyleTest,
                         onColumnsChange = onColumnsChange,
                         onRowsChange = onRowsChange,
                         onSpacingChange = onSpacingChange,
@@ -1555,7 +1550,7 @@ private fun SettingsSidebar(
     onRefreshHosts: () -> Unit,
     onConnectHost: (PairedHidHost) -> Unit
 ) {
-    val colors = deckThemeColors(deckUiMode)
+    val colors = deckThemeColors(deckUiMode, isSystemInDarkTheme())
     Column(
         modifier = modifier
             .background(colors.sidebarBackground)
@@ -1617,7 +1612,7 @@ private fun UiModeToggle(
     deckUiMode: DeckUiMode,
     onDeckUiModeChange: (DeckUiMode) -> Unit
 ) {
-    val colors = deckThemeColors(deckUiMode)
+    val colors = deckThemeColors(deckUiMode, isSystemInDarkTheme())
     val selectedStart by animateColorAsState(
         targetValue = if (deckUiMode == DeckUiMode.Console) Color(0xFF006BAC) else Color(0xFF0B63D1),
         label = "settingsToggleStart"
@@ -1652,7 +1647,13 @@ private fun UiModeToggle(
                         listOf(selectedStart, selectedEnd)
                     )
                 )
-                .border(1.dp, selectedBorder, RoundedCornerShape(7.dp))
+                .then(
+                    if (deckUiMode == DeckUiMode.Console) {
+                        Modifier.border(1.dp, selectedBorder, RoundedCornerShape(7.dp))
+                    } else {
+                        Modifier
+                    }
+                )
         )
         Row(Modifier.fillMaxSize()) {
             DeckUiMode.values().forEach { mode ->
@@ -1692,9 +1693,10 @@ private fun BluetoothManagementBox(
     onRefreshHosts: () -> Unit,
     onConnectHost: (PairedHidHost) -> Unit
 ) {
-    val colors = deckThemeColors(deckUiMode)
+    val colors = deckThemeColors(deckUiMode, isSystemInDarkTheme())
     val accent = settingsModeAccent(deckUiMode)
-    val secondaryAccent = settingsModeSecondaryAccent(deckUiMode)
+    val classicHeader = deckUiMode == DeckUiMode.Classic
+    val classicHeaderBackground = accent.copy(alpha = if (isSystemInDarkTheme()) 0.5f else 0.18f)
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -1706,24 +1708,12 @@ private fun BluetoothManagementBox(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(
-                    Brush.linearGradient(
-                        listOf(
-                            accent.copy(alpha = if (isSystemInDarkTheme()) 0.62f else 0.16f),
-                            secondaryAccent.copy(alpha = if (isSystemInDarkTheme()) 0.42f else 0.08f)
-                        )
-                    )
-                )
+                .background(if (classicHeader) classicHeaderBackground else colors.toggleBackground.copy(alpha = 0.54f))
                 .padding(12.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            Icon(
-                imageVector = Icons.Filled.Bluetooth,
-                contentDescription = null,
-                tint = Color.White,
-                modifier = Modifier.size(28.dp)
-            )
+            SettingsIconTile(Icons.Filled.Bluetooth, accent)
             Text(
                 text = stringResource(R.string.settings_hid_management),
                 modifier = Modifier.weight(1f),
@@ -1795,7 +1785,7 @@ private fun SidebarCompactActionButton(
     deckUiMode: DeckUiMode,
     onClick: () -> Unit
 ) {
-    val colors = deckThemeColors(deckUiMode)
+    val colors = deckThemeColors(deckUiMode, isSystemInDarkTheme())
     val background = if (highlighted) {
         Brush.linearGradient(listOf(settingsModeAccent(deckUiMode), Color(0xFF0B7FE8)))
     } else {
@@ -1842,7 +1832,7 @@ private fun SidebarDiscoverableRow(
     onMakeDiscoverable: () -> Unit,
     onCancelDiscoverable: () -> Unit
 ) {
-    val colors = deckThemeColors(deckUiMode)
+    val colors = deckThemeColors(deckUiMode, isSystemInDarkTheme())
     val accent = settingsModeAccent(deckUiMode)
     Surface(
         modifier = Modifier.fillMaxWidth(),
@@ -1894,7 +1884,7 @@ private fun PairedHostsInlineSection(
     onRefreshHosts: () -> Unit,
     onConnectHost: (PairedHidHost) -> Unit
 ) {
-    val colors = deckThemeColors(deckUiMode)
+    val colors = deckThemeColors(deckUiMode, isSystemInDarkTheme())
     val accent = settingsModeAccent(deckUiMode)
     Column(
         modifier = Modifier
@@ -2024,6 +2014,7 @@ private fun ClassicSettingsContent(
     onClassicDeckBackgroundChange: (ClassicDeckBackground) -> Unit,
     onPickClassicDeckBackgroundImage: () -> Unit,
     onLayoutEditor: () -> Unit,
+    onOpenIconStyleTest: () -> Unit,
     onColumnsChange: (Int) -> Unit,
     onRowsChange: (Int) -> Unit,
     onSpacingChange: (Int) -> Unit,
@@ -2082,6 +2073,7 @@ private fun ClassicSettingsContent(
         item {
             SettingsAppInfoRow(
                 mode = DeckUiMode.Classic,
+                onOpenIconStyleTest = onOpenIconStyleTest,
                 onShowClassicTutorial = onShowClassicTutorial
             )
         }
@@ -2107,6 +2099,7 @@ private fun ConsoleSettingsContent(
     onConsolePanelOptionsChange: (ConsolePanelOptions) -> Unit,
     onConsoleLayoutEditor: () -> Unit,
     onAddPage: () -> Unit,
+    onOpenIconStyleTest: () -> Unit,
     onShowClassicTutorial: () -> Unit
 ) {
     SettingsDetailContent(
@@ -2199,6 +2192,7 @@ private fun ConsoleSettingsContent(
         item {
             SettingsAppInfoRow(
                 mode = DeckUiMode.Console,
+                onOpenIconStyleTest = onOpenIconStyleTest,
                 onShowClassicTutorial = onShowClassicTutorial
             )
         }
@@ -2214,7 +2208,7 @@ private fun SettingsDetailContent(
     subtitle: String,
     content: LazyListScope.() -> Unit
 ) {
-    val colors = deckThemeColors(mode)
+    val colors = deckThemeColors(mode, isSystemInDarkTheme())
     val listState = rememberLazyListState()
     var showDragHint by remember(mode) { mutableStateOf(true) }
     LaunchedEffect(listState.isScrollInProgress) {
@@ -2270,7 +2264,7 @@ private fun SettingsDetailContent(
                 contentColor = colors.textSecondary,
                 shape = RoundedCornerShape(999.dp),
                 tonalElevation = 0.dp,
-                shadowElevation = 6.dp
+                shadowElevation = 0.dp
             ) {
                 Text(
                     modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
@@ -2287,9 +2281,10 @@ private fun SettingsDetailContent(
 @Composable
 private fun SettingsAppInfoRow(
     mode: DeckUiMode,
+    onOpenIconStyleTest: () -> Unit,
     onShowClassicTutorial: () -> Unit
 ) {
-    val colors = deckThemeColors(mode)
+    val colors = deckThemeColors(mode, isSystemInDarkTheme())
     val accent = settingsModeAccent(mode)
     SettingsCard(accent = accent, themeColors = colors) {
         Row(
@@ -2313,24 +2308,714 @@ private fun SettingsAppInfoRow(
                     overflow = TextOverflow.Ellipsis
                 )
             }
-            Button(
-                shape = RoundedCornerShape(8.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = accent,
-                    contentColor = Color.White
-                ),
-                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
-                onClick = onShowClassicTutorial
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    shape = RoundedCornerShape(8.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = accent.copy(alpha = 0.82f),
+                        contentColor = Color.White
+                    ),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                    onClick = onOpenIconStyleTest
+                ) {
+                    Text(
+                        text = "아이콘 테스트",
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                Button(
+                    shape = RoundedCornerShape(8.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = accent,
+                        contentColor = Color.White
+                    ),
+                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
+                    onClick = onShowClassicTutorial
+                ) {
+                    Text(
+                        text = stringResource(R.string.tutorial),
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+        }
+    }
+}
+
+private enum class ConsoleIconStyleVariant {
+    AgslGradient,
+    BrushGradientVertical,
+    BrushGradientDiagonal,
+    BrushGradientSoft,
+    CloneRim1Px,
+    CloneRim2Px,
+    RoundNoPath,
+    SharpPathThin,
+    RoundPathThin,
+    AutoPathAngularHairline,
+    AutoPathAngularThin,
+    AutoPathAngularThick,
+    AutoPathAngularStrong,
+    AutoPathRound,
+    ThickNoPath,
+    ThickPathThin,
+    ThickPathMedium,
+    ModifierShadowLow,
+    ModifierShadowHigh,
+    DropShadowLow,
+    DropShadowMedium,
+    DropShadowHigh
+}
+
+private enum class ConsoleIconStyleTone(
+    val title: String,
+    val bakedTone: BakedIconTone
+) {
+    MatteSlate("Matte slate", BakedIconTone.MatteSlate),
+    MattePearl("Matte pearl", BakedIconTone.MattePearl),
+    BlueGray("Blue gray", BakedIconTone.BlueGray)
+}
+
+private data class ConsoleIconStyleSample(
+    val title: String,
+    val subtitle: String,
+    val icon: ImageVector,
+    val tone: ConsoleIconStyleTone,
+    val variant: ConsoleIconStyleVariant
+)
+
+@Composable
+private fun ConsoleIconStyleTestPage(
+    modifier: Modifier = Modifier,
+    onBack: () -> Unit
+) {
+    val colors = deckThemeColors(DeckUiMode.Console, darkTheme = false)
+    val samples = remember {
+        val variants = listOf(
+            ConsoleIconStyleVariant.CloneRim1Px to "복제 림 1px",
+            ConsoleIconStyleVariant.CloneRim2Px to "복제 림 2px",
+            ConsoleIconStyleVariant.AutoPathAngularHairline to "auto path 각진 / hairline",
+            ConsoleIconStyleVariant.AutoPathAngularThin to "auto path 각진 / thin",
+        )
+        listOf(ConsoleIconStyleTone.MatteSlate, ConsoleIconStyleTone.MattePearl).flatMap { tone ->
+            variants.map { (variant, subtitle) ->
+                ConsoleIconStyleSample(
+                    title = tone.title,
+                    subtitle = subtitle,
+                    icon = when (variant) {
+                        ConsoleIconStyleVariant.AgslGradient -> Icons.Filled.PlayArrow
+                        ConsoleIconStyleVariant.BrushGradientVertical -> Icons.Filled.PlayArrow
+                        ConsoleIconStyleVariant.BrushGradientDiagonal -> Icons.Filled.SkipNext
+                        ConsoleIconStyleVariant.BrushGradientSoft -> Icons.Filled.VolumeUp
+                        ConsoleIconStyleVariant.CloneRim1Px -> Icons.Filled.Keyboard
+                        ConsoleIconStyleVariant.CloneRim2Px -> Icons.Filled.Bluetooth
+                        ConsoleIconStyleVariant.RoundNoPath -> Icons.Filled.SkipPrevious
+                        ConsoleIconStyleVariant.SharpPathThin -> Icons.Filled.Stop
+                        ConsoleIconStyleVariant.RoundPathThin -> Icons.Filled.SkipPrevious
+                        ConsoleIconStyleVariant.AutoPathAngularHairline -> Icons.Filled.Keyboard
+                        ConsoleIconStyleVariant.AutoPathAngularThin -> Icons.Filled.Keyboard
+                        ConsoleIconStyleVariant.AutoPathAngularThick -> Icons.Filled.Stop
+                        ConsoleIconStyleVariant.AutoPathAngularStrong -> Icons.Filled.Apps
+                        ConsoleIconStyleVariant.AutoPathRound -> Icons.Filled.Bluetooth
+                        ConsoleIconStyleVariant.ThickNoPath -> Icons.Filled.SkipNext
+                        ConsoleIconStyleVariant.ThickPathThin -> Icons.Filled.SkipNext
+                        ConsoleIconStyleVariant.ThickPathMedium -> Icons.Filled.VolumeUp
+                        ConsoleIconStyleVariant.ModifierShadowLow -> Icons.Filled.PlayArrow
+                        ConsoleIconStyleVariant.ModifierShadowHigh -> Icons.Filled.PlayArrow
+                        ConsoleIconStyleVariant.DropShadowLow -> Icons.Filled.PlayArrow
+                        ConsoleIconStyleVariant.DropShadowMedium -> Icons.Filled.PlayArrow
+                        ConsoleIconStyleVariant.DropShadowHigh -> Icons.Filled.PlayArrow
+                    },
+                    tone = tone,
+                    variant = variant
+                )
+            }
+        }
+    }
+
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(Brush.linearGradient(colors.backgroundGradient))
+            .padding(18.dp)
+    ) {
+        Column(
+            modifier = Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
+                OutlinedButton(
+                    onClick = onBack,
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = colors.textPrimary)
+                ) {
+                    Icon(Icons.Filled.ArrowBack, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("설정")
+                }
+                Column {
+                    Text(
+                        text = "Console icon style test",
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = colors.textPrimary
+                    )
+                    Text(
+                        text = "Matte slate / Matte pearl 색상에서 각진 auto path와 1/2px 림 후보만 비교합니다.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = colors.textSecondary
+                    )
+                }
+            }
+
+            Row(
+                modifier = Modifier.fillMaxSize(),
+                horizontalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                ConsoleIconStyleSidebarSample(
+                    modifier = Modifier
+                        .width(250.dp)
+                        .fillMaxHeight(),
+                    colors = colors
+                )
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    samples.chunked(3).forEach { rowSamples ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            rowSamples.forEach { sample ->
+                                ConsoleIconStyleSampleCard(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(218.dp),
+                                    sample = sample,
+                                    colors = colors
+                                )
+                            }
+                            repeat(3 - rowSamples.size) {
+                                Spacer(Modifier.weight(1f))
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ConsoleIconStyleSidebarSample(
+    modifier: Modifier,
+    colors: DeckThemeColors
+) {
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(28.dp),
+        color = colors.sidebarBackground,
+        shadowElevation = 7.dp,
+        tonalElevation = 0.dp
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(26.dp),
+            verticalArrangement = Arrangement.SpaceBetween
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(18.dp)) {
+                Box(
+                    modifier = Modifier
+                        .size(width = 38.dp, height = 24.dp),
+                    contentAlignment = Alignment.CenterStart
+                ) {
+                    Canvas(modifier = Modifier.fillMaxSize()) {
+                        drawRoundRect(
+                            color = Color(0xFF79B9EA),
+                            topLeft = Offset(size.width * 0.05f, size.height * 0.18f),
+                            size = Size(size.width * 0.16f, size.height * 0.64f),
+                            cornerRadius = CornerRadius(12f, 12f)
+                        )
+                        drawRoundRect(
+                            color = Color(0xFF79B9EA),
+                            topLeft = Offset(size.width * 0.34f, size.height * 0.18f),
+                            size = Size(size.width * 0.16f, size.height * 0.64f),
+                            cornerRadius = CornerRadius(12f, 12f)
+                        )
+                    }
+                }
                 Text(
-                    text = stringResource(R.string.tutorial),
-                    style = MaterialTheme.typography.labelLarge,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
+                    text = "MobileDeck",
+                    style = MaterialTheme.typography.headlineMedium,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = colors.textPrimary
+                )
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+                    Box(
+                        modifier = Modifier
+                            .size(13.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFFE53935))
+                    )
+                    Text(
+                        text = "연결 안 됨",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFFE53935)
+                    )
+                }
+                Text(
+                    text = "Ready to register\nBluetooth keyboard",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = colors.textSecondary
+                )
+            }
+            ConsoleIconStylePreviewIcon(
+                sample = ConsoleIconStyleSample(
+                    title = "Settings",
+                    subtitle = "",
+                    icon = Icons.Filled.Settings,
+                    tone = ConsoleIconStyleTone.MatteSlate,
+                    variant = ConsoleIconStyleVariant.CloneRim1Px
+                ),
+                iconSize = 54.dp
+            )
+        }
+    }
+}
+
+@Composable
+private fun ConsoleIconStyleSampleCard(
+    modifier: Modifier,
+    sample: ConsoleIconStyleSample,
+    colors: DeckThemeColors
+) {
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(24.dp),
+        color = Color(0xFFE1E8F0),
+        shadowElevation = 0.dp,
+        tonalElevation = 0.dp
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .border(0.7.dp, Color(0xFFC2CEDA), RoundedCornerShape(24.dp))
+                .padding(18.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                ConsoleIconStylePreviewIcon(
+                    sample = sample,
+                    iconSize = 72.dp
+                )
+                Text(
+                    text = sample.title,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = colors.textPrimary,
+                    textAlign = TextAlign.Center
+                )
+                Text(
+                    text = sample.subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.textSecondary,
+                    textAlign = TextAlign.Center,
+                    maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun ConsoleIconStylePreviewIcon(
+    sample: ConsoleIconStyleSample,
+    iconSize: Dp
+) {
+    val shadowRenderSize = iconSize * 1.25f
+    val iconSizePx = with(LocalDensity.current) { iconSize.toPx().roundToInt() }
+    val shadowSizePx = with(LocalDensity.current) { shadowRenderSize.toPx().roundToInt() }
+    val bakedShadow = rememberBakedVectorIconShadow(
+        key = "icon-style-test:${sample.title}:${sample.subtitle}:${sample.icon.name}",
+        imageVector = sample.icon,
+        sizePx = iconSizePx,
+        shadowSizePx = shadowSizePx,
+        enabled = true,
+        lightMode = true
+    )
+    Box(
+        modifier = Modifier.size(shadowRenderSize),
+        contentAlignment = Alignment.Center
+    ) {
+        bakedShadow?.let { shadow ->
+            Image(
+                bitmap = shadow,
+                contentDescription = null,
+                modifier = Modifier.size(shadowRenderSize)
+            )
+        }
+        when (sample.variant) {
+            ConsoleIconStyleVariant.SharpPathThin,
+            ConsoleIconStyleVariant.RoundPathThin,
+            ConsoleIconStyleVariant.AutoPathAngularHairline,
+            ConsoleIconStyleVariant.AutoPathAngularThin,
+            ConsoleIconStyleVariant.AutoPathAngularThick,
+            ConsoleIconStyleVariant.AutoPathAngularStrong,
+            ConsoleIconStyleVariant.AutoPathRound,
+            ConsoleIconStyleVariant.ThickPathThin,
+            ConsoleIconStyleVariant.ThickPathMedium -> ConsoleBakedGeometryIcon(
+                sample = sample,
+                iconSize = iconSize
+            )
+            ConsoleIconStyleVariant.ModifierShadowLow,
+            ConsoleIconStyleVariant.ModifierShadowHigh -> ConsoleModifierShadowIcon(
+                sample = sample,
+                iconSize = iconSize
+            )
+            ConsoleIconStyleVariant.DropShadowLow,
+            ConsoleIconStyleVariant.DropShadowMedium,
+            ConsoleIconStyleVariant.DropShadowHigh -> ConsoleDropShadowIcon(
+                sample = sample,
+                iconSize = iconSize
+            )
+            else -> ConsoleAgslGlossIcon(
+                sample = sample,
+                iconSize = iconSize
+            )
+        }
+    }
+}
+
+@Composable
+private fun ConsoleModifierShadowIcon(
+    sample: ConsoleIconStyleSample,
+    iconSize: Dp
+) {
+    val elevation = when (sample.variant) {
+        ConsoleIconStyleVariant.ModifierShadowHigh -> 12.dp
+        else -> 5.dp
+    }
+    Box(
+        modifier = Modifier
+            .size(iconSize * 1.18f)
+            .shadow(
+                elevation = elevation,
+                shape = CircleShape,
+                clip = false,
+                ambientColor = Color(0xFF2C4058).copy(alpha = 0.34f),
+                spotColor = Color(0xFF2C4058).copy(alpha = 0.42f)
+            ),
+        contentAlignment = Alignment.Center
+    ) {
+        ConsoleAgslGlossIcon(
+            sample = sample.copy(variant = ConsoleIconStyleVariant.AgslGradient),
+            iconSize = iconSize
+        )
+    }
+}
+
+@Composable
+private fun ConsoleDropShadowIcon(
+    sample: ConsoleIconStyleSample,
+    iconSize: Dp
+) {
+    val offset = with(LocalDensity.current) {
+        when (sample.variant) {
+            ConsoleIconStyleVariant.DropShadowHigh -> 5.toDp()
+            ConsoleIconStyleVariant.DropShadowMedium -> 3.toDp()
+            ConsoleIconStyleVariant.DropShadowLow -> 3.toDp()
+            else -> 0.toDp()
+        }
+    }
+    val alpha = when (sample.variant) {
+        ConsoleIconStyleVariant.DropShadowHigh -> 0.30f
+        ConsoleIconStyleVariant.DropShadowMedium -> 0.22f
+        ConsoleIconStyleVariant.DropShadowLow -> 0.22f
+        else -> 0f
+    }
+    Box(
+        modifier = Modifier
+                .size(iconSize * 1.2f),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(
+            imageVector = sample.icon,
+            contentDescription = null,
+            modifier = Modifier
+                .size(iconSize)
+                .offset(x = offset, y = offset),
+            tint = Color(0xFF2C4058).copy(alpha = alpha)
+        )
+        if (sample.variant == ConsoleIconStyleVariant.DropShadowHigh) {
+            Icon(
+                imageVector = sample.icon,
+                contentDescription = null,
+                modifier = Modifier
+                    .size(iconSize)
+                    .offset(x = offset * 0.55f, y = offset * 0.55f),
+                tint = Color(0xFF2C4058).copy(alpha = 0.12f)
+            )
+        }
+        ConsoleAgslGlossIcon(
+            sample = sample.copy(variant = ConsoleIconStyleVariant.AgslGradient),
+            iconSize = iconSize
+        )
+    }
+}
+
+@Composable
+private fun ConsoleBakedGeometryIcon(
+    sample: ConsoleIconStyleSample,
+    iconSize: Dp
+) {
+    val style = when (sample.variant) {
+        ConsoleIconStyleVariant.SharpPathThin -> BakedIconBodyStyle.SharpThin
+        ConsoleIconStyleVariant.RoundPathThin -> BakedIconBodyStyle.RoundThin
+        ConsoleIconStyleVariant.AutoPathAngularHairline -> BakedIconBodyStyle.SharpHairline
+        ConsoleIconStyleVariant.AutoPathAngularThin -> BakedIconBodyStyle.SharpThin
+        ConsoleIconStyleVariant.AutoPathAngularThick -> BakedIconBodyStyle.ThickThin
+        ConsoleIconStyleVariant.AutoPathAngularStrong -> BakedIconBodyStyle.ThickMedium
+        ConsoleIconStyleVariant.AutoPathRound -> BakedIconBodyStyle.RoundThin
+        ConsoleIconStyleVariant.ThickPathMedium -> BakedIconBodyStyle.ThickMedium
+        else -> BakedIconBodyStyle.ThickThin
+    }
+    val sizePx = with(LocalDensity.current) { iconSize.toPx().roundToInt() }
+    val image = rememberBakedVectorIconBody(
+        key = "geometry-${sample.title}-${sample.icon.name}",
+        imageVector = sample.icon,
+        sizePx = sizePx,
+        style = style,
+        tone = sample.tone.bakedTone,
+        enabled = true
+    )
+    if (image != null) {
+        Image(
+            bitmap = image,
+            contentDescription = sample.title,
+            modifier = Modifier.size(iconSize)
+        )
+    }
+}
+
+private const val CONSOLE_ICON_MATTE_SLATE_SHADER = """
+uniform float2 resolution;
+
+half4 main(float2 coord) {
+    float2 uv = coord / resolution;
+    float top = 1.0 - smoothstep(0.0, 0.92, uv.y);
+    float edge = 1.0 - smoothstep(0.0, 0.10, min(min(uv.x, 1.0 - uv.x), min(uv.y, 1.0 - uv.y)));
+    half3 color = mix(half3(0.37, 0.47, 0.60), half3(0.55, 0.66, 0.79), top * 0.55);
+    color += half3(0.08, 0.10, 0.12) * edge * 0.18;
+    color += half3(0.11, 0.15, 0.18) * (1.0 - uv.y) * 0.12;
+    return half4(color, 1.0);
+}
+"""
+
+private const val CONSOLE_ICON_MATTE_PEARL_SHADER = """
+uniform float2 resolution;
+
+half4 main(float2 coord) {
+    float2 uv = coord / resolution;
+    float top = 1.0 - smoothstep(0.0, 0.86, uv.y);
+    float edge = 1.0 - smoothstep(0.0, 0.09, min(min(uv.x, 1.0 - uv.x), min(uv.y, 1.0 - uv.y)));
+    half3 color = mix(half3(0.76, 0.84, 0.92), half3(0.96, 0.99, 1.0), top * 0.52);
+    color = mix(color, half3(0.60, 0.70, 0.82), edge * 0.16);
+    return half4(color, 1.0);
+}
+"""
+
+private const val CONSOLE_ICON_MATTE_BLUE_GRAY_SHADER = """
+uniform float2 resolution;
+
+half4 main(float2 coord) {
+    float2 uv = coord / resolution;
+    float vertical = 1.0 - smoothstep(0.0, 1.0, uv.y);
+    float diagonal = smoothstep(0.0, 1.0, (1.0 - uv.y) * 0.7 + uv.x * 0.3);
+    float edge = 1.0 - smoothstep(0.0, 0.08, min(min(uv.x, 1.0 - uv.x), min(uv.y, 1.0 - uv.y)));
+    half3 color = mix(half3(0.36, 0.48, 0.62), half3(0.68, 0.80, 0.91), vertical * 0.42 + diagonal * 0.12);
+    color += half3(0.04, 0.08, 0.12) * edge * 0.18;
+    return half4(color, 1.0);
+}
+"""
+
+private const val CONSOLE_ICON_THIN_BEVEL_SHADER = """
+uniform float2 resolution;
+
+half4 main(float2 coord) {
+    float2 uv = coord / resolution;
+    float topLeft = (1.0 - uv.x) * 0.42 + (1.0 - uv.y) * 0.58;
+    float bottomRight = uv.x * 0.42 + uv.y * 0.58;
+    float edge = 1.0 - smoothstep(0.0, 0.055, min(min(uv.x, 1.0 - uv.x), min(uv.y, 1.0 - uv.y)));
+    half3 color = half3(0.44, 0.55, 0.68);
+    color += half3(0.20, 0.24, 0.28) * topLeft * 0.20;
+    color -= half3(0.12, 0.15, 0.18) * bottomRight * 0.18;
+    color += half3(0.14, 0.17, 0.20) * edge * 0.16;
+    return half4(color, 1.0);
+}
+"""
+
+private const val CONSOLE_ICON_SOFT_CENTER_SHADER = """
+uniform float2 resolution;
+
+half4 main(float2 coord) {
+    float2 uv = coord / resolution;
+    float center = 1.0 - smoothstep(0.0, 0.78, distance(uv, float2(0.46, 0.36)));
+    float top = 1.0 - smoothstep(0.0, 0.94, uv.y);
+    float edge = 1.0 - smoothstep(0.0, 0.08, min(min(uv.x, 1.0 - uv.x), min(uv.y, 1.0 - uv.y)));
+    half3 color = half3(0.48, 0.59, 0.72);
+    color += half3(0.16, 0.20, 0.24) * center * 0.26;
+    color += half3(0.08, 0.10, 0.12) * top * 0.10;
+    color -= half3(0.09, 0.12, 0.15) * edge * 0.13;
+    return half4(color, 1.0);
+}
+"""
+
+private const val CONSOLE_ICON_MATTE_BLUE_SHADER = """
+uniform float2 resolution;
+
+half4 main(float2 coord) {
+    float2 uv = coord / resolution;
+    float top = 1.0 - smoothstep(0.0, 0.92, uv.y);
+    float edge = 1.0 - smoothstep(0.0, 0.08, min(min(uv.x, 1.0 - uv.x), min(uv.y, 1.0 - uv.y)));
+    half3 color = mix(half3(0.12, 0.46, 0.82), half3(0.58, 0.80, 0.96), top * 0.42);
+    color = mix(color, half3(0.07, 0.28, 0.56), edge * 0.14);
+    return half4(color, 1.0);
+}
+"""
+
+@Composable
+private fun ConsoleAgslGlossIcon(
+    sample: ConsoleIconStyleSample,
+    iconSize: Dp
+) {
+    val shaderBrush = if (sample.variant == ConsoleIconStyleVariant.AgslGradient) {
+        rememberAgslGlossBrush(sample.tone)
+    } else {
+        null
+    }
+    val fallbackBrush = fallbackIconGlossBrush(sample.tone, sample.variant)
+    val rimOffset = with(LocalDensity.current) {
+        when (sample.variant) {
+            ConsoleIconStyleVariant.CloneRim1Px -> 1.toDp()
+            ConsoleIconStyleVariant.CloneRim2Px -> 2.toDp()
+            else -> 0.dp
+        }
+    }
+    Box(
+        modifier = Modifier.size(iconSize * 1.08f),
+        contentAlignment = Alignment.Center
+    ) {
+        if (rimOffset > 0.dp) {
+            Icon(
+                imageVector = sample.icon,
+                contentDescription = null,
+                modifier = Modifier
+                    .size(iconSize)
+                    .offset(x = -rimOffset, y = -rimOffset),
+                tint = Color.White.copy(alpha = 0.39f)
+            )
+            Icon(
+                imageVector = sample.icon,
+                contentDescription = null,
+                modifier = Modifier
+                    .size(iconSize)
+                    .offset(x = rimOffset, y = rimOffset),
+                tint = Color(0xFF2C4058).copy(alpha = 0.17f)
+            )
+        }
+        Icon(
+            imageVector = sample.icon,
+            contentDescription = sample.title,
+            modifier = Modifier
+                .size(iconSize)
+                .graphicsLayer {
+                    compositingStrategy = CompositingStrategy.Offscreen
+                }
+                .drawWithCache {
+                    val brush = shaderBrush ?: fallbackBrush
+                    onDrawWithContent {
+                        drawContent()
+                        drawRect(
+                            brush = brush,
+                            blendMode = BlendMode.SrcAtop
+                        )
+                    }
+                },
+            tint = Color.White
+        )
+    }
+}
+
+@Composable
+private fun rememberAgslGlossBrush(tone: ConsoleIconStyleTone): ShaderBrush? {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+        return null
+    }
+    return remember(tone) {
+        RuntimeShaderIconGlossBrush(consoleIconShaderSource(tone))
+    }
+}
+
+private fun fallbackIconGlossBrush(
+    tone: ConsoleIconStyleTone,
+    variant: ConsoleIconStyleVariant = ConsoleIconStyleVariant.BrushGradientVertical
+): Brush {
+    val colors = when (tone) {
+        ConsoleIconStyleTone.BlueGray -> listOf(Color(0xFF9AAFC4), Color(0xFF5F748E), Color(0xFF40556D))
+        ConsoleIconStyleTone.MattePearl -> listOf(Color(0xFFE7F0F8), Color(0xFFC7D3E0), Color(0xFF8FA2B8))
+        ConsoleIconStyleTone.MatteSlate -> listOf(Color(0xFF8EA3BA), Color(0xFF617790), Color(0xFF3F536B))
+    }
+    return when (variant) {
+        ConsoleIconStyleVariant.BrushGradientDiagonal -> Brush.linearGradient(
+            colors = listOf(colors[0], colors[1], colors[2]),
+            start = Offset.Zero,
+            end = Offset(96f, 96f)
+        )
+        ConsoleIconStyleVariant.BrushGradientSoft -> Brush.radialGradient(
+            colorStops = arrayOf(
+                0.00f to colors[0],
+                0.48f to colors[1],
+                1.00f to colors[2]
+            )
+        )
+        else -> Brush.verticalGradient(colors)
+    }
+}
+
+private fun consoleIconShaderSource(tone: ConsoleIconStyleTone): String {
+    return when (tone) {
+        ConsoleIconStyleTone.MatteSlate -> CONSOLE_ICON_MATTE_SLATE_SHADER
+        ConsoleIconStyleTone.MattePearl -> CONSOLE_ICON_MATTE_PEARL_SHADER
+        ConsoleIconStyleTone.BlueGray -> CONSOLE_ICON_MATTE_BLUE_GRAY_SHADER
+    }
+}
+
+private class RuntimeShaderIconGlossBrush(shaderSource: String) : ShaderBrush() {
+    private val shader = RuntimeShader(shaderSource)
+
+    override fun createShader(size: Size): Shader {
+        shader.setFloatUniform("resolution", size.width, size.height)
+        return shader
     }
 }
 
@@ -2443,6 +3128,7 @@ private fun ClassicLayoutControlsCard(
                     selected = pageSwipeAxis,
                     label = { stringResource(it.shortLabelRes) },
                     accent = ClassicLayoutAccent,
+                    borderless = true,
                     onSelected = onPageSwipeAxisChange
                 )
             }
@@ -2458,6 +3144,7 @@ private fun ClassicLayoutControlsCard(
                     selected = pageSwipeMode,
                     label = { stringResource(it.labelRes) },
                     accent = ClassicLayoutAccent,
+                    borderless = true,
                     onSelected = onPageSwipeModeChange
                 )
             }
@@ -3062,7 +3749,7 @@ private fun MiniVerticalLayoutSlider(
             textAlign = TextAlign.End,
             maxLines = 1
         )
-        BoxWithConstraints(
+        Box(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth(),
@@ -3429,7 +4116,12 @@ private fun ConsoleSettingRow(
     trailing: @Composable () -> Unit
 ) {
     val colors = LocalDeckThemeColors.current
-    SettingsCard(accent = iconColor) {
+    SettingsCard(
+        accent = iconColor,
+        borderAlpha = 0.08f,
+        borderWidth = 0.6.dp,
+        shadowElevation = 0.dp
+    ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
@@ -3506,7 +4198,12 @@ private fun ConsolePreviewCard(
     content: @Composable () -> Unit
 ) {
     val colors = LocalDeckThemeColors.current
-    SettingsCard(accent = Color(0xFF00A6E7)) {
+    SettingsCard(
+        accent = Color(0xFF00A6E7),
+        borderAlpha = 0.07f,
+        borderWidth = 0.6.dp,
+        shadowElevation = 0.dp
+    ) {
         Text(
             text = stringResource(R.string.settings_console_preview),
             style = MaterialTheme.typography.titleMedium,
@@ -3528,7 +4225,12 @@ private fun ConsolePanelOptionsCard(
     onOptionsChange: (ConsolePanelOptions) -> Unit
 ) {
     val colors = LocalDeckThemeColors.current
-    SettingsCard(accent = Color(0xFF00A6E7)) {
+    SettingsCard(
+        accent = Color(0xFF00A6E7),
+        borderAlpha = 0.07f,
+        borderWidth = 0.6.dp,
+        shadowElevation = 0.dp
+    ) {
         Text(
             text = stringResource(R.string.console_panel),
             style = MaterialTheme.typography.titleMedium,
@@ -3700,21 +4402,39 @@ private fun <T> SettingsSegmentedControl(
     selected: T,
     label: @Composable (T) -> String,
     accent: Color? = null,
+    borderless: Boolean = false,
     onSelected: (T) -> Unit
 ) {
     val colors = LocalDeckThemeColors.current
     val activeColor = accent ?: MaterialTheme.colorScheme.primary
+    val shape = RoundedCornerShape(7.dp)
+    val containerColor = if (borderless) {
+        colors.toggleBackground.copy(alpha = 0.54f)
+    } else {
+        colors.toggleBackground
+    }
+    val activeContainerColor = if (borderless) {
+        activeColor
+    } else {
+        activeColor.copy(alpha = if (isSystemInDarkTheme()) 0.86f else 0.78f)
+    }
     Row(
         modifier = Modifier
             .height(38.dp)
-            .clip(RoundedCornerShape(7.dp))
-            .background(colors.toggleBackground)
-            .border(1.dp, colors.cardBorder, RoundedCornerShape(7.dp))
+            .clip(shape)
+            .background(containerColor)
+            .then(
+                if (borderless) {
+                    Modifier
+                } else {
+                    Modifier.border(1.dp, colors.cardBorder, shape)
+                }
+            )
     ) {
         options.forEach { option ->
             val active = option == selected
             Surface(
-                color = if (active) activeColor.copy(alpha = if (isSystemInDarkTheme()) 0.86f else 0.78f) else Color.Transparent,
+                color = if (active) activeContainerColor else Color.Transparent,
                 contentColor = if (active) Color.White else colors.textPrimary,
                 onClick = { onSelected(option) }
             ) {
@@ -3815,23 +4535,32 @@ private fun SettingsCard(
     modifier: Modifier = Modifier,
     accent: Color = Color(0xFF0EA5FF),
     themeColors: DeckThemeColors? = null,
+    borderAlpha: Float = 0.18f,
+    borderWidth: Dp = 1.dp,
+    shadowElevation: Dp = 0.dp,
     content: @Composable ColumnScope.() -> Unit
 ) {
     val colors = themeColors ?: LocalDeckThemeColors.current
     val borderColor by animateColorAsState(
-        targetValue = accent.copy(alpha = 0.18f).compositeOver(colors.cardBorder.copy(alpha = 0.5f)),
+        targetValue = accent.copy(alpha = borderAlpha).compositeOver(colors.cardBorder.copy(alpha = 0.42f)),
         label = "settingsCardBorder"
     )
-    Column(
+    Surface(
         modifier = modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(8.dp))
-            .background(colors.cardBackground)
-            .border(1.dp, borderColor, RoundedCornerShape(8.dp))
-            .padding(10.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-        content = content
-    )
+            .fillMaxWidth(),
+        shape = RoundedCornerShape(8.dp),
+        color = colors.cardBackground,
+        tonalElevation = 0.dp,
+        shadowElevation = shadowElevation
+    ) {
+        Column(
+            modifier = Modifier
+                .border(borderWidth, borderColor, RoundedCornerShape(8.dp))
+                .padding(10.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+            content = content
+        )
+    }
 }
 
 @Composable
@@ -3859,10 +4588,6 @@ private fun SettingsIconTile(
 
 private fun settingsModeAccent(mode: DeckUiMode): Color {
     return if (mode == DeckUiMode.Console) Color(0xFF00A6E7) else Color(0xFF0B7FE8)
-}
-
-private fun settingsModeSecondaryAccent(mode: DeckUiMode): Color {
-    return if (mode == DeckUiMode.Console) Color(0xFF004B78) else Color(0xFF124E91)
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -4540,6 +5265,7 @@ private fun DeckPage(
     uiMode: DeckUiMode,
     consoleLayout: ConsoleLayoutConfig,
     consolePanelOptions: ConsolePanelOptions,
+    onConsoleSettings: () -> Unit = {},
     classicSolidButtonBackground: Boolean,
     classicDeckBackground: ClassicDeckBackground,
     previewMode: Boolean,
@@ -4599,6 +5325,7 @@ private fun DeckPage(
                 status = status,
                 appWidgetHost = appWidgetHost,
                 appWidgetManager = appWidgetManager,
+                onSettings = onConsoleSettings,
                 onPageSwipe = onPageSwipe,
                 onButtonPressed = onButtonPressed,
                 onButtonTouchStarted = onButtonTouchStarted,
@@ -4620,14 +5347,15 @@ private fun DeckPage(
                 targetState = PageAnimationTarget(activePageId, pageSwipeDelta, pageAnimationSequence),
                 modifier = Modifier.fillMaxSize(),
                 transitionSpec = {
+                    val slideGap = with(density) { maxOf(spacing, PAGE_TRANSITION_GAP).toPx().roundToInt() }
                     if (!pageSwipeAnimation) {
                         fadeIn(tween(0)) togetherWith fadeOut(tween(0))
                     } else if (pageSwipeAxis == PageSwipeAxis.Horizontal) {
-                        slideInHorizontally { width -> targetState.delta.signOrOne() * width } togetherWith
-                            slideOutHorizontally { width -> -targetState.delta.signOrOne() * width }
+                        slideInHorizontally { width -> targetState.delta.signOrOne() * (width + slideGap) } togetherWith
+                            slideOutHorizontally { width -> -targetState.delta.signOrOne() * (width + slideGap) }
                     } else {
-                        slideInVertically { height -> targetState.delta.signOrOne() * height } togetherWith
-                            slideOutVertically { height -> -targetState.delta.signOrOne() * height }
+                        slideInVertically { height -> targetState.delta.signOrOne() * (height + slideGap) } togetherWith
+                            slideOutVertically { height -> -targetState.delta.signOrOne() * (height + slideGap) }
                     }
                 },
                 label = "pageSwipe"
@@ -4780,6 +5508,7 @@ private fun Context.loadClassicBackgroundMovie(uriString: String): Movie? = runC
     }
 }.getOrNull()
 
+private val PAGE_TRANSITION_GAP = 24.dp
 private fun widgetSpanForProvider(
     info: AppWidgetProviderInfo?,
     columns: Int,
@@ -4891,15 +5620,15 @@ private fun ConsoleDeckSurface(
     status: HidStatus,
     appWidgetHost: AppWidgetHost?,
     appWidgetManager: AppWidgetManager?,
+    onSettings: () -> Unit,
     onPageSwipe: (Int) -> Unit,
     onButtonPressed: (DeckButton) -> Unit,
     onButtonTouchStarted: () -> Unit,
     onButtonTouchEnded: () -> Unit
 ) {
     val colors = LocalDeckThemeColors.current
-    val settingsButton = remember(deckPages) {
-        deckPages.flatMap { it.buttons }.firstOrNull { buttonAppAction(it) == DeckActionType.Settings }
-    }
+    val density = LocalDensity.current
+    val consoleSpacing = maxOf(spacing, 10.dp)
     val swipeModifier = Modifier.pageSwipeGesture(
         mode = pageSwipeMode,
         axis = PageSwipeAxis.Horizontal,
@@ -4911,84 +5640,96 @@ private fun ConsoleDeckSurface(
                 Brush.linearGradient(colors.backgroundGradient)
             )
     ) {
-        Row(
-            modifier = Modifier.fillMaxSize(),
-            horizontalArrangement = Arrangement.spacedBy(14.dp)
-        ) {
-            ConsoleSidebar(
+        BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+            val sidebarWidth = consoleSidebarWidth(maxWidth, layout.sidebarFraction)
+            val consoleGap = 14.dp
+            val deckStart = sidebarWidth * 0.5f
+            val deckVisibleStartPadding = maxOf(sidebarWidth - deckStart + consoleGap, 0.dp)
+            Box(
                 modifier = Modifier
-                    .width(160.dp)
-                    .fillMaxHeight(),
-                status = status,
-                panelOptions = panelOptions,
-                onSettings = { settingsButton?.let(onButtonPressed) }
-            )
-            BoxWithConstraints(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxHeight()
-                    .then(swipeModifier)
+                    .fillMaxSize()
+                    .padding(start = deckStart)
             ) {
-                val density = LocalDensity.current
-                val consoleSpacing = maxOf(spacing, 10.dp)
-                AnimatedContent(
-                    targetState = PageAnimationTarget(activePageId, pageSwipeDelta, pageAnimationSequence),
-                    modifier = Modifier.fillMaxSize(),
-                    transitionSpec = {
-                        if (!pageSwipeAnimation) {
-                            fadeIn(tween(0)) togetherWith fadeOut(tween(0))
-                        } else {
-                            slideInHorizontally { width -> targetState.delta.signOrOne() * width } togetherWith
-                                slideOutHorizontally { width -> -targetState.delta.signOrOne() * width }
-                        }
-                    },
-                    label = "consolePageSwipe"
-                ) { target ->
-                    val targetButtons = deckPages.firstOrNull { it.id == target.pageId }?.buttons.orEmpty()
-                    val consoleRows = consoleLayoutRows(
-                        layout = layout,
-                        buttons = targetButtons.filterNot { buttonAppAction(it) == DeckActionType.Settings },
-                        columns = columns,
-                        rows = rows
-                    )
-                    val rowHeight = with(density) {
-                        val spacingPx = consoleSpacing.toPx()
-                        val rowCount = consoleRows.size.coerceAtLeast(1)
-                        ((constraints.maxHeight - 12.dp.toPx() - spacingPx * (rowCount - 1)) / rowCount).toDp()
-                    }
-                    ConsoleButtonRows(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(bottom = 12.dp),
-                        rows = consoleRows,
-                        rowHeight = rowHeight,
-                        spacing = consoleSpacing,
-                        status = status,
-                        appWidgetHost = appWidgetHost,
-                        appWidgetManager = appWidgetManager,
-                        onButtonPressed = onButtonPressed,
-                        onButtonTouchStarted = onButtonTouchStarted,
-                        onButtonTouchEnded = onButtonTouchEnded
-                    )
-                }
-                PageIndicator(
+                Box(
                     modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .padding(bottom = 2.dp),
-                    pageCount = deckPages.size,
-                    activeIndex = deckPages.indexOfFirst { it.id == activePageId }.coerceAtLeast(0),
-                    axis = PageSwipeAxis.Horizontal
+                        .matchParentSize()
+                ) {
+                    BoxWithConstraints(modifier = Modifier.matchParentSize()) {
+                        val slideGapPx = with(density) {
+                            maxOf(consoleSpacing, PAGE_TRANSITION_GAP).toPx().roundToInt()
+                        }
+                        AnimatedContent(
+                            targetState = PageAnimationTarget(activePageId, pageSwipeDelta, pageAnimationSequence),
+                            modifier = Modifier.fillMaxSize(),
+                            transitionSpec = {
+                                if (!pageSwipeAnimation) {
+                                    fadeIn(tween(0)) togetherWith fadeOut(tween(0))
+                                } else {
+                                    slideInHorizontally { width -> targetState.delta.signOrOne() * (width + slideGapPx) } togetherWith
+                                        slideOutHorizontally { width -> -targetState.delta.signOrOne() * (width + slideGapPx) }
+                                }
+                            },
+                            label = "consolePageSwipe"
+                        ) { target ->
+                            val targetButtons = deckPages.firstOrNull { it.id == target.pageId }?.buttons.orEmpty()
+                            val consoleRows = consoleLayoutRows(
+                                layout = layout,
+                                buttons = targetButtons.filterNot { buttonAppAction(it) == DeckActionType.Settings },
+                                columns = columns,
+                                rows = rows
+                            )
+                            val consoleWeights = normalizedConsoleRowWeights(layout, consoleRows.size)
+                            ConsoleButtonRows(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(start = deckVisibleStartPadding)
+                                    .then(swipeModifier)
+                                    .padding(bottom = 12.dp),
+                                rows = consoleRows,
+                                rowWeights = consoleWeights,
+                                spacing = consoleSpacing,
+                                status = status,
+                                appWidgetHost = appWidgetHost,
+                                appWidgetManager = appWidgetManager,
+                                onButtonPressed = onButtonPressed,
+                                onButtonTouchStarted = onButtonTouchStarted,
+                                onButtonTouchEnded = onButtonTouchEnded
+                            )
+                        }
+                        PageIndicator(
+                            modifier = Modifier
+                                .align(Alignment.BottomCenter)
+                                .padding(bottom = 2.dp),
+                            pageCount = deckPages.size,
+                            activeIndex = deckPages.indexOfFirst { it.id == activePageId }.coerceAtLeast(0),
+                            axis = PageSwipeAxis.Horizontal
+                        )
+                    }
+                }
+            }
+            Box(
+                modifier = Modifier
+                    .width(sidebarWidth)
+                    .fillMaxHeight()
+                    .align(Alignment.CenterStart)
+            ) {
+                ConsoleSidebar(
+                    modifier = Modifier.matchParentSize(),
+                    status = status,
+                    panelOptions = panelOptions,
+                    onSettings = onSettings
                 )
             }
         }
     }
 }
 
+
 @Composable
 private fun ConsoleButtonRows(
     modifier: Modifier = Modifier,
     rows: List<List<DeckButton>>,
-    rowHeight: Dp,
+    rowWeights: List<Float>,
     spacing: Dp,
     status: HidStatus,
     appWidgetHost: AppWidgetHost?,
@@ -4997,41 +5738,47 @@ private fun ConsoleButtonRows(
     onButtonTouchStarted: () -> Unit,
     onButtonTouchEnded: () -> Unit
 ) {
-    Column(
-        modifier = modifier,
-        verticalArrangement = Arrangement.spacedBy(spacing)
-    ) {
-        rows.forEach { rowButtons ->
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(rowHeight)
-                    .weight(1f),
-                horizontalArrangement = Arrangement.spacedBy(spacing)
-            ) {
-                rowButtons.forEach { button ->
-                    DeckKey(
-                        modifier = Modifier
-                            .weight(button.spanColumns.coerceAtLeast(1).toFloat())
-                            .fillMaxHeight(),
-                        button = button,
-                        status = status,
-                        appWidgetHost = appWidgetHost,
-                        appWidgetManager = appWidgetManager,
-                        visualMode = DeckUiMode.Console,
-                        classicSolidButtonBackground = true,
-                        enabled = true,
-                        previewMode = false,
-                        columns = rowButtons.size.coerceAtLeast(1),
-                        slot = button.position,
-                        cellSize = rowHeight,
-                        spacing = spacing,
-                        onPressed = { onButtonPressed(button) },
-                        onPressFeedback = onButtonTouchStarted,
-                        onReleaseFeedback = onButtonTouchEnded,
-                        onEdit = {},
-                        onMove = {}
-                    )
+    BoxWithConstraints(modifier = modifier) {
+        val safeRows = rows.ifEmpty { listOf(emptyList()) }
+        val weights = rowWeights.takeIf { it.size == safeRows.size } ?: List(safeRows.size) { 1f }
+        val availableHeight = maxHeight - spacing * (safeRows.size - 1).coerceAtLeast(0).toFloat()
+        val totalWeight = weights.sum().takeIf { it > 0f } ?: safeRows.size.toFloat()
+        Column(
+            modifier = Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.spacedBy(spacing)
+        ) {
+            safeRows.forEachIndexed { rowIndex, rowButtons ->
+                val rowHeight = availableHeight * (weights[rowIndex] / totalWeight)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(rowHeight),
+                    horizontalArrangement = Arrangement.spacedBy(spacing)
+                ) {
+                    rowButtons.forEach { button ->
+                        DeckKey(
+                            modifier = Modifier
+                                .weight(button.spanColumns.coerceAtLeast(1).toFloat())
+                                .fillMaxHeight(),
+                            button = button,
+                            status = status,
+                            appWidgetHost = appWidgetHost,
+                            appWidgetManager = appWidgetManager,
+                            visualMode = DeckUiMode.Console,
+                            classicSolidButtonBackground = true,
+                            enabled = true,
+                            previewMode = false,
+                            columns = rowButtons.size.coerceAtLeast(1),
+                            slot = button.position,
+                            cellSize = rowHeight,
+                            spacing = spacing,
+                            onPressed = { onButtonPressed(button) },
+                            onPressFeedback = onButtonTouchStarted,
+                            onReleaseFeedback = onButtonTouchEnded,
+                            onEdit = {},
+                            onMove = {}
+                        )
+                    }
                 }
             }
         }
@@ -5056,7 +5803,16 @@ private fun consoleLayoutRows(
 private fun defaultConsoleLayout(buttons: List<DeckButton>): ConsoleLayoutConfig {
     val buttonIds = buttons.filterNot { buttonAppAction(it) == DeckActionType.Settings }.associateBy { it.id }
     val defaultRows = defaultConsoleRows(buttonIds.values.toList(), DEFAULT_COLUMNS, DEFAULT_ROWS)
-    return ConsoleLayoutConfig(defaultRows.map { row -> row.map { it.id } })
+    return ConsoleLayoutConfig(
+        rows = defaultRows.map { row -> row.map { it.id } },
+        rowWeights = List(defaultRows.size) { 1f },
+        sidebarFraction = CONSOLE_DEFAULT_SIDEBAR_FRACTION
+    )
+}
+
+private fun consoleSidebarWidth(totalWidth: Dp, sidebarFraction: Float): Dp {
+    val fraction = sidebarFraction.coerceIn(CONSOLE_MIN_SIDEBAR_FRACTION, CONSOLE_MAX_SIDEBAR_FRACTION)
+    return (totalWidth * fraction).coerceIn(124.dp, 280.dp)
 }
 
 private fun defaultConsoleRows(
@@ -5114,6 +5870,63 @@ private fun consoleMediaOrder(button: DeckButton): Int {
     }
 }
 
+private fun Modifier.consolePanelDropShadow(
+    shape: Shape,
+    darkTheme: Boolean
+): Modifier {
+    return this
+        .dropShadow(
+            shape = shape,
+            shadow = DropShadow(
+                radius = if (darkTheme) 18.dp else 22.dp,
+                spread = if (darkTheme) 4.dp else 5.dp,
+                offset = DpOffset(0.dp, 3.dp),
+                color = Color.Black.copy(alpha = if (darkTheme) 0.34f else 0.14f)
+            )
+        )
+}
+
+private fun Modifier.consoleButtonDropShadow(
+    shape: Shape,
+    darkTheme: Boolean,
+    pressed: Boolean
+): Modifier {
+    val blackAlpha = when {
+        pressed && darkTheme -> 0.22f
+        pressed -> 0.10f
+        darkTheme -> 0.34f
+        else -> 0.14f
+    }
+    return this
+        .dropShadow(
+            shape = shape,
+            shadow = DropShadow(
+                radius = 0.dp,
+                spread = if (pressed) 1.dp else 1.4.dp,
+                offset = DpOffset(0.dp, 0.dp),
+                color = Color.White.copy(alpha = if (darkTheme) 0.18f else 0.32f)
+            )
+        )
+        .dropShadow(
+            shape = shape,
+            shadow = DropShadow(
+                radius = if (pressed) 2.dp else 3.dp,
+                spread = if (pressed) 1.6.dp else 2.4.dp,
+                offset = DpOffset(0.dp, 0.dp),
+                color = Color.Black.copy(alpha = if (darkTheme) 0.20f else 0.08f)
+            )
+        )
+        .dropShadow(
+            shape = shape,
+            shadow = DropShadow(
+                radius = if (pressed) 9.dp else 18.dp,
+                spread = if (pressed) 2.dp else 6.dp,
+                offset = DpOffset(0.dp, if (pressed) 1.dp else 4.dp),
+                color = Color.Black.copy(alpha = blackAlpha)
+            )
+        )
+}
+
 @Composable
 private fun ConsoleSidebar(
     modifier: Modifier = Modifier,
@@ -5122,79 +5935,96 @@ private fun ConsoleSidebar(
     onSettings: () -> Unit
 ) {
     val colors = LocalDeckThemeColors.current
+    val shape = RoundedCornerShape(20.dp)
     Surface(
-        modifier = modifier,
-        shape = RoundedCornerShape(20.dp),
+        modifier = modifier.consolePanelDropShadow(
+            shape = shape,
+            darkTheme = isSystemInDarkTheme()
+        ),
+        shape = shape,
         color = colors.consoleSidebar,
-        tonalElevation = 0.dp
+        tonalElevation = 0.dp,
+        shadowElevation = 0.dp
     ) {
-        Column(
-            modifier = Modifier.padding(14.dp),
-            verticalArrangement = Arrangement.SpaceBetween
+        ConsoleRaisedButtonFrame(
+            modifier = Modifier.fillMaxSize(),
+            shape = shape,
+            cornerRadius = 20.dp,
+            drawShadow = false,
+            drawHighlight = false,
+            shadowColor = Color.Black,
+            highlightColor = null
         ) {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text(
-                    text = stringResource(R.string.app_name),
-                    style = MaterialTheme.typography.headlineMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = colors.textPrimary,
-                    maxLines = 2
-                )
-                if (panelOptions.showConnection) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(10.dp)
-                                .clip(CircleShape)
-                                .background(statusDotColor(status.state))
-                        )
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(14.dp),
+                verticalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        text = stringResource(R.string.app_name),
+                        style = MaterialTheme.typography.headlineMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = colors.textPrimary,
+                        maxLines = 2
+                    )
+                    if (panelOptions.showConnection) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(10.dp)
+                                    .clip(CircleShape)
+                                    .background(statusDotColor(status.state))
+                            )
+                            Text(
+                                text = stringResource(status.state.labelRes()),
+                                style = MaterialTheme.typography.labelLarge,
+                                color = statusDotColor(status.state)
+                            )
+                        }
+                    }
+                    if (panelOptions.showMessage) {
                         Text(
-                            text = stringResource(status.state.labelRes()),
-                            style = MaterialTheme.typography.labelLarge,
-                            color = statusDotColor(status.state)
+                            text = status.message,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = colors.textSecondary,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
                 }
-                if (panelOptions.showMessage) {
-                    Text(
-                        text = status.message,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = colors.textSecondary,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-            }
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (panelOptions.showClock) {
-                    Text(
-                        text = currentTimeText(),
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = colors.textPrimary
-                    )
-                }
-                if (panelOptions.showDate) {
-                    Text(
-                        text = currentDateText(),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = colors.textSecondary
-                    )
-                }
-                OutlinedButton(
-                    modifier = Modifier.size(48.dp),
-                    shape = RoundedCornerShape(10.dp),
-                    contentPadding = PaddingValues(0.dp),
-                    onClick = onSettings
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Settings,
-                        contentDescription = stringResource(R.string.settings_title),
-                        tint = colors.textPrimary
-                    )
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (panelOptions.showClock) {
+                        Text(
+                            text = currentTimeText(),
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = colors.textPrimary
+                        )
+                    }
+                    if (panelOptions.showDate) {
+                        Text(
+                            text = currentDateText(),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = colors.textSecondary
+                        )
+                    }
+                    OutlinedButton(
+                        modifier = Modifier.size(48.dp),
+                        shape = RoundedCornerShape(10.dp),
+                        contentPadding = PaddingValues(0.dp),
+                        onClick = onSettings
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Settings,
+                            contentDescription = stringResource(R.string.settings_title),
+                            tint = colors.textPrimary
+                        )
+                    }
                 }
             }
         }
@@ -5209,6 +6039,7 @@ private fun ConsoleLayoutEditorPage(
     onBack: () -> Unit,
     onAddRow: () -> Unit,
     onReset: () -> Unit,
+    onLayoutChange: (ConsoleLayoutConfig) -> Unit,
     onPickButton: (Int) -> Unit,
     onRemoveButton: (Int, Int) -> Unit,
     onMoveButton: (Int, Int, Int) -> Unit,
@@ -5225,12 +6056,13 @@ private fun ConsoleLayoutEditorPage(
             Surface(
                 shape = RoundedCornerShape(14.dp),
                 color = colors.cardBackground,
-                tonalElevation = 0.dp
+                tonalElevation = 0.dp,
+                shadowElevation = 0.dp
             ) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .border(1.dp, colors.cardBorder, RoundedCornerShape(14.dp))
+                        .border(0.6.dp, colors.cardBorder.copy(alpha = 0.58f), RoundedCornerShape(14.dp))
                         .padding(12.dp),
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                     verticalAlignment = Alignment.CenterVertically
@@ -5256,15 +6088,26 @@ private fun ConsoleLayoutEditorPage(
         }
 
         val rows = layout.rows.ifEmpty { listOf(emptyList()) }
+        item {
+            ConsoleLayoutTuningPreview(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(330.dp),
+                layout = layout,
+                buttons = buttons,
+                onLayoutChange = onLayoutChange
+            )
+        }
         items(rows.indices.toList()) { rowIndex ->
             Surface(
                 shape = RoundedCornerShape(16.dp),
                 color = colors.consolePreviewBackground,
-                tonalElevation = 0.dp
+                tonalElevation = 0.dp,
+                shadowElevation = 0.dp
             ) {
                 Column(
                     modifier = Modifier
-                        .border(1.dp, colors.cardBorder, RoundedCornerShape(16.dp))
+                        .border(0.6.dp, colors.cardBorder.copy(alpha = 0.5f), RoundedCornerShape(16.dp))
                         .padding(12.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
@@ -5320,6 +6163,436 @@ private fun ConsoleLayoutEditorPage(
 }
 
 @Composable
+private fun ConsoleLayoutTuningPreview(
+    modifier: Modifier = Modifier,
+    layout: ConsoleLayoutConfig,
+    buttons: List<DeckButton>,
+    onLayoutChange: (ConsoleLayoutConfig) -> Unit
+) {
+    val colors = LocalDeckThemeColors.current
+    val density = LocalDensity.current
+    val rows = layout.rows.ifEmpty { listOf(emptyList()) }
+    val buttonById = buttons.associateBy { it.id }
+    val rowButtons = rows.map { row -> row.mapNotNull { buttonById[it] } }
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(18.dp),
+        color = colors.consolePreviewBackground,
+        tonalElevation = 0.dp,
+        shadowElevation = 0.dp
+    ) {
+        BoxWithConstraints(
+            modifier = Modifier
+                .border(0.6.dp, colors.cardBorder.copy(alpha = 0.48f), RoundedCornerShape(18.dp))
+                .padding(12.dp)
+        ) {
+            var workingSidebarFraction by remember(layout.sidebarFraction) {
+                mutableStateOf(layout.sidebarFraction)
+            }
+            val sidebarWidth = consoleSidebarWidth(maxWidth, workingSidebarFraction)
+            val contentGap = 14.dp
+            Row(
+                modifier = Modifier.fillMaxSize(),
+                horizontalArrangement = Arrangement.spacedBy(contentGap)
+            ) {
+                ConsoleLayoutPreviewSidebar(
+                    modifier = Modifier
+                        .width(sidebarWidth)
+                        .fillMaxHeight()
+                )
+                ConsoleLayoutPreviewRows(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight(),
+                    rows = rowButtons,
+                    layout = layout,
+                    onLayoutChange = onLayoutChange
+                )
+            }
+            ConsoleVerticalSplitHandle(
+                modifier = Modifier
+                    .offset(x = sidebarWidth + contentGap / 2f - 11.dp)
+                    .width(22.dp)
+                    .fillMaxHeight(),
+                onDelta = { deltaPx ->
+                    val totalWidthPx = with(density) { maxWidth.toPx() }.coerceAtLeast(1f)
+                    workingSidebarFraction = (workingSidebarFraction + deltaPx / totalWidthPx)
+                        .coerceIn(CONSOLE_MIN_SIDEBAR_FRACTION, CONSOLE_MAX_SIDEBAR_FRACTION)
+                    onLayoutChange(layout.copy(sidebarFraction = workingSidebarFraction))
+                }
+            )
+        }
+    }
+}
+
+@Composable
+private fun ConsoleLayoutPreviewSidebar(modifier: Modifier = Modifier) {
+    val colors = LocalDeckThemeColors.current
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(20.dp),
+        color = colors.consoleSidebar,
+        tonalElevation = 0.dp,
+        shadowElevation = 0.dp
+    ) {
+        ConsoleRaisedButtonFrame(
+            modifier = Modifier.fillMaxSize(),
+            shape = RoundedCornerShape(20.dp),
+            cornerRadius = 20.dp,
+            drawShadow = false
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(14.dp),
+                verticalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    LiftedText(
+                        text = stringResource(R.string.app_name),
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White,
+                        lifted = false
+                    )
+                    Text(
+                        text = stringResource(R.string.status_connected),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = Color(0xFF79E46F)
+                    )
+                }
+                Box(
+                    modifier = Modifier
+                        .size(38.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(Color.White.copy(alpha = 0.12f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Settings,
+                        contentDescription = null,
+                        tint = Color.White
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ConsoleLayoutPreviewRows(
+    modifier: Modifier = Modifier,
+    rows: List<List<DeckButton>>,
+    layout: ConsoleLayoutConfig,
+    onLayoutChange: (ConsoleLayoutConfig) -> Unit
+) {
+    val colors = LocalDeckThemeColors.current
+    val density = LocalDensity.current
+    val rowSpacing = 12.dp
+    BoxWithConstraints(modifier = modifier) {
+        val safeRows = rows.ifEmpty { listOf(emptyList()) }
+        var weights by remember(layout.rows, layout.rowWeights, safeRows.size) {
+            mutableStateOf(normalizedConsoleRowWeights(layout, safeRows.size))
+        }
+        val totalWeight = weights.sum().takeIf { it > 0f } ?: safeRows.size.toFloat()
+        val availableHeight = maxHeight - rowSpacing * (safeRows.size - 1).coerceAtLeast(0).toFloat()
+        val rowHeights = weights.map { availableHeight * (it / totalWeight) }
+
+        Column(
+            modifier = Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.spacedBy(rowSpacing)
+        ) {
+            safeRows.forEachIndexed { rowIndex, buttons ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(rowHeights[rowIndex]),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    if (buttons.isEmpty()) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .clip(RoundedCornerShape(18.dp))
+                                .background(Color.White.copy(alpha = 0.06f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = stringResource(R.string.add_button),
+                                color = colors.textSecondary
+                            )
+                        }
+                    } else {
+                        buttons.forEach { button ->
+                            ConsoleLayoutPreviewButton(
+                                modifier = Modifier
+                                    .weight(button.spanColumns.coerceAtLeast(1).toFloat())
+                                    .fillMaxHeight(),
+                                button = button
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        var boundaryY = 0.dp
+        rowHeights.dropLast(1).forEachIndexed { index, rowHeight ->
+            boundaryY += rowHeight
+            ConsoleRowHeightHandle(
+                modifier = Modifier
+                    .offset(y = boundaryY + rowSpacing / 2f - 10.dp)
+                    .fillMaxWidth()
+                    .height(20.dp),
+                onDelta = { deltaPx ->
+                    val totalHeightPx = with(density) { maxHeight.toPx() }.coerceAtLeast(1f)
+                    val deltaWeight = deltaPx / totalHeightPx * totalWeight
+                    weights = adjustConsoleRowBoundary(weights, index, deltaWeight)
+                    onLayoutChange(layout.copy(rowWeights = weights))
+                }
+            )
+            boundaryY += rowSpacing
+        }
+    }
+}
+
+@Composable
+private fun ConsoleRaisedButtonFrame(
+    modifier: Modifier = Modifier,
+    shape: RoundedCornerShape = RoundedCornerShape(18.dp),
+    cornerRadius: Dp = 18.dp,
+    pressed: Boolean = false,
+    drawShadow: Boolean = true,
+    drawHighlight: Boolean = false,
+    shadowColor: Color = Color.Black,
+    highlightColor: Color? = null,
+    content: @Composable () -> Unit
+) {
+    val density = LocalDensity.current
+    Box(modifier = modifier) {
+        if (drawShadow) {
+            Canvas(
+                modifier = Modifier
+                    .matchParentSize()
+                    .graphicsLayer {
+                        scaleX = 1.12f
+                        scaleY = 1.12f
+                    }
+            ) {
+                val radiusPx = with(density) { cornerRadius.toPx() }
+                drawRoundRect(
+                    brush = Brush.radialGradient(
+                        colorStops = arrayOf(
+                            0.00f to shadowColor.copy(alpha = if (pressed) 0.36f else 0.32f),
+                            0.24f to shadowColor.copy(alpha = if (pressed) 0.30f else 0.25f),
+                            0.48f to shadowColor.copy(alpha = if (pressed) 0.13f else 0.15f),
+                            0.74f to shadowColor.copy(alpha = if (pressed) 0.04f else 0.06f),
+                            1.00f to Color.Transparent
+                        ),
+                        center = Offset(size.width / 2f, size.height / 2f),
+                        radius = maxOf(size.width, size.height) * 0.72f
+                    ),
+                    topLeft = Offset.Zero,
+                    size = Size(
+                        width = size.width,
+                        height = size.height
+                    ),
+                    cornerRadius = CornerRadius(radiusPx * 1.16f, radiusPx * 1.16f)
+                )
+                drawRoundRect(
+                    brush = Brush.radialGradient(
+                        colorStops = arrayOf(
+                            0.00f to shadowColor.copy(alpha = if (pressed) 0.14f else 0.12f),
+                            0.44f to shadowColor.copy(alpha = if (pressed) 0.08f else 0.07f),
+                            0.72f to shadowColor.copy(alpha = if (pressed) 0.02f else 0.03f),
+                            1.00f to Color.Transparent
+                        ),
+                        center = Offset(size.width / 2f, size.height / 2f),
+                        radius = maxOf(size.width, size.height)
+                    ),
+                    topLeft = Offset.Zero,
+                    size = Size(width = size.width, height = size.height),
+                    cornerRadius = CornerRadius(radiusPx * 1.24f, radiusPx * 1.24f)
+                )
+            }
+        }
+        content()
+        if (drawHighlight) {
+            Canvas(
+                modifier = Modifier
+                    .matchParentSize()
+                    .clip(shape)
+            ) {
+                val strokeWidth = with(density) { 0.8.dp.toPx() }
+                val inset = strokeWidth / 2f
+                val radiusPx = with(density) { cornerRadius.toPx() }
+                val accent = highlightColor
+                drawRoundRect(
+                    brush = Brush.linearGradient(
+                        colors = if (pressed) {
+                            listOf(
+                                Color.Black.copy(alpha = 0.36f),
+                                Color.Black.copy(alpha = 0.14f),
+                                (accent ?: Color.White).copy(alpha = if (accent == null) 0.12f else 0.20f),
+                                (accent ?: Color.White).copy(alpha = if (accent == null) 0.24f else 0.34f)
+                            )
+                        } else {
+                            listOf(
+                                (accent ?: Color.White).copy(alpha = if (accent == null) 0.34f else 0.56f),
+                                (accent ?: Color.White).copy(alpha = if (accent == null) 0.13f else 0.24f),
+                                Color.Black.copy(alpha = 0.10f),
+                                Color.Black.copy(alpha = 0.30f)
+                            )
+                        },
+                        start = Offset.Zero,
+                        end = Offset(size.width, size.height)
+                    ),
+                    topLeft = Offset(inset, inset),
+                    size = Size(
+                        width = (size.width - strokeWidth).coerceAtLeast(0f),
+                        height = (size.height - strokeWidth).coerceAtLeast(0f)
+                    ),
+                    cornerRadius = CornerRadius(radiusPx, radiusPx),
+                    style = Stroke(width = strokeWidth)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ConsoleLayoutPreviewButton(
+    modifier: Modifier = Modifier,
+    button: DeckButton
+) {
+    val color = consoleButtonColor(button)
+    val contentColor = if (color.luminance() > 0.55f) Color(0xFF0A1620) else Color.White
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(20.dp),
+        color = color,
+        shadowElevation = 0.dp,
+        tonalElevation = 0.dp
+    ) {
+        ConsoleRaisedButtonFrame(
+            modifier = Modifier.fillMaxSize(),
+            shape = RoundedCornerShape(20.dp),
+            cornerRadius = 20.dp,
+            drawShadow = false
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(10.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    materialIconFor(button)?.let { icon ->
+                        LiftedIcon(
+                            imageVector = icon,
+                            contentDescription = null,
+                            tint = contentColor,
+                            modifier = Modifier.size(30.dp),
+                            shadowSize = 30.dp,
+                            lifted = false
+                        )
+                    }
+                    LiftedText(
+                        text = buttonDisplayTitle(button),
+                        color = contentColor,
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        lifted = false
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ConsoleVerticalSplitHandle(
+    modifier: Modifier = Modifier,
+    onDelta: (Float) -> Unit
+) {
+    Box(
+        modifier = modifier
+            .pointerInput(Unit) {
+                detectDragGestures { change, dragAmount ->
+                    change.consume()
+                    onDelta(dragAmount.x)
+                }
+            },
+        contentAlignment = Alignment.Center
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxHeight()
+                .width(2.dp)
+                .clip(RoundedCornerShape(100.dp))
+                .background(Color.White.copy(alpha = 0.24f))
+        )
+        Box(
+            modifier = Modifier
+                .size(width = 8.dp, height = 54.dp)
+                .clip(RoundedCornerShape(100.dp))
+                .background(Color(0xFF26BFFF))
+        )
+    }
+}
+
+@Composable
+private fun ConsoleRowHeightHandle(
+    modifier: Modifier = Modifier,
+    onDelta: (Float) -> Unit
+) {
+    Box(
+        modifier = modifier
+            .pointerInput(Unit) {
+                detectDragGestures { change, dragAmount ->
+                    change.consume()
+                    onDelta(dragAmount.y)
+                }
+            },
+        contentAlignment = Alignment.Center
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(2.dp)
+                .clip(RoundedCornerShape(100.dp))
+                .background(Color.White.copy(alpha = 0.20f))
+        )
+        Box(
+            modifier = Modifier
+                .size(width = 54.dp, height = 8.dp)
+                .clip(RoundedCornerShape(100.dp))
+                .background(Color(0xFF26BFFF))
+        )
+    }
+}
+
+private fun adjustConsoleRowBoundary(
+    weights: List<Float>,
+    boundaryIndex: Int,
+    deltaWeight: Float
+): List<Float> {
+    if (boundaryIndex !in 0 until weights.lastIndex) return weights
+    val next = weights.toMutableList()
+    val upper = next[boundaryIndex]
+    val lower = next[boundaryIndex + 1]
+    val applied = deltaWeight.coerceIn(CONSOLE_MIN_ROW_WEIGHT - upper, lower - CONSOLE_MIN_ROW_WEIGHT)
+    next[boundaryIndex] = upper + applied
+    next[boundaryIndex + 1] = lower - applied
+    return next
+}
+
+@Composable
 private fun ConsoleEditorButtonItem(
     modifier: Modifier = Modifier,
     button: DeckButton,
@@ -5330,49 +6603,59 @@ private fun ConsoleEditorButtonItem(
     onMoveLeft: () -> Unit,
     onMoveRight: () -> Unit
 ) {
-    val colors = LocalDeckThemeColors.current
     Surface(
         modifier = modifier,
         shape = RoundedCornerShape(18.dp),
         color = consoleButtonColor(button),
+        shadowElevation = 0.dp,
         tonalElevation = 0.dp
     ) {
-        Column(
-            modifier = Modifier
-                .border(1.dp, colors.cardBorder, RoundedCornerShape(18.dp))
-                .padding(10.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
+        ConsoleRaisedButtonFrame(
+            modifier = Modifier.fillMaxSize(),
+            shape = RoundedCornerShape(18.dp),
+            cornerRadius = 18.dp,
+            drawShadow = false
         ) {
-            materialIconFor(button)?.let { icon ->
-                Icon(
-                    imageVector = icon,
-                    contentDescription = null,
-                    tint = Color.White,
-                    modifier = Modifier.size(24.dp)
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(10.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                materialIconFor(button)?.let { icon ->
+                    LiftedIcon(
+                        imageVector = icon,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(24.dp),
+                        shadowSize = 24.dp,
+                        lifted = false
+                    )
+                }
+                LiftedText(
+                    text = button.title,
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    lifted = false
                 )
-            }
-            Text(
-                text = button.title,
-                style = MaterialTheme.typography.labelLarge,
-                fontWeight = FontWeight.Bold,
-                color = Color.White,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                ConsoleMiniButton(enabled = canMoveLeft, onClick = onMoveLeft) {
-                    Text("<")
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    ConsoleMiniButton(enabled = canMoveLeft, onClick = onMoveLeft) {
+                        Text("<")
+                    }
+                    ConsoleMiniButton(onClick = onEdit) {
+                        Text(stringResource(R.string.edit_key))
+                    }
+                    ConsoleMiniButton(enabled = canMoveRight, onClick = onMoveRight) {
+                        Text(">")
+                    }
                 }
-                ConsoleMiniButton(onClick = onEdit) {
-                    Text(stringResource(R.string.edit_key))
+                ConsoleMiniButton(onClick = onRemove) {
+                    Text(stringResource(R.string.delete))
                 }
-                ConsoleMiniButton(enabled = canMoveRight, onClick = onMoveRight) {
-                    Text(">")
-                }
-            }
-            ConsoleMiniButton(onClick = onRemove) {
-                Text(stringResource(R.string.delete))
             }
         }
     }
@@ -5953,7 +7236,7 @@ private fun DeckKey(
     }
     val contentColor = when {
         !enabled -> MaterialTheme.colorScheme.onSurfaceVariant
-        isConsole && containerColor.luminance() > 0.5f -> themeColors.textPrimary
+        isConsole -> if (darkTheme) Color.White else Color(0xFF243950)
         !isConsole && !classicSolidButtonBackground -> if (button.color.luminance() > 0.62f) {
             themeColors.textPrimary
         } else {
@@ -6043,8 +7326,10 @@ private fun DeckKey(
             onClick = onPressed
         )
     }
-    val surfaceColor = if (touchPressed) {
-        Color.White.copy(alpha = if (isConsole) 0.12f else 0.16f).compositeOver(containerColor)
+    val surfaceColor = if (touchPressed && isConsole) {
+        themeColors.consoleButtonFeatured
+    } else if (touchPressed) {
+        Color.White.copy(alpha = 0.16f).compositeOver(containerColor)
     } else {
         containerColor
     }
@@ -6068,6 +7353,17 @@ private fun DeckKey(
                     else -> 0f
                 }
             )
+            .then(
+                if (isConsole) {
+                    Modifier.consoleButtonDropShadow(
+                        shape = buttonShape,
+                        darkTheme = darkTheme,
+                        pressed = touchPressed
+                    )
+                } else {
+                    Modifier
+                }
+            )
             .border(
                 width = if (!isConsole && !classicSolidButtonBackground) 2.dp else 0.dp,
                 color = classicOutlineColor,
@@ -6083,6 +7379,7 @@ private fun DeckKey(
             .then(clickModifier),
         shape = buttonShape,
         tonalElevation = if (isConsole) 0.dp else 2.dp,
+        shadowElevation = 0.dp,
         color = surfaceColor
     ) {
     val showText = if (isConsole) cellSize >= 58.dp else cellSize >= 96.dp
@@ -6132,6 +7429,34 @@ private fun DeckKey(
             }
             return@Surface
         }
+        if (isConsole) {
+            ConsoleRaisedButtonFrame(
+                modifier = Modifier.fillMaxSize(),
+                shape = buttonShape,
+                cornerRadius = 18.dp,
+                pressed = touchPressed,
+                drawShadow = false,
+                drawHighlight = false,
+                shadowColor = Color.Black,
+                highlightColor = null
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(6.dp)
+                ) {
+                    ClassicDeckKeyContent(
+                        button = button,
+                        status = status,
+                        contentColor = contentColor,
+                        cellSize = cellSize,
+                        contentScale = contentScale,
+                        liftedContent = true
+                    )
+                }
+            }
+            return@Surface
+        }
         if (!isConsole) {
             ClassicDeckKeyContent(
                 button = button,
@@ -6148,7 +7473,15 @@ private fun DeckKey(
                 .then(
                     if (isConsole) {
                         Modifier
-                            .border(1.dp, themeColors.cardBorder, RoundedCornerShape(18.dp))
+                            .background(
+                                Brush.verticalGradient(
+                                    listOf(
+                                        Color.White.copy(alpha = 0.18f),
+                                        Color.Transparent,
+                                        Color.Black.copy(alpha = 0.18f)
+                                    )
+                                )
+                            )
                             .padding(10.dp)
                     } else {
                         Modifier.padding(8.dp)
@@ -6163,11 +7496,11 @@ private fun DeckKey(
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 if (button.displayMode != DeckDisplayMode.KeywordOnly || !showText) {
-                    DeckButtonIcon(
-                        button = button,
-                        tint = contentColor,
-                        large = button.displayMode == DeckDisplayMode.IconOnly || !showText
-                    )
+                DeckButtonIcon(
+                    button = button,
+                    tint = contentColor,
+                    large = button.displayMode == DeckDisplayMode.IconOnly || !showText
+                )
                 }
                 if ((button.displayMode == DeckDisplayMode.IconAndText || isConsole) && showText) {
                     Row(
@@ -6241,7 +7574,8 @@ private fun ClassicDeckKeyContent(
     status: HidStatus,
     contentColor: Color,
     cellSize: Dp,
-    contentScale: Float = 1f
+    contentScale: Float = 1f,
+    liftedContent: Boolean = false
 ) {
     val displayTitle = buttonDisplayTitle(button)
     val subtitleText = buttonSubtitle(button, status)
@@ -6262,26 +7596,28 @@ private fun ClassicDeckKeyContent(
                 contentAlignment = Alignment.Center
             ) {
                 if (hasTitle) {
-                    Text(
+                    LiftedText(
                         text = displayTitle,
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.Bold,
                         color = contentColor,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
-                        textAlign = TextAlign.Center
+                        textAlign = TextAlign.Center,
+                        lifted = liftedContent
                     )
                 }
             }
             if (showSubtitle) {
-                Text(
+                LiftedText(
                     text = subtitleText,
                     style = MaterialTheme.typography.labelMedium,
                     fontWeight = FontWeight.SemiBold,
                     color = contentColor.copy(alpha = 0.86f),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    textAlign = TextAlign.Center
+                    textAlign = TextAlign.Center,
+                    lifted = liftedContent
                 )
             }
         }
@@ -6306,16 +7642,19 @@ private fun ClassicDeckKeyContent(
                 DeckButtonIcon(
                     button = button,
                     tint = contentColor,
-                    large = button.displayMode == DeckDisplayMode.IconOnly || !showText
+                    large = button.displayMode == DeckDisplayMode.IconOnly || !showText,
+                    lifted = liftedContent,
+                    shadowMaxSize = cellSize * 0.98f
                 )
             } else {
-                Text(
+                LiftedText(
                     text = displayTitle,
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                     color = contentColor,
                     maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
+                    overflow = TextOverflow.Ellipsis,
+                    lifted = liftedContent
                 )
             }
         }
@@ -6337,25 +7676,27 @@ private fun ClassicDeckKeyContent(
                                     .background(statusDotColor(status.state))
                             )
                         }
-                        Text(
+                        LiftedText(
                             text = displayTitle,
                             style = MaterialTheme.typography.labelMedium,
                             fontWeight = FontWeight.Bold,
                             color = contentColor,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
-                            textAlign = TextAlign.Center
+                            textAlign = TextAlign.Center,
+                            lifted = liftedContent
                         )
                     }
                 }
                 if (showSubtitle) {
-                    Text(
+                    LiftedText(
                         text = subtitleText,
                         style = MaterialTheme.typography.labelSmall,
                         color = contentColor.copy(alpha = 0.82f),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
-                        textAlign = TextAlign.Center
+                        textAlign = TextAlign.Center,
+                        lifted = liftedContent
                     )
                 }
             }
@@ -6466,50 +7807,201 @@ private fun currentDateText(): String {
 private fun DeckButtonIcon(
     button: DeckButton,
     tint: Color,
-    large: Boolean = false
+    large: Boolean = false,
+    lifted: Boolean = false,
+    shadowMaxSize: Dp? = null
 ) {
     val image = rememberImageBitmap(button.iconImageUri)
     val iconSize = if (large) 80.dp else 52.dp
+    val shadowRenderSize = boundedIconShadowSize(iconSize, shadowMaxSize)
+    val iconSizePx = with(LocalDensity.current) { iconSize.toPx().roundToInt() }
+    val shadowSizePx = with(LocalDensity.current) { shadowRenderSize.toPx().roundToInt() }
+    val lightConsoleMode = lifted && !isSystemInDarkTheme()
     when {
         image != null -> {
-            Image(
-                bitmap = image,
-                contentDescription = button.title,
-                modifier = Modifier.size(iconSize)
-            )
+            if (lifted) {
+                val shadow = rememberBakedBitmapIconShadow(
+                    key = button.iconImageUri,
+                    imageBitmap = image,
+                    sizePx = iconSizePx,
+                    shadowSizePx = shadowSizePx,
+                    enabled = true,
+                    lightMode = lightConsoleMode
+                )
+                Box(modifier = Modifier.size(shadowRenderSize)) {
+                    if (shadow != null) {
+                        Image(
+                            bitmap = shadow,
+                            contentDescription = null,
+                            modifier = Modifier
+                                .size(shadowRenderSize)
+                                .align(Alignment.Center)
+                        )
+                    }
+                    Image(
+                        bitmap = image,
+                        contentDescription = button.title,
+                        modifier = Modifier
+                            .size(iconSize)
+                            .align(Alignment.Center)
+                    )
+                }
+            } else {
+                Image(
+                    bitmap = image,
+                    contentDescription = button.title,
+                    modifier = Modifier.size(iconSize)
+                )
+            }
         }
 
         materialIconFor(button) != null -> {
-            Icon(
+            LiftedIcon(
                 imageVector = materialIconFor(button)!!,
                 contentDescription = button.title,
                 modifier = Modifier.size(iconSize),
-                tint = tint
+                shadowSize = iconSize,
+                shadowMaxSize = shadowMaxSize,
+                shadowKey = "${button.icon}:${button.actionType}:${button.payload}",
+                tint = tint,
+                lifted = lifted
             )
         }
 
         else -> {
-            Text(
+            LiftedText(
                 text = button.icon.ifBlank { button.title.take(1).uppercase() },
                 style = if (large) MaterialTheme.typography.displayMedium else MaterialTheme.typography.headlineMedium,
                 fontWeight = FontWeight.Bold,
                 color = tint,
                 maxLines = 1,
-                overflow = TextOverflow.Ellipsis
+                overflow = TextOverflow.Ellipsis,
+                lifted = lifted
             )
         }
     }
 }
 
 @Composable
+private fun LiftedIcon(
+    imageVector: ImageVector,
+    contentDescription: String?,
+    modifier: Modifier = Modifier,
+    shadowSize: Dp = 48.dp,
+    shadowMaxSize: Dp? = null,
+    shadowKey: String = imageVector.name,
+    tint: Color,
+    lifted: Boolean
+) {
+    if (!lifted) {
+        Icon(
+            imageVector = imageVector,
+            contentDescription = contentDescription,
+            modifier = modifier,
+            tint = tint
+        )
+        return
+    }
+    val shadowSizePx = with(LocalDensity.current) { shadowSize.toPx().roundToInt() }
+    val shadowRenderSize = boundedIconShadowSize(shadowSize, shadowMaxSize)
+    val shadowRenderSizePx = with(LocalDensity.current) { shadowRenderSize.toPx().roundToInt() }
+    val lightConsoleMode = !isSystemInDarkTheme()
+    val shadow = rememberBakedVectorIconShadow(
+        key = "$shadowKey:${imageVector.name}:${imageVector.viewportWidth}:${imageVector.viewportHeight}",
+        imageVector = imageVector,
+        sizePx = shadowSizePx,
+        shadowSizePx = shadowRenderSizePx,
+        enabled = true,
+        lightMode = lightConsoleMode
+    )
+    val mattePearlBody = rememberBakedVectorIconBody(
+        key = "main-console-matte-pearl-hairline:$shadowKey:${imageVector.name}:${imageVector.viewportWidth}:${imageVector.viewportHeight}",
+        imageVector = imageVector,
+        sizePx = shadowSizePx,
+        style = BakedIconBodyStyle.SharpHairline,
+        tone = BakedIconTone.MattePearl,
+        enabled = lightConsoleMode
+    )
+    Box(
+        modifier = Modifier.size(shadowRenderSize),
+        contentAlignment = Alignment.Center
+    ) {
+        if (shadow != null) {
+            Image(
+                bitmap = shadow,
+                contentDescription = null,
+                modifier = Modifier
+                    .size(shadowRenderSize)
+                    .align(Alignment.Center)
+            )
+        }
+        if (mattePearlBody != null) {
+            Image(
+                bitmap = mattePearlBody,
+                contentDescription = contentDescription,
+                modifier = modifier
+            )
+        } else {
+            Icon(
+                imageVector = imageVector,
+                contentDescription = contentDescription,
+                modifier = modifier,
+                tint = tint
+            )
+        }
+    }
+}
+
+private const val ICON_SHADOW_RENDER_SCALE = 2.25f
+
+private fun boundedIconShadowSize(iconSize: Dp, shadowMaxSize: Dp?): Dp {
+    val preferred = iconSize * ICON_SHADOW_RENDER_SCALE
+    val maxSize = shadowMaxSize ?: preferred
+    val bounded = if (preferred > maxSize) maxSize else preferred
+    return if (bounded < iconSize) iconSize else bounded
+}
+
+@Composable
+private fun LiftedText(
+    text: String,
+    modifier: Modifier = Modifier,
+    style: TextStyle,
+    fontWeight: FontWeight? = null,
+    color: Color,
+    maxLines: Int = Int.MAX_VALUE,
+    overflow: TextOverflow = TextOverflow.Clip,
+    textAlign: TextAlign? = null,
+    lifted: Boolean = false
+) {
+    if (!lifted) {
+        Text(
+            text = text,
+            modifier = modifier,
+            style = style,
+            fontWeight = fontWeight,
+            color = color,
+            maxLines = maxLines,
+            overflow = overflow,
+            textAlign = textAlign
+        )
+        return
+    }
+    Text(
+        text = text,
+        modifier = modifier,
+        style = style,
+        fontWeight = fontWeight,
+        color = color,
+        maxLines = maxLines,
+        overflow = overflow,
+        textAlign = textAlign
+    )
+}
+
+@Composable
 private fun consoleButtonColor(button: DeckButton): Color {
     val colors = LocalDeckThemeColors.current
-    return when {
-        button.actionType == DeckActionType.MediaKey &&
-            button.payload in setOf(MEDIA_PLAY_PAUSE, MEDIA_VOLUME_UP) -> colors.consoleButtonFeatured
-        buttonAppAction(button) == DeckActionType.BluetoothStatus -> colors.consoleButtonSystem
-        else -> colors.consoleButtonDefault
-    }
+    return colors.consoleButtonDefault
 }
 
 @Composable
@@ -7421,12 +8913,24 @@ private enum class SettingsTutorialStep {
     Bluetooth,
     Layout,
     Buttons,
-    DeckSettingsButton;
+    DeckSettingsButton
+}
 
-    fun next(): SettingsTutorialStep? {
-        val values = values()
-        val nextIndex = ordinal + 1
-        return values.getOrNull(nextIndex)
+private fun nextSettingsTutorialStep(step: SettingsTutorialStep): SettingsTutorialStep? {
+    return when (step) {
+        SettingsTutorialStep.Bluetooth -> SettingsTutorialStep.Layout
+        SettingsTutorialStep.Layout -> SettingsTutorialStep.Buttons
+        SettingsTutorialStep.Buttons -> SettingsTutorialStep.DeckSettingsButton
+        SettingsTutorialStep.DeckSettingsButton -> null
+    }
+}
+
+private fun settingsTutorialStepNumber(step: SettingsTutorialStep): Int {
+    return when (step) {
+        SettingsTutorialStep.Bluetooth -> 1
+        SettingsTutorialStep.Layout -> 2
+        SettingsTutorialStep.Buttons -> 3
+        SettingsTutorialStep.DeckSettingsButton -> 4
     }
 }
 
@@ -7444,7 +8948,7 @@ private fun ClassicSettingsTutorialOverlay(
         SettingsTutorialStep.Buttons -> ClassicButtonAccent
         SettingsTutorialStep.DeckSettingsButton -> ClassicButtonAccent
     }
-    val stepNumber = step.ordinal + 1
+    val stepNumber = settingsTutorialStepNumber(step)
     val title = when (step) {
         SettingsTutorialStep.Bluetooth -> stringResource(R.string.classic_tutorial_connect_title)
         SettingsTutorialStep.Layout -> stringResource(R.string.classic_tutorial_layout_title)
@@ -7560,13 +9064,13 @@ private fun ClassicSettingsTutorialOverlay(
                                 contentColor = Color.White
                             ),
                             onClick = {
-                                val next = step.next()
+                                val next = nextSettingsTutorialStep(step)
                                 if (next == null) onDismiss() else onStepChange(next)
                             }
                         ) {
                             Text(
                                 text = stringResource(
-                                    if (step.next() == null) R.string.classic_tutorial_done else R.string.next
+                                    if (nextSettingsTutorialStep(step) == null) R.string.classic_tutorial_done else R.string.next
                                 )
                             )
                         }
@@ -7637,7 +9141,7 @@ private fun ClassicDeckSettingsButtonTutorialOverlay(
             TutorialHighlightFrame(
                 modifier = highlightModifier,
                 accent = accent,
-                stepNumber = SettingsTutorialStep.DeckSettingsButton.ordinal + 1,
+                stepNumber = settingsTutorialStepNumber(SettingsTutorialStep.DeckSettingsButton),
                 title = stringResource(R.string.action_settings),
                 showBluetoothOrder = false
             )
@@ -7668,7 +9172,7 @@ private fun ClassicDeckSettingsButtonTutorialOverlay(
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
-                                text = (SettingsTutorialStep.DeckSettingsButton.ordinal + 1).toString(),
+                                text = settingsTutorialStepNumber(SettingsTutorialStep.DeckSettingsButton).toString(),
                                 style = MaterialTheme.typography.titleSmall,
                                 fontWeight = FontWeight.Bold,
                                 color = Color.White
@@ -7702,10 +9206,10 @@ private fun ClassicDeckSettingsButtonTutorialOverlay(
                         }
                     }
                 }
+                }
             }
         }
     }
-}
 
 @Composable
 private fun TutorialHighlightFrame(
@@ -8482,7 +9986,7 @@ private fun AppIconPickerDialog(
 private fun MobileDeckPreview() {
     MobileDeckTheme {
         val pages = remember { defaultDeckPages() }
-        val colors = deckThemeColors(DeckUiMode.Classic)
+        val colors = deckThemeColors(DeckUiMode.Classic, isSystemInDarkTheme())
         CompositionLocalProvider(LocalDeckThemeColors provides colors) {
             DeckPage(
                 modifier = Modifier.fillMaxSize(),
@@ -8512,6 +10016,64 @@ private fun MobileDeckPreview() {
                 onButtonEdit = {},
                 onButtonMoved = { _, _ -> },
                 onEmptySlotPressed = {}
+            )
+        }
+    }
+}
+
+@Preview(
+    name = "Console Deck Light",
+    widthDp = 960,
+    heightDp = 432,
+    showBackground = true,
+    uiMode = Configuration.UI_MODE_NIGHT_NO
+)
+@Composable
+private fun ConsoleDeckLightPreview() {
+    ConsoleDeckPreviewContent()
+}
+
+@Preview(
+    name = "Console Deck Dark",
+    widthDp = 960,
+    heightDp = 432,
+    showBackground = true,
+    uiMode = Configuration.UI_MODE_NIGHT_YES
+)
+@Composable
+private fun ConsoleDeckDarkPreview() {
+    ConsoleDeckPreviewContent()
+}
+
+
+@Composable
+private fun ConsoleDeckPreviewContent() {
+    MobileDeckTheme(style = MobileDeckThemeStyle.Console) {
+        val pages = remember { defaultDeckPages() }
+        val colors = deckThemeColors(DeckUiMode.Console, isSystemInDarkTheme())
+        val layout = remember(pages) { defaultConsoleLayout(pages.first().buttons) }
+        CompositionLocalProvider(LocalDeckThemeColors provides colors) {
+            ConsoleDeckSurface(
+                modifier = Modifier.fillMaxSize(),
+                deckPages = pages,
+                activePageId = pages.first().id,
+                pageSwipeAnimation = true,
+                pageSwipeDelta = 1,
+                pageAnimationSequence = 0,
+                pageSwipeMode = PageSwipeMode.Disabled,
+                layout = layout,
+                panelOptions = ConsolePanelOptions(),
+                columns = DEFAULT_COLUMNS,
+                rows = DEFAULT_ROWS,
+                spacing = DEFAULT_SPACING_DP.dp,
+                status = HidStatus(HidConnectionState.Disconnected, "Ready to register Bluetooth keyboard"),
+                appWidgetHost = null,
+                appWidgetManager = null,
+                onSettings = {},
+                onPageSwipe = {},
+                onButtonPressed = {},
+                onButtonTouchStarted = {},
+                onButtonTouchEnded = {}
             )
         }
     }

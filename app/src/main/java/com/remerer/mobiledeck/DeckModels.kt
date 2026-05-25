@@ -110,7 +110,9 @@ data class DragSwapCandidate(
 )
 
 data class ConsoleLayoutConfig(
-    val rows: List<List<Int>>
+    val rows: List<List<Int>>,
+    val rowWeights: List<Float> = emptyList(),
+    val sidebarFraction: Float = CONSOLE_DEFAULT_SIDEBAR_FRACTION
 )
 
 data class ConsolePanelOptions(
@@ -169,7 +171,7 @@ data class DeckThemeColors(
     val consoleButtonSystem: Color
 )
 
-val DefaultDeckThemeColors = DeckThemeColors(
+val ClassicDarkDeckThemeColors = DeckThemeColors(
     backgroundGradient = listOf(Color(0xFF0F141A), Color(0xFF151B22), Color(0xFF10151B)),
     sidebarBackground = Color(0xFF10171F).copy(alpha = 0.94f),
     sidebarBorder = Color.White.copy(alpha = 0.08f),
@@ -182,12 +184,81 @@ val DefaultDeckThemeColors = DeckThemeColors(
     actionStart = Color(0xFF18212B),
     actionEnd = Color(0xFF131B24),
     neutralIconBackground = Color(0xFF263342),
-    consoleSidebar = Color(0xFF17212B).copy(alpha = 0.86f),
+    consoleSidebar = Color(0xFF17212B),
     consolePreviewBackground = Color(0xFF101820),
     consoleButtonDefault = Color(0xFF24313D),
     consoleButtonFeatured = Color(0xFF245B9D),
     consoleButtonSystem = Color(0xFF1F5DAD)
 )
+
+val ClassicLightDeckThemeColors = DeckThemeColors(
+    backgroundGradient = listOf(Color(0xFFF7F9FC), Color(0xFFEFF4FA), Color(0xFFE6EDF5)),
+    sidebarBackground = Color.White.copy(alpha = 0.95f),
+    sidebarBorder = Color(0xFFD0DAE5),
+    cardBackground = Color.White.copy(alpha = 0.9f),
+    cardBorder = Color(0xFFD7E0EA),
+    textPrimary = Color(0xFF17202A),
+    textSecondary = Color(0xFF56616D),
+    textMuted = Color(0xFF838E99),
+    toggleBackground = Color(0xFFE8EEF5),
+    actionStart = Color(0xFFFFFFFF),
+    actionEnd = Color(0xFFF0F5FA),
+    neutralIconBackground = Color(0xFFDDE7F2),
+    consoleSidebar = Color.White.copy(alpha = 0.9f),
+    consolePreviewBackground = Color(0xFFEFF4FA),
+    consoleButtonDefault = Color(0xFFE1E8F0),
+    consoleButtonFeatured = Color(0xFF276DB4),
+    consoleButtonSystem = Color(0xFF2369B0)
+)
+
+val ConsoleDarkDeckThemeColors = DeckThemeColors(
+    backgroundGradient = listOf(Color(0xFF050A10), Color(0xFF0D1721), Color(0xFF06111A)),
+    sidebarBackground = Color(0xFF071018).copy(alpha = 0.92f),
+    sidebarBorder = Color.White.copy(alpha = 0.08f),
+    cardBackground = Color(0xFF121F2A).copy(alpha = 0.9f),
+    cardBorder = Color.White.copy(alpha = 0.045f),
+    textPrimary = Color.White,
+    textSecondary = Color.White.copy(alpha = 0.64f),
+    textMuted = Color.White.copy(alpha = 0.38f),
+    toggleBackground = Color(0xFF162432),
+    actionStart = Color(0xFF111D27),
+    actionEnd = Color(0xFF0D1720),
+    neutralIconBackground = Color(0xFF233342),
+    consoleSidebar = Color(0xFF1A2632),
+    consolePreviewBackground = Color(0xFF0B1621),
+    consoleButtonDefault = Color(0xFF202D39),
+    consoleButtonFeatured = Color(0xFF245B9D),
+    consoleButtonSystem = Color(0xFF1F5DAD)
+)
+
+val ConsoleLightDeckThemeColors = DeckThemeColors(
+    backgroundGradient = listOf(Color(0xFFF6FAFD), Color(0xFFECF3F8), Color(0xFFE1ECF3)),
+    sidebarBackground = Color(0xFFFAFCFE).copy(alpha = 0.98f),
+    sidebarBorder = Color(0xFFC9D8E4).copy(alpha = 0.72f),
+    cardBackground = Color(0xFFFAFCFE).copy(alpha = 0.96f),
+    cardBorder = Color(0xFFC8D6E3).copy(alpha = 0.58f),
+    textPrimary = Color(0xFF172A3D),
+    textSecondary = Color(0xFF64748A),
+    textMuted = Color(0xFF91A0AE),
+    toggleBackground = Color(0xFFF0F5F9),
+    actionStart = Color(0xFFF8FCFF),
+    actionEnd = Color(0xFFEAF5FB),
+    neutralIconBackground = Color(0xFFE4EEF6),
+    consoleSidebar = Color(0xFFFAFCFE),
+    consolePreviewBackground = Color(0xFFEEF5FA),
+    consoleButtonDefault = Color(0xFFF4F8FB),
+    consoleButtonFeatured = Color(0xFF1976B7),
+    consoleButtonSystem = Color(0xFF1D82BE)
+)
+
+fun deckThemeColors(mode: DeckUiMode, darkTheme: Boolean): DeckThemeColors {
+    return when (mode) {
+        DeckUiMode.Classic -> if (darkTheme) ClassicDarkDeckThemeColors else ClassicLightDeckThemeColors
+        DeckUiMode.Console -> if (darkTheme) ConsoleDarkDeckThemeColors else ConsoleLightDeckThemeColors
+    }
+}
+
+val DefaultDeckThemeColors = ClassicDarkDeckThemeColors
 
 val LocalDeckThemeColors = staticCompositionLocalOf { DefaultDeckThemeColors }
 
@@ -202,6 +273,7 @@ enum class AppPage {
     Deck,
     LayoutEditor,
     ConsoleLayoutEditor,
+    IconStyleTest,
     Settings
 }
 
