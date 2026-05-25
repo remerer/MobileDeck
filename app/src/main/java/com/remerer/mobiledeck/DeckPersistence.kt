@@ -177,24 +177,65 @@ fun saveDeckPages(context: Context, pages: List<DeckPageConfig>) {
 fun loadConsoleLayout(context: Context): ConsoleLayoutConfig {
     val raw = context.deckPrefs().getString(PREF_CONSOLE_LAYOUT, null) ?: return ConsoleLayoutConfig(emptyList())
     return runCatching {
-        val array = JSONArray(raw)
-        ConsoleLayoutConfig(
-            rows = List(array.length()) { rowIndex ->
-                val row = array.getJSONArray(rowIndex)
-                List(row.length()) { index -> row.getInt(index) }
-            }
-        )
+        val trimmed = raw.trim()
+        if (trimmed.startsWith("{")) {
+            val root = JSONObject(trimmed)
+            val rowsArray = root.getJSONArray("rows")
+            val weightsArray = root.optJSONArray("rowWeights")
+            ConsoleLayoutConfig(
+                rows = List(rowsArray.length()) { rowIndex ->
+                    val row = rowsArray.getJSONArray(rowIndex)
+                    List(row.length()) { index -> row.getInt(index) }
+                },
+                rowWeights = if (weightsArray == null) {
+                    emptyList()
+                } else {
+                    List(weightsArray.length()) { index -> weightsArray.getDouble(index).toFloat() }
+                },
+                sidebarFraction = root.optDouble("sidebarFraction", CONSOLE_DEFAULT_SIDEBAR_FRACTION.toDouble())
+                    .toFloat()
+                    .coerceIn(CONSOLE_MIN_SIDEBAR_FRACTION, CONSOLE_MAX_SIDEBAR_FRACTION)
+            )
+        } else {
+            val array = JSONArray(trimmed)
+            ConsoleLayoutConfig(
+                rows = List(array.length()) { rowIndex ->
+                    val row = array.getJSONArray(rowIndex)
+                    List(row.length()) { index -> row.getInt(index) }
+                }
+            )
+        }
     }.getOrDefault(ConsoleLayoutConfig(emptyList()))
 }
 
 fun saveConsoleLayout(context: Context, layout: ConsoleLayoutConfig) {
-    val array = JSONArray()
+    val rowsArray = JSONArray()
     layout.rows.forEach { row ->
         val rowArray = JSONArray()
         row.forEach { rowArray.put(it) }
-        array.put(rowArray)
+        rowsArray.put(rowArray)
     }
-    context.deckPrefs().edit().putString(PREF_CONSOLE_LAYOUT, array.toString()).apply()
+    val weightsArray = JSONArray()
+    normalizedConsoleRowWeights(layout, layout.rows.size).forEach { weightsArray.put(it.toDouble()) }
+    val root = JSONObject()
+        .put("rows", rowsArray)
+        .put("rowWeights", weightsArray)
+        .put(
+            "sidebarFraction",
+            layout.sidebarFraction.coerceIn(CONSOLE_MIN_SIDEBAR_FRACTION, CONSOLE_MAX_SIDEBAR_FRACTION).toDouble()
+        )
+    context.deckPrefs().edit().putString(PREF_CONSOLE_LAYOUT, root.toString()).apply()
+}
+
+fun normalizedConsoleRowWeights(layout: ConsoleLayoutConfig, rowCount: Int = layout.rows.size): List<Float> {
+    val safeCount = rowCount.coerceAtLeast(0)
+    if (safeCount == 0) return emptyList()
+    val existing = layout.rowWeights
+        .take(safeCount)
+        .map { it.coerceAtLeast(CONSOLE_MIN_ROW_WEIGHT) }
+    val padded = existing + List(safeCount - existing.size) { 1f }
+    val total = padded.sum().takeIf { it > 0f } ?: safeCount.toFloat()
+    return padded.map { it / total * safeCount.toFloat() }
 }
 
 fun loadConsolePanelOptions(context: Context): ConsolePanelOptions {
@@ -556,6 +597,10 @@ const val MAX_BUTTON_SPAN_ROWS = 2
 const val MIN_SPACING_DP = 2
 const val MAX_SPACING_DP = 16
 const val DEFAULT_SPACING_DP = 8
+const val CONSOLE_DEFAULT_SIDEBAR_FRACTION = 0.22f
+const val CONSOLE_MIN_SIDEBAR_FRACTION = 0.14f
+const val CONSOLE_MAX_SIDEBAR_FRACTION = 0.34f
+const val CONSOLE_MIN_ROW_WEIGHT = 0.45f
 const val ICON_AUTO = "AUTO"
 const val ICON_SETTINGS = "ICON_SETTINGS"
 const val ICON_BLUETOOTH = "ICON_BLUETOOTH"
