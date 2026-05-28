@@ -6,14 +6,14 @@ plugins {
 
 android {
     namespace = "com.remerer.mobiledeck"
-    compileSdk = 36
+    compileSdk = 35
 
     defaultConfig {
         applicationId = "com.remerer.mobiledeck"
         minSdk = 24
-        targetSdk = 36
-        versionCode = 17
-        versionName = "1.2.11"
+        targetSdk = 35
+        versionCode = 18
+        versionName = "1.2.12"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

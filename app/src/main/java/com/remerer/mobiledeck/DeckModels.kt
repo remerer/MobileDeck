@@ -212,21 +212,21 @@ val ClassicLightDeckThemeColors = DeckThemeColors(
 )
 
 val ConsoleDarkDeckThemeColors = DeckThemeColors(
-    backgroundGradient = listOf(Color(0xFF050A10), Color(0xFF0D1721), Color(0xFF06111A)),
-    sidebarBackground = Color(0xFF071018).copy(alpha = 0.92f),
+    backgroundGradient = listOf(Color(0xFF08111A), Color(0xFF112033), Color(0xFF0A1825)),
+    sidebarBackground = Color(0xFF0A1520).copy(alpha = 0.92f),
     sidebarBorder = Color.White.copy(alpha = 0.08f),
-    cardBackground = Color(0xFF121F2A).copy(alpha = 0.9f),
+    cardBackground = Color(0xFF142638).copy(alpha = 0.9f),
     cardBorder = Color.White.copy(alpha = 0.045f),
     textPrimary = Color.White,
     textSecondary = Color.White.copy(alpha = 0.64f),
     textMuted = Color.White.copy(alpha = 0.38f),
-    toggleBackground = Color(0xFF162432),
-    actionStart = Color(0xFF111D27),
-    actionEnd = Color(0xFF0D1720),
-    neutralIconBackground = Color(0xFF233342),
-    consoleSidebar = Color(0xFF1A2632),
-    consolePreviewBackground = Color(0xFF0B1621),
-    consoleButtonDefault = Color(0xFF202D39),
+    toggleBackground = Color(0xFF192B3D),
+    actionStart = Color(0xFF132331),
+    actionEnd = Color(0xFF0F1D2B),
+    neutralIconBackground = Color(0xFF263A4D),
+    consoleSidebar = Color(0xFF1D2E40),
+    consolePreviewBackground = Color(0xFF0E1E2D),
+    consoleButtonDefault = Color(0xFF233548),
     consoleButtonFeatured = Color(0xFF245B9D),
     consoleButtonSystem = Color(0xFF1F5DAD)
 )

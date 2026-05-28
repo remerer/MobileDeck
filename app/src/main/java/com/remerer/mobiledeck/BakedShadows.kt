@@ -34,13 +34,13 @@ import androidx.compose.ui.graphics.asAndroidPath
 import kotlin.math.roundToInt
 
 private const val MAX_ICON_SHADOW_CACHE_SIZE = 96
-private const val SHADOW_BAKE_VERSION = "v19-sharp-slate-shadow-size"
+private const val SHADOW_BAKE_VERSION = "v20-compact-icon-shadow"
 private const val ICON_VECTOR_ALPHA_DARK = 132
 private const val ICON_VECTOR_ALPHA_LIGHT = 72
 private const val ICON_BITMAP_ALPHA_DARK = 118
 private const val ICON_BITMAP_ALPHA_LIGHT = 58
-private const val ICON_SHADOW_BLUR_FACTOR = 0.1f
-private const val ICON_SHADOW_SOURCE_SCALE = 1.75f
+private const val ICON_SHADOW_BLUR_FACTOR = 0.085f
+private const val ICON_SHADOW_SOURCE_SCALE = 1.2f
 private const val ICON_SHADOW_STACK_COUNT_DARK = 2
 private const val ICON_SHADOW_STACK_COUNT_LIGHT = 1
 private const val ICON_SHADOW_MASK_CHECK_ALPHA = 0
