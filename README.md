@@ -19,7 +19,6 @@ MobileDeck turns an Android phone into a Bluetooth HID macro deck for a Windows 
 - Console UI with a separate layout editor for sidebar width, row height, row order, and button swap editing
 - Display modes for icon, icon + keyword, or keyword-only keys
 - Icon picker and media-key target picker in key editing
-- Debug-only icon style tuning page for validating console icon and button shadow values
 
 ## Install
 
