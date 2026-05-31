@@ -711,14 +711,21 @@ private fun MobileDeckApp() {
 
     fun saveConsoleLayoutForActivePage(updated: ConsoleLayoutConfig, removeEmptyRows: Boolean = false) {
         val activeButtonIds = activeDeckPage.buttons.map { it.id }.toSet()
-        val rows = if (removeEmptyRows) {
-            updated.rows
-                .map { row -> row.filter { it in activeButtonIds } }
-                .filter { it.isNotEmpty() }
+        val cleanedBase = if (removeEmptyRows) {
+            val weights = normalizedConsoleRowWeights(updated, updated.rows.size)
+            val rowsWithWeights = updated.rows.mapIndexed { index, row ->
+                row.filter { it in activeButtonIds } to weights.getOrElse(index) { 1f }
+            }.filter { (row, _) -> row.isNotEmpty() }
+            updated.copy(
+                rows = rowsWithWeights.map { it.first },
+                rowWeights = normalizedConsoleWeightValues(
+                    weights = rowsWithWeights.map { it.second },
+                    rowCount = rowsWithWeights.size
+                )
+            )
         } else {
-            updated.rows
+            updated.copy(rowWeights = normalizedConsoleRowWeights(updated, updated.rows.size))
         }
-        val cleanedBase = updated.copy(rows = rows)
         val cleaned = cleanedBase.copy(rowWeights = normalizedConsoleRowWeights(cleanedBase, cleanedBase.rows.size))
         if (removeEmptyRows && cleaned.rows.isEmpty() && deckPages.size > 1) {
             val currentIndex = deckPages.indexOfFirst { it.id == activeDeckPage.id }.coerceAtLeast(0)
@@ -1204,7 +1211,14 @@ private fun MobileDeckApp() {
                         val updatedRows = rows.toMutableList().apply {
                             add(insertIndex, newButtons.map { it.id })
                         }
-                        val updatedBase = consoleLayout.copy(rows = updatedRows)
+                        val updatedBase = consoleLayout.copy(
+                            rows = updatedRows,
+                            rowWeights = insertedConsoleRowWeights(
+                                layout = consoleLayout,
+                                rowCount = rows.size,
+                                insertIndex = insertIndex
+                            )
+                        )
                         val updated = updatedBase.copy(rowWeights = normalizedConsoleRowWeights(updatedBase, updatedBase.rows.size))
                         deckPages = updatedPages
                         saveConsoleLayout(context, updated)
@@ -1228,7 +1242,14 @@ private fun MobileDeckApp() {
                         val updatedPages = updateDeckPage(deckPages, activeDeckPage.id) { pageConfig ->
                             pageConfig.buttons.filterNot { it.id in removedButtonIds }
                         }
-                        val updatedBase = consoleLayout.copy(rows = rows.filterIndexed { index, _ -> index != rowIndex })
+                        val updatedBase = consoleLayout.copy(
+                            rows = rows.filterIndexed { index, _ -> index != rowIndex },
+                            rowWeights = removedConsoleRowWeights(
+                                layout = consoleLayout,
+                                rowCount = rows.size,
+                                removeIndex = rowIndex
+                            )
+                        )
                         val updated = updatedBase.copy(rowWeights = normalizedConsoleRowWeights(updatedBase, updatedBase.rows.size))
                         deckPages = updatedPages
                         saveDeckPages(context, updatedPages)
@@ -1256,11 +1277,7 @@ private fun MobileDeckApp() {
                                 val row = removeAt(rowIndex)
                                 add(targetIndex, row)
                             }
-                            val updatedWeights = weights.toMutableList().apply {
-                                val weight = removeAt(rowIndex)
-                                add(targetIndex, weight)
-                            }
-                            val updated = consoleLayout.copy(rows = updatedRows, rowWeights = updatedWeights)
+                            val updated = consoleLayout.copy(rows = updatedRows, rowWeights = weights)
                             saveConsoleLayoutForActivePage(updated)
                             addConsoleLayoutDiagnostic("move row saved rows=${updated.rows.size}")
                         }
@@ -1273,8 +1290,12 @@ private fun MobileDeckApp() {
                     addConsoleLayoutDiagnostic("reset console layout rows=${updated.rows.size}")
                 },
                 onLayoutChange = { updated ->
-                    saveConsoleLayoutForActivePage(updated)
-                    addConsoleLayoutDiagnostic("layout changed rows=${updated.rows.size} weights=${updated.rowWeights.size}")
+                    val merged = consoleLayout.copy(
+                        rowWeights = normalizedConsoleWeightValues(updated.rowWeights, consoleLayout.rows.size),
+                        sidebarFraction = updated.sidebarFraction
+                    )
+                    saveConsoleLayoutForActivePage(merged)
+                    addConsoleLayoutDiagnostic("layout changed rows=${merged.rows.size} weights=${merged.rowWeights.size}")
                 },
                 onPickButton = { rowIndex ->
                     addConsoleLayoutDiagnostic("open button picker row=${rowIndex + 1}")
@@ -1315,8 +1336,9 @@ private fun MobileDeckApp() {
                                 row
                             } else {
                                 row.toMutableList().apply {
-                                    val item = removeAt(fromIndex)
-                                    add(targetIndex, item)
+                                    val item = this[fromIndex]
+                                    this[fromIndex] = this[targetIndex]
+                                    this[targetIndex] = item
                                 }
                             }
                         }
@@ -1332,14 +1354,19 @@ private fun MobileDeckApp() {
                         DEFAULT_COLUMNS,
                         DEFAULT_ROWS
                     )
-                    if (fromRowIndex in rows.indices && toRowIndex in rows.indices && fromIndex in rows[fromRowIndex].indices) {
+                    if (
+                        fromRowIndex in rows.indices &&
+                        toRowIndex in rows.indices &&
+                        fromIndex in rows[fromRowIndex].indices &&
+                        toIndex in rows[toRowIndex].indices
+                    ) {
                         val mutableRows = rows.map { it.toMutableList() }.toMutableList()
-                        val movingButtonId = mutableRows[fromRowIndex].removeAt(fromIndex)
-                        val insertIndex = toIndex.coerceIn(0, mutableRows[toRowIndex].size)
-                        mutableRows[toRowIndex].add(insertIndex, movingButtonId)
+                        val movingButtonId = mutableRows[fromRowIndex][fromIndex]
+                        mutableRows[fromRowIndex][fromIndex] = mutableRows[toRowIndex][toIndex]
+                        mutableRows[toRowIndex][toIndex] = movingButtonId
                         val updated = consoleLayout.copy(rows = mutableRows)
-                        saveConsoleLayoutForActivePage(updated, removeEmptyRows = true)
-                        addConsoleLayoutDiagnostic("move button id=$movingButtonId from=${fromRowIndex + 1}:${fromIndex + 1} to=${toRowIndex + 1}:${insertIndex + 1}")
+                        saveConsoleLayoutForActivePage(updated)
+                        addConsoleLayoutDiagnostic("swap button id=$movingButtonId from=${fromRowIndex + 1}:${fromIndex + 1} to=${toRowIndex + 1}:${toIndex + 1}")
                     }
                 },
                 onEditButton = { button ->
@@ -2062,6 +2089,16 @@ private fun UiModeToggle(
                             listOf(selectedStart, selectedEnd)
                         )
                     )
+                    .then(
+                        if (consoleSelected) {
+                            Modifier.consoleUiModeToggleInnerShadow(
+                                shape = selectedShape,
+                                darkTheme = darkTheme
+                            )
+                        } else {
+                            Modifier
+                        }
+                    )
             ) {
                 if (consoleSelected) {
                     Box(
@@ -2107,6 +2144,31 @@ private fun UiModeToggle(
             }
         }
     }
+}
+
+private fun Modifier.consoleUiModeToggleInnerShadow(
+    shape: Shape,
+    darkTheme: Boolean
+): Modifier {
+    return this
+        .innerShadow(
+            shape = shape,
+            shadow = DropShadow(
+                radius = 8.dp,
+                spread = 1.dp,
+                offset = DpOffset((-2).dp, (-2).dp),
+                color = Color.Black.copy(alpha = if (darkTheme) 0.42f else 0.22f)
+            )
+        )
+        .innerShadow(
+            shape = shape,
+            shadow = DropShadow(
+                radius = 7.dp,
+                spread = 0.7.dp,
+                offset = DpOffset(2.dp, 2.dp),
+                color = Color.White.copy(alpha = if (darkTheme) 0.08f else 0.28f)
+            )
+        )
 }
 
 @Composable
@@ -5644,7 +5706,8 @@ private fun ConsolePillButton(
         modifier = Modifier.consoleButtonDropShadow(
             shape = shape,
             darkTheme = isSystemInDarkTheme(),
-            pressed = pressed
+            pressed = pressed,
+            drawHairline = false
         ),
         shape = shape,
         color = if (enabled) colors.consoleButtonDefault else colors.toggleBackground,
@@ -7431,7 +7494,8 @@ private fun Modifier.consolePanelDropShadow(
 private fun Modifier.consoleButtonDropShadow(
     shape: Shape,
     darkTheme: Boolean,
-    pressed: Boolean
+    pressed: Boolean,
+    drawHairline: Boolean = true
 ): Modifier {
     val blackAlpha = when {
         pressed && darkTheme -> 0.22f
@@ -7458,10 +7522,16 @@ private fun Modifier.consoleButtonDropShadow(
                 color = Color.Black.copy(alpha = blackAlpha)
             )
         )
-        .consoleHairlineHighlight(
-            shape = shape,
-            darkTheme = darkTheme,
-            pressed = pressed
+        .then(
+            if (drawHairline) {
+                Modifier.consoleHairlineHighlight(
+                    shape = shape,
+                    darkTheme = darkTheme,
+                    pressed = pressed
+                )
+            } else {
+                Modifier
+            }
         )
 }
 
@@ -7692,57 +7762,67 @@ private fun ConsoleLayoutEditorPage(
                         selectedMode = editMode,
                         onModeChange = { editMode = it }
                     )
-                    ConsoleLayoutPageControls(
-                        activePageIndex = activePageIndex,
-                        pageCount = pageCount,
-                        onAddPage = onAddPage
-                    )
                     ConsolePillButton(text = stringResource(R.string.reset), onClick = onReset)
                 }
             }
         }
 
         item {
-            ConsoleLayoutTuningPreview(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(380.dp),
-                layout = layout,
-                buttons = buttons,
-                activePageIndex = activePageIndex,
-                pageCount = pageCount,
-                selectedRowIndex = selectedRowIndex,
-                selectedButtonId = selectedButtonId,
-                editMode = editMode,
-                onSelectRow = { selectedRowIndex = it.coerceIn(rows.indices) },
-                onSelectButton = { button ->
-                    selectedButtonId = button.id
-                    val rowIndex = rows.indexOfFirst { button.id in it }
-                    if (rowIndex >= 0) selectedRowIndex = rowIndex
-                },
-                onPickButton = { rowIndex ->
-                    selectedRowIndex = rowIndex.coerceIn(rows.indices)
-                    onPickButton(selectedRowIndex)
-                },
-                onPreviousPage = { onPageSwipe(-1) },
-                onNextPage = { onPageSwipe(1) },
-                canAddRow = rows.size < MAX_CONSOLE_LAYOUT_ROWS,
-                onAddRow = ::addRowAndSelect,
-                onRemoveRow = { rowIndex ->
-                    onRemoveRow(rowIndex)
-                    selectedRowIndex = rowIndex.coerceAtMost((rows.size - 2).coerceAtLeast(0))
-                },
-                onMoveRow = { rowIndex, delta ->
-                    val targetIndex = (rowIndex + delta).coerceIn(rows.indices)
-                    onMoveRow(rowIndex, delta)
-                    selectedRowIndex = targetIndex
-                },
-                onMoveButtonTo = { fromRowIndex, fromIndex, toRowIndex, toIndex ->
-                    onMoveButtonTo(fromRowIndex, fromIndex, toRowIndex, toIndex)
-                    selectedRowIndex = toRowIndex.coerceIn(rows.indices)
-                },
-                onLayoutChange = onLayoutChange
-            )
+            val configuration = LocalConfiguration.current
+            val rawRatio = configuration.screenWidthDp.toFloat() / configuration.screenHeightDp.coerceAtLeast(1).toFloat()
+            val deviceRatio = if (rawRatio >= 1f) rawRatio else 1f / rawRatio
+            BoxWithConstraints(
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                val previewContentPadding = 12.dp
+                val previewBottomControlsHeight = 42.dp
+                val previewBottomControlsGap = 10.dp
+                val previewHeight = ((maxWidth - previewContentPadding * 2f) / deviceRatio +
+                    previewContentPadding * 2f +
+                    previewBottomControlsGap +
+                    previewBottomControlsHeight).coerceAtLeast(260.dp)
+                ConsoleLayoutTuningPreview(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(previewHeight),
+                    layout = layout,
+                    buttons = buttons,
+                    activePageIndex = activePageIndex,
+                    pageCount = pageCount,
+                    selectedRowIndex = selectedRowIndex,
+                    selectedButtonId = selectedButtonId,
+                    editMode = editMode,
+                    onSelectRow = { selectedRowIndex = it.coerceIn(rows.indices) },
+                    onSelectButton = { button ->
+                        selectedButtonId = button.id
+                        val rowIndex = rows.indexOfFirst { button.id in it }
+                        if (rowIndex >= 0) selectedRowIndex = rowIndex
+                    },
+                    onPickButton = { rowIndex ->
+                        selectedRowIndex = rowIndex.coerceIn(rows.indices)
+                        onPickButton(selectedRowIndex)
+                    },
+                    onPreviousPage = { onPageSwipe(-1) },
+                    onNextPage = { onPageSwipe(1) },
+                    onAddPage = onAddPage,
+                    canAddRow = rows.size < MAX_CONSOLE_LAYOUT_ROWS,
+                    onAddRow = ::addRowAndSelect,
+                    onRemoveRow = { rowIndex ->
+                        onRemoveRow(rowIndex)
+                        selectedRowIndex = rowIndex.coerceAtMost((rows.size - 2).coerceAtLeast(0))
+                    },
+                    onMoveRow = { rowIndex, delta ->
+                        val targetIndex = (rowIndex + delta).coerceIn(rows.indices)
+                        onMoveRow(rowIndex, delta)
+                        selectedRowIndex = targetIndex
+                    },
+                    onMoveButtonTo = { fromRowIndex, fromIndex, toRowIndex, toIndex ->
+                        onMoveButtonTo(fromRowIndex, fromIndex, toRowIndex, toIndex)
+                        selectedRowIndex = toRowIndex.coerceIn(rows.indices)
+                    },
+                    onLayoutChange = onLayoutChange
+                )
+            }
         }
         if (editMode == ConsoleLayoutEditMode.Buttons) {
             item {
@@ -7762,8 +7842,10 @@ private fun ConsoleLayoutEditorPage(
                 )
             }
         }
-        item {
-            ConsoleLayoutDiagnosticsCard(diagnostics = diagnostics)
+        if (BuildConfig.DEBUG) {
+            item {
+                ConsoleLayoutDiagnosticsCard(diagnostics = diagnostics)
+            }
         }
     }
 }
@@ -8041,12 +8123,16 @@ private fun ConsoleRowOrderTag(
     onDragStart: () -> Unit,
     onDragOffset: (Float) -> Unit,
     onDragStop: () -> Unit,
-    onMoveBy: (Int) -> Unit
+    onMoveBy: (Int) -> Unit,
+    onPreviewMove: (Int) -> Unit,
+    resolveDrag: (Float) -> Pair<Int, Float>
 ) {
     val colors = LocalDeckThemeColors.current
     val darkTheme = isSystemInDarkTheme()
     var dragging by remember { mutableStateOf(false) }
     var dragY by remember { mutableStateOf(0f) }
+    var pendingMoveDelta by remember { mutableStateOf(0) }
+    val shape = RoundedCornerShape(10.dp)
     Surface(
         modifier = modifier
             .pointerInput(dragThresholdPx) {
@@ -8054,37 +8140,39 @@ private fun ConsoleRowOrderTag(
                     onDragStart = {
                         dragging = true
                         dragY = 0f
+                        pendingMoveDelta = 0
+                        onPreviewMove(0)
                         onSelect()
                         onDragStart()
                     },
                     onDragCancel = {
                         dragging = false
                         dragY = 0f
+                        pendingMoveDelta = 0
+                        onPreviewMove(0)
                         onDragOffset(0f)
                         onDragStop()
                     },
                     onDragEnd = {
+                        val moveDelta = pendingMoveDelta
                         dragging = false
                         dragY = 0f
-                        onDragOffset(0f)
+                        pendingMoveDelta = 0
+                        if (moveDelta != 0) {
+                            onMoveBy(moveDelta)
+                        } else {
+                            onPreviewMove(0)
+                            onDragOffset(0f)
+                        }
                         onDragStop()
                     },
                     onDrag = { change, dragAmount ->
                         change.consume()
                         dragY += dragAmount.y
-                        val direction = if (dragY > 0f) 1 else -1
-                        val magnetStart = dragThresholdPx * 0.68f
-                        val visualOffset = if (abs(dragY) > magnetStart) {
-                            direction * (magnetStart + (abs(dragY) - magnetStart) * 0.28f)
-                        } else {
-                            dragY
-                        }
-                        onDragOffset(visualOffset)
-                        if (abs(dragY) >= dragThresholdPx) {
-                            onMoveBy(direction)
-                            dragY = 0f
-                            onDragOffset(0f)
-                        }
+                        val (moveDelta, residualOffset) = resolveDrag(dragY)
+                        pendingMoveDelta = moveDelta
+                        onDragOffset(residualOffset)
+                        onPreviewMove(pendingMoveDelta)
                     }
                 )
             }
@@ -8095,9 +8183,9 @@ private fun ConsoleRowOrderTag(
                 } else {
                     if (darkTheme) Color.White.copy(alpha = 0.12f) else Color(0xFF6FA8C9).copy(alpha = 0.72f)
                 },
-                RoundedCornerShape(topStart = 4.dp, topEnd = 14.dp, bottomEnd = 14.dp, bottomStart = 4.dp)
+                shape
             ),
-        shape = RoundedCornerShape(topStart = 4.dp, topEnd = 14.dp, bottomEnd = 14.dp, bottomStart = 4.dp),
+        shape = shape,
         color = when {
             selected || dragging -> colors.consoleButtonFeatured.copy(alpha = 0.84f)
             darkTheme -> colors.consoleButtonDefault.copy(alpha = 0.68f)
@@ -8113,7 +8201,7 @@ private fun ConsoleRowOrderTag(
         onClick = onSelect
     ) {
         Column(
-            modifier = Modifier.padding(vertical = 12.dp, horizontal = 8.dp),
+            modifier = Modifier.padding(vertical = 7.dp, horizontal = 5.dp),
             verticalArrangement = Arrangement.Center,
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
@@ -8157,13 +8245,16 @@ private fun ConsoleButtonDragHandle(
     onDragStart: () -> Unit,
     onDragOffset: (Float, Float) -> Unit,
     onDragStop: () -> Unit,
-    onMoveBy: (rowDelta: Int, columnDelta: Int) -> Unit
+    onMoveBy: (rowDelta: Int, columnDelta: Int) -> Unit,
+    onPreviewMove: (rowDelta: Int, columnDelta: Int) -> Unit
 ) {
     val colors = LocalDeckThemeColors.current
     val darkTheme = isSystemInDarkTheme()
     var dragging by remember { mutableStateOf(false) }
     var dragX by remember { mutableStateOf(0f) }
     var dragY by remember { mutableStateOf(0f) }
+    var pendingRowDelta by remember { mutableStateOf(0) }
+    var pendingColumnDelta by remember { mutableStateOf(0) }
     Surface(
         modifier = modifier
             .size(width = 42.dp, height = 34.dp)
@@ -8173,6 +8264,9 @@ private fun ConsoleButtonDragHandle(
                         dragging = true
                         dragX = 0f
                         dragY = 0f
+                        pendingRowDelta = 0
+                        pendingColumnDelta = 0
+                        onPreviewMove(0, 0)
                         onSelect()
                         onDragStart()
                     },
@@ -8180,14 +8274,26 @@ private fun ConsoleButtonDragHandle(
                         dragging = false
                         dragX = 0f
                         dragY = 0f
+                        pendingRowDelta = 0
+                        pendingColumnDelta = 0
+                        onPreviewMove(0, 0)
                         onDragOffset(0f, 0f)
                         onDragStop()
                     },
                     onDragEnd = {
+                        val rowDelta = pendingRowDelta
+                        val columnDelta = pendingColumnDelta
                         dragging = false
                         dragX = 0f
                         dragY = 0f
-                        onDragOffset(0f, 0f)
+                        pendingRowDelta = 0
+                        pendingColumnDelta = 0
+                        if (rowDelta != 0 || columnDelta != 0) {
+                            onMoveBy(rowDelta, columnDelta)
+                        } else {
+                            onPreviewMove(0, 0)
+                            onDragOffset(0f, 0f)
+                        }
                         onDragStop()
                     },
                     onDrag = { change, dragAmount ->
@@ -8198,27 +8304,16 @@ private fun ConsoleButtonDragHandle(
                         val threshold = if (horizontalDominant) horizontalThresholdPx else verticalThresholdPx
                         val primary = if (horizontalDominant) dragX else dragY
                         val direction = if (primary > 0f) 1 else -1
-                        val magnetStart = threshold * 0.66f
-                        val visualPrimary = if (abs(primary) > magnetStart) {
-                            direction * (magnetStart + (abs(primary) - magnetStart) * 0.32f)
-                        } else {
-                            primary
-                        }
+                        val moveDelta = (abs(primary) / threshold.coerceAtLeast(1f)).toInt() * direction
+                        pendingRowDelta = if (horizontalDominant) 0 else moveDelta
+                        pendingColumnDelta = if (horizontalDominant) moveDelta else 0
+                        val residualPrimary = primary - moveDelta * threshold.coerceAtLeast(1f)
                         if (horizontalDominant) {
-                            onDragOffset(visualPrimary, dragY * 0.18f)
+                            onDragOffset(residualPrimary, dragY * 0.18f)
                         } else {
-                            onDragOffset(dragX * 0.18f, visualPrimary)
+                            onDragOffset(dragX * 0.18f, residualPrimary)
                         }
-                        if (abs(primary) >= threshold) {
-                            if (horizontalDominant) {
-                                onMoveBy(0, direction)
-                            } else {
-                                onMoveBy(direction, 0)
-                            }
-                            dragX = 0f
-                            dragY = 0f
-                            onDragOffset(0f, 0f)
-                        }
+                        onPreviewMove(pendingRowDelta, pendingColumnDelta)
                     }
                 )
             },
@@ -8288,11 +8383,13 @@ private fun ConsoleLayoutAddRowFooter(
 
 @Composable
 private fun ConsoleLayoutPageControls(
+    modifier: Modifier = Modifier,
     activePageIndex: Int,
     pageCount: Int,
     onAddPage: () -> Unit
 ) {
     Row(
+        modifier = modifier,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -8335,14 +8432,14 @@ private fun ConsoleLayoutEditorIconButton(
             .consoleButtonDropShadow(
                 shape = shape,
                 darkTheme = darkTheme,
-                pressed = pressed
+                pressed = pressed,
+                drawHairline = false
             ),
         shape = shape,
         color = when {
             !enabled -> colors.toggleBackground
             active -> colors.consoleButtonFeatured
-            darkTheme -> colors.consoleButtonDefault
-            else -> Color.White
+            else -> colors.consoleButtonDefault
         },
         contentColor = when {
             !enabled -> colors.textMuted
@@ -8461,6 +8558,29 @@ private fun ConsoleSidebarGapIndicator(
 }
 
 @Composable
+private fun ConsoleRowBoundaryIndicator(
+    modifier: Modifier = Modifier
+) {
+    val darkTheme = isSystemInDarkTheme()
+    Canvas(modifier = modifier) {
+        val lineHeight = 1.2.dp.toPx()
+        val dashWidth = 8.dp.toPx()
+        val dashGap = 7.dp.toPx()
+        val y = size.height / 2f - lineHeight / 2f
+        var x = 0f
+        while (x < size.width) {
+            drawRoundRect(
+                color = (if (darkTheme) Color(0xFF76DFFF) else Color(0xFF0876B8)).copy(alpha = 0.52f),
+                topLeft = Offset(x, y),
+                size = Size(dashWidth.coerceAtMost(size.width - x), lineHeight),
+                cornerRadius = CornerRadius(lineHeight, lineHeight)
+            )
+            x += dashWidth + dashGap
+        }
+    }
+}
+
+@Composable
 private fun ConsoleLayoutTuningPreview(
     modifier: Modifier = Modifier,
     layout: ConsoleLayoutConfig,
@@ -8475,6 +8595,7 @@ private fun ConsoleLayoutTuningPreview(
     onPickButton: (Int) -> Unit,
     onPreviousPage: () -> Unit,
     onNextPage: () -> Unit,
+    onAddPage: () -> Unit,
     canAddRow: Boolean,
     onAddRow: () -> Unit,
     onRemoveRow: (Int) -> Unit,
@@ -8501,9 +8622,13 @@ private fun ConsoleLayoutTuningPreview(
         val bottomControlsGap = 10.dp
         val bottomControlsHeight = 42.dp
         val contentWidth = (maxWidth - contentPadding * 2f).coerceAtLeast(1.dp)
-        val panelWidth = (contentWidth - contentGap).coerceAtLeast(1.dp)
         val layoutAreaHeight = (maxHeight - contentPadding * 2f - bottomControlsGap - bottomControlsHeight).coerceAtLeast(1.dp)
-        val sidebarWidth = consoleSidebarWidth(panelWidth, workingSidebarFraction)
+        val sidebarWidth = consoleSidebarWidth(contentWidth, workingSidebarFraction)
+        val rowsAreaX = contentPadding + sidebarWidth + contentGap
+        val rowsAreaWidth = (contentWidth - sidebarWidth - contentGap).coerceAtLeast(1.dp)
+        val editOverlayEndInset = if (editMode == ConsoleLayoutEditMode.Layout) 20.dp else 0.dp
+        val visibleRowsAreaWidth = (rowsAreaWidth - editOverlayEndInset).coerceAtLeast(1.dp)
+        val addRowWidth = if (visibleRowsAreaWidth < 190.dp) visibleRowsAreaWidth else visibleRowsAreaWidth.coerceAtMost(260.dp)
         Surface(
             modifier = Modifier.fillMaxSize(),
             shape = RoundedCornerShape(18.dp),
@@ -8532,7 +8657,8 @@ private fun ConsoleLayoutTuningPreview(
                     ConsoleLayoutPreviewRows(
                         modifier = Modifier
                             .weight(1f)
-                            .fillMaxHeight(),
+                            .fillMaxHeight()
+                            .padding(end = editOverlayEndInset),
                         rows = rowButtons,
                         layout = layout,
                         selectedRowIndex = selectedRowIndex,
@@ -8559,16 +8685,12 @@ private fun ConsoleLayoutTuningPreview(
                         enabled = activePageIndex > 0,
                         onClick = onPreviousPage
                     )
-                    if (editMode == ConsoleLayoutEditMode.Layout) {
-                        ConsoleLayoutAddRowFooter(
-                            modifier = Modifier
-                                .align(Alignment.Center)
-                                .widthIn(min = 190.dp, max = 280.dp)
-                                .height(34.dp),
-                            enabled = canAddRow,
-                            onAddRow = onAddRow
-                        )
-                    }
+                    ConsoleLayoutPageControls(
+                        modifier = Modifier.align(Alignment.Center),
+                        activePageIndex = activePageIndex,
+                        pageCount = pageCount,
+                        onAddPage = onAddPage
+                    )
                     ConsoleLayoutEditorIconButton(
                         modifier = Modifier.align(Alignment.CenterEnd),
                         icon = Icons.Filled.SkipNext,
@@ -8580,6 +8702,18 @@ private fun ConsoleLayoutTuningPreview(
             }
         }
         if (editMode == ConsoleLayoutEditMode.Layout) {
+            ConsoleLayoutAddRowFooter(
+                modifier = Modifier
+                    .offset(
+                        x = rowsAreaX + (visibleRowsAreaWidth - addRowWidth) / 2f,
+                        y = contentPadding + layoutAreaHeight - 17.dp
+                    )
+                    .width(addRowWidth)
+                    .height(34.dp)
+                    .zIndex(8f),
+                enabled = canAddRow,
+                onAddRow = onAddRow
+            )
             ConsoleSidebarGapIndicator(
                 modifier = Modifier
                     .offset(x = contentPadding + sidebarWidth, y = contentPadding)
@@ -8587,14 +8721,14 @@ private fun ConsoleLayoutTuningPreview(
                     .height(layoutAreaHeight)
                     .zIndex(5f)
             )
-            ConsoleVerticalSplitHandle(
-                modifier = Modifier
-                    .offset(x = contentPadding + sidebarWidth + contentGap / 2f - 29.dp, y = (-18).dp)
-                    .width(58.dp)
-                    .height(36.dp)
+                ConsoleVerticalSplitHandle(
+                    modifier = Modifier
+                    .offset(x = contentPadding + sidebarWidth + contentGap / 2f - 16.dp, y = (-18).dp)
+                    .width(32.dp)
+                    .height(72.dp)
                     .zIndex(8f),
                 onDelta = { deltaPx ->
-                    val totalWidthPx = with(density) { panelWidth.toPx() }.coerceAtLeast(1f)
+                    val totalWidthPx = with(density) { contentWidth.toPx() }.coerceAtLeast(1f)
                     workingSidebarFraction = (workingSidebarFraction + deltaPx / totalWidthPx)
                         .coerceIn(CONSOLE_MIN_SIDEBAR_FRACTION, CONSOLE_MAX_SIDEBAR_FRACTION)
                     onLayoutChange(layout.copy(sidebarFraction = workingSidebarFraction))
@@ -8686,7 +8820,9 @@ private fun ConsoleLayoutPreviewRows(
     val colors = LocalDeckThemeColors.current
     val density = LocalDensity.current
     val rowSpacing = 10.dp
+    val buttonSpacing = 12.dp
     BoxWithConstraints(modifier = modifier) {
+        val previewRowsWidth = maxWidth
         val safeRows = rows.ifEmpty { listOf(emptyList()) }
         val selectedIndex = selectedRowIndex.coerceIn(safeRows.indices)
         var weights by remember(layout.rows, layout.rowWeights, safeRows.size) {
@@ -8702,11 +8838,39 @@ private fun ConsoleLayoutPreviewRows(
             rowTops += accumulatedTop
             accumulatedTop += rowHeight + rowSpacing
         }
-        var draggingRowIndex by remember { mutableStateOf<Int?>(null) }
-        var rowDragOffsetPx by remember { mutableStateOf(0f) }
-        var draggingButtonId by remember { mutableStateOf<Int?>(null) }
-        var buttonDragOffsetX by remember { mutableStateOf(0f) }
-        var buttonDragOffsetY by remember { mutableStateOf(0f) }
+        fun previewTargetIndex(rowIndex: Int, move: Pair<Int, Int>?): Int {
+            if (move == null) return rowIndex
+            val (fromIndex, toIndex) = move
+            return when {
+                rowIndex == fromIndex -> toIndex
+                fromIndex < toIndex && rowIndex in (fromIndex + 1)..toIndex -> rowIndex - 1
+                fromIndex > toIndex && rowIndex in toIndex until fromIndex -> rowIndex + 1
+                else -> rowIndex
+            }.coerceIn(rowHeights.indices)
+        }
+        fun rowPreviewOffset(rowIndex: Int, move: Pair<Int, Int>?): Dp {
+            val targetIndex = previewTargetIndex(rowIndex, move)
+            return rowTops[targetIndex] - rowTops[rowIndex]
+        }
+        fun rowPreviewHeight(rowIndex: Int, move: Pair<Int, Int>?): Dp {
+            return rowHeights[previewTargetIndex(rowIndex, move)]
+        }
+        fun resolveRowDragDelta(rowIndex: Int, dragOffsetPx: Float): Pair<Int, Float> {
+            if (rowHeights.isEmpty()) return 0 to 0f
+            val draggedCenter = rowTops[rowIndex] + rowHeights[rowIndex] / 2f + with(density) { dragOffsetPx.toDp() }
+            val targetIndex = rowHeights.indices.minBy { index ->
+                abs(with(density) { ((rowTops[index] + rowHeights[index] / 2f) - draggedCenter).toPx() })
+            }
+            val baseOffsetPx = with(density) { (rowTops[targetIndex] - rowTops[rowIndex]).toPx() }
+            return (targetIndex - rowIndex) to (dragOffsetPx - baseOffsetPx)
+        }
+    var draggingRowIndex by remember { mutableStateOf<Int?>(null) }
+    var rowDragOffsetPx by remember { mutableStateOf(0f) }
+    var rowPreviewMove by remember { mutableStateOf<Pair<Int, Int>?>(null) }
+    var draggingButtonId by remember { mutableStateOf<Int?>(null) }
+    var buttonDragOffsetX by remember { mutableStateOf(0f) }
+    var buttonDragOffsetY by remember { mutableStateOf(0f) }
+    var buttonPreviewMove by remember { mutableStateOf<ButtonPreviewMove?>(null) }
 
         Box(modifier = Modifier.fillMaxSize()) {
             safeRows.forEachIndexed { rowIndex, buttons ->
@@ -8714,11 +8878,14 @@ private fun ConsoleLayoutPreviewRows(
                 key(rowKey) {
                     val selected = rowIndex == selectedIndex
                     val dragging = draggingRowIndex == rowIndex
+                    val previewRowOffset = rowPreviewOffset(rowIndex, rowPreviewMove)
+                    val previewRowHeight = rowPreviewHeight(rowIndex, rowPreviewMove)
                     val animatedTop by animateDpAsState(rowTops[rowIndex], label = "consoleRowTop")
-                    val animatedHeight by animateDpAsState(rowHeights[rowIndex], label = "consoleRowHeight")
+                    val animatedPreviewRowOffset by animateDpAsState(previewRowOffset, label = "consoleRowPreviewOffset")
+                    val animatedHeight by animateDpAsState(previewRowHeight, label = "consoleRowHeight")
                     Row(
                         modifier = Modifier
-                            .offset(y = animatedTop)
+                            .offset(y = animatedTop + animatedPreviewRowOffset)
                             .zIndex(if (dragging) 5f else 0f)
                             .graphicsLayer {
                                 translationY = if (dragging) rowDragOffsetPx else 0f
@@ -8743,7 +8910,7 @@ private fun ConsoleLayoutPreviewRows(
                                 }
                             }
                             .padding(if (selected && editMode == ConsoleLayoutEditMode.Layout) 2.dp else 0.dp),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        horizontalArrangement = Arrangement.spacedBy(buttonSpacing)
                     ) {
                         if (buttons.isEmpty()) {
                             Box(
@@ -8755,14 +8922,38 @@ private fun ConsoleLayoutPreviewRows(
                         } else {
                             buttons.forEachIndexed { buttonIndex, button ->
                                 val draggingButton = draggingButtonId == button.id
+                                val previewButtonOffset = buttonPreviewMove?.let { move ->
+                                    if (move.fromRowIndex == rowIndex && move.toRowIndex == rowIndex) {
+                                        when {
+                                            buttonIndex == move.fromIndex -> (move.toIndex - move.fromIndex).toFloat()
+                                            move.fromIndex < move.toIndex && buttonIndex in (move.fromIndex + 1)..move.toIndex -> -1f
+                                            move.fromIndex > move.toIndex && buttonIndex in move.toIndex until move.fromIndex -> 1f
+                                            else -> 0f
+                                        }
+                                    } else {
+                                        0f
+                                    }
+                                } ?: 0f
+                                val animatedPreviewButtonOffset by animateFloatAsState(previewButtonOffset, label = "consoleButtonPreviewOffset")
+                                val previewButtonRowOffset = buttonPreviewMove?.let { move ->
+                                    if (move.fromRowIndex == rowIndex && move.toRowIndex != rowIndex) {
+                                        rowTops[move.toRowIndex] - rowTops[move.fromRowIndex]
+                                    } else {
+                                        0.dp
+                                    }
+                                } ?: 0.dp
+                                val animatedPreviewButtonRowOffset by animateDpAsState(previewButtonRowOffset, label = "consoleButtonPreviewRowOffset")
                                 Box(
                                     modifier = Modifier
                                         .weight(button.spanColumns.coerceAtLeast(1).toFloat())
                                         .fillMaxHeight()
                                         .zIndex(if (draggingButton) 6f else 0f)
                                         .graphicsLayer {
-                                            translationX = if (draggingButton) buttonDragOffsetX else 0f
-                                            translationY = if (draggingButton) buttonDragOffsetY else 0f
+                                            val widthWithGap = size.width + with(density) { buttonSpacing.toPx() }
+                                            val previewX = animatedPreviewButtonOffset * widthWithGap
+                                            val previewY = with(density) { animatedPreviewButtonRowOffset.toPx() }
+                                            translationX = if (draggingButton) previewX + buttonDragOffsetX else previewX
+                                            translationY = if (draggingButton) previewY + buttonDragOffsetY else previewY
                                             alpha = if (draggingButton) 0.72f else 1f
                                             scaleX = if (draggingButton) 0.985f else 1f
                                             scaleY = if (draggingButton) 0.985f else 1f
@@ -8782,11 +8973,13 @@ private fun ConsoleLayoutPreviewRows(
                                     if (editMode == ConsoleLayoutEditMode.Buttons) {
                                         ConsoleButtonDragHandle(
                                             modifier = Modifier
-                                                .align(Alignment.TopStart)
-                                                .padding(8.dp)
+                                                .align(Alignment.CenterStart)
+                                                .offset(x = (-21).dp)
                                                 .zIndex(8f),
                                             selected = selectedButtonId == button.id,
-                                            horizontalThresholdPx = with(density) { 58.dp.toPx() },
+                                            horizontalThresholdPx = with(density) {
+                                                ((previewRowsWidth - buttonSpacing * (DEFAULT_COLUMNS - 1).toFloat()) / DEFAULT_COLUMNS.toFloat() + buttonSpacing).toPx()
+                                            },
                                             verticalThresholdPx = with(density) { (rowHeights[rowIndex] * 0.48f + rowSpacing * 0.5f).toPx() },
                                             onSelect = {
                                                 onSelectRow(rowIndex)
@@ -8796,6 +8989,7 @@ private fun ConsoleLayoutPreviewRows(
                                                 draggingButtonId = button.id
                                                 buttonDragOffsetX = 0f
                                                 buttonDragOffsetY = 0f
+                                                buttonPreviewMove = null
                                             },
                                             onDragOffset = { x, y ->
                                                 buttonDragOffsetX = x
@@ -8805,6 +8999,7 @@ private fun ConsoleLayoutPreviewRows(
                                                 draggingButtonId = null
                                                 buttonDragOffsetX = 0f
                                                 buttonDragOffsetY = 0f
+                                                buttonPreviewMove = null
                                             },
                                             onMoveBy = { rowDelta, columnDelta ->
                                                 val targetRowIndex = (rowIndex + rowDelta).coerceIn(safeRows.indices)
@@ -8821,6 +9016,19 @@ private fun ConsoleLayoutPreviewRows(
                                                     buttonDragOffsetX = 0f
                                                     buttonDragOffsetY = 0f
                                                 }
+                                            },
+                                            onPreviewMove = { rowDelta, columnDelta ->
+                                                val targetRowIndex = (rowIndex + rowDelta).coerceIn(safeRows.indices)
+                                                val targetIndex = if (rowDelta == 0) {
+                                                    (buttonIndex + columnDelta).coerceIn(safeRows[rowIndex].indices)
+                                                } else {
+                                                    buttonIndex.coerceIn(0, safeRows[targetRowIndex].size)
+                                                }
+                                                buttonPreviewMove = if (rowDelta != 0 || columnDelta != 0) {
+                                                    ButtonPreviewMove(rowIndex, buttonIndex, targetRowIndex, targetIndex)
+                                                } else {
+                                                    null
+                                                }
                                             }
                                         )
                                     }
@@ -8836,6 +9044,13 @@ private fun ConsoleLayoutPreviewRows(
             var boundaryY = 0.dp
             rowHeights.dropLast(1).forEachIndexed { index, rowHeight ->
                 boundaryY += rowHeight
+                ConsoleRowBoundaryIndicator(
+                    modifier = Modifier
+                        .offset(x = 0.dp, y = boundaryY + rowSpacing / 2f - 1.dp)
+                        .fillMaxWidth()
+                        .height(2.dp)
+                        .zIndex(5f)
+                )
                 ConsoleRowHeightHandle(
                     modifier = Modifier
                         .offset(x = (-52).dp, y = boundaryY + rowSpacing / 2f - 17.dp)
@@ -8845,8 +9060,9 @@ private fun ConsoleLayoutPreviewRows(
                     onDelta = { deltaPx ->
                         val totalHeightPx = with(density) { maxHeight.toPx() }.coerceAtLeast(1f)
                         val deltaWeight = deltaPx / totalHeightPx * totalWeight
-                        weights = adjustConsoleRowBoundary(weights, index, deltaWeight)
-                        onLayoutChange(layout.copy(rowWeights = weights))
+                        val updatedWeights = adjustConsoleRowBoundary(weights, index, deltaWeight)
+                        weights = updatedWeights
+                        onLayoutChange(layout.copy(rowWeights = updatedWeights))
                     }
                 )
                 boundaryY += rowSpacing
@@ -8855,19 +9071,26 @@ private fun ConsoleLayoutPreviewRows(
             var rowTop = 0.dp
             rowHeights.forEachIndexed { rowIndex, rowHeight ->
                 val selected = rowIndex == selectedIndex
+                val dragging = draggingRowIndex == rowIndex
+                val previewRowOffset = rowPreviewOffset(rowIndex, rowPreviewMove)
+                val previewRowHeight = rowPreviewHeight(rowIndex, rowPreviewMove)
                 val animatedTop by animateDpAsState(rowTop, label = "consoleRowControlTop")
+                val animatedPreviewRowOffset by animateDpAsState(previewRowOffset, label = "consoleRowControlPreviewOffset")
+                val dragOffset = if (dragging) with(density) { rowDragOffsetPx.toDp() } else 0.dp
+                val visualTop = animatedTop + animatedPreviewRowOffset + dragOffset
                 ConsoleRowOrderTag(
                     modifier = Modifier
-                        .offset(x = 8.dp, y = animatedTop + rowHeight / 2f - 32.dp)
-                        .width(34.dp)
-                        .height(64.dp)
-                        .zIndex(7f),
+                        .offset(x = (-14).dp, y = visualTop + previewRowHeight / 2f - 23.dp)
+                        .width(28.dp)
+                        .height(46.dp)
+                        .zIndex(if (dragging) 9f else 7f),
                     selected = selected,
                     dragThresholdPx = with(density) { (rowHeight * 0.48f + rowSpacing * 0.5f).toPx() },
                     onSelect = { onSelectRow(rowIndex) },
                     onDragStart = {
                         draggingRowIndex = rowIndex
                         rowDragOffsetPx = 0f
+                        rowPreviewMove = null
                     },
                     onDragOffset = { offsetPx ->
                         rowDragOffsetPx = offsetPx
@@ -8875,22 +9098,27 @@ private fun ConsoleLayoutPreviewRows(
                     onDragStop = {
                         draggingRowIndex = null
                         rowDragOffsetPx = 0f
+                        rowPreviewMove = null
                     },
                     onMoveBy = { delta ->
                         val targetIndex = (rowIndex + delta).coerceIn(safeRows.indices)
                         if (targetIndex != rowIndex) {
                             draggingRowIndex = targetIndex
-                            rowDragOffsetPx = 0f
                             onMoveRow(rowIndex, delta)
                             onSelectRow(targetIndex)
                         }
-                    }
+                    },
+                    onPreviewMove = { delta ->
+                        val targetIndex = (rowIndex + delta).coerceIn(safeRows.indices)
+                        rowPreviewMove = if (targetIndex != rowIndex) rowIndex to targetIndex else null
+                    },
+                    resolveDrag = { dragOffsetPx -> resolveRowDragDelta(rowIndex, dragOffsetPx) }
                 )
                 ConsoleRowDeleteIcon(
                     modifier = Modifier
                         .align(Alignment.TopEnd)
-                        .offset(x = (-8).dp, y = animatedTop + 8.dp)
-                        .zIndex(7f),
+                        .offset(x = 18.dp, y = visualTop + previewRowHeight / 2f - 18.dp)
+                        .zIndex(if (dragging) 9f else 7f),
                     enabled = true,
                     selected = selected,
                     onClick = {
@@ -8920,6 +9148,13 @@ private fun ConsoleLayoutPreviewRows(
         }
     }
 }
+
+private data class ButtonPreviewMove(
+    val fromRowIndex: Int,
+    val fromIndex: Int,
+    val toRowIndex: Int,
+    val toIndex: Int
+)
 
 @Composable
 private fun ConsoleRaisedButtonFrame(
@@ -9159,7 +9394,7 @@ private fun ConsoleVerticalSplitHandle(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .clip(RoundedCornerShape(topStart = 5.dp, topEnd = 14.dp, bottomEnd = 14.dp, bottomStart = 5.dp))
+                .clip(RoundedCornerShape(topStart = 0.dp, topEnd = 0.dp, bottomEnd = 14.dp, bottomStart = 14.dp))
                 .background(
                     when {
                         dragging -> colors.consoleButtonFeatured.copy(alpha = 0.86f)
@@ -9170,7 +9405,7 @@ private fun ConsoleVerticalSplitHandle(
                 .border(
                     1.dp,
                     if (dragging) Color(0xFF76DFFF) else if (darkTheme) Color.White.copy(alpha = 0.16f) else Color(0xFF0876B8),
-                    RoundedCornerShape(topStart = 5.dp, topEnd = 14.dp, bottomEnd = 14.dp, bottomStart = 5.dp)
+                    RoundedCornerShape(topStart = 0.dp, topEnd = 0.dp, bottomEnd = 14.dp, bottomStart = 14.dp)
                 ),
             contentAlignment = Alignment.Center
         ) {
@@ -9248,6 +9483,42 @@ private fun adjustConsoleRowBoundary(
     next[boundaryIndex] = upper + applied
     next[boundaryIndex + 1] = lower - applied
     return next
+}
+
+private fun insertedConsoleRowWeights(
+    layout: ConsoleLayoutConfig,
+    rowCount: Int,
+    insertIndex: Int
+): List<Float> {
+    val next = normalizedConsoleRowWeights(layout, rowCount).toMutableList()
+    next.add(insertIndex.coerceIn(0, next.size), 1f)
+    return normalizedConsoleWeightValues(next, rowCount + 1)
+}
+
+private fun removedConsoleRowWeights(
+    layout: ConsoleLayoutConfig,
+    rowCount: Int,
+    removeIndex: Int
+): List<Float> {
+    val next = normalizedConsoleRowWeights(layout, rowCount).toMutableList()
+    if (removeIndex in next.indices) {
+        next.removeAt(removeIndex)
+    }
+    return normalizedConsoleWeightValues(next, (rowCount - 1).coerceAtLeast(0))
+}
+
+private fun normalizedConsoleWeightValues(
+    weights: List<Float>,
+    rowCount: Int
+): List<Float> {
+    val safeCount = rowCount.coerceAtLeast(0)
+    if (safeCount == 0) return emptyList()
+    val padded = weights
+        .take(safeCount)
+        .map { it.coerceAtLeast(CONSOLE_MIN_ROW_WEIGHT) } +
+        List((safeCount - weights.size).coerceAtLeast(0)) { 1f }
+    val total = padded.sum().takeIf { it > 0f } ?: safeCount.toFloat()
+    return padded.map { it / total * safeCount.toFloat() }
 }
 
 @Composable

@@ -16,8 +16,10 @@ MobileDeck turns an Android phone into a Bluetooth HID macro deck for a Windows 
 - Horizontal or vertical page direction
 - Optional looped page swiping at the first and last page
 - Layout editor for rows, columns, key editing, and drag movement
+- Console UI with a separate layout editor for sidebar width, row height, row order, and button swap editing
 - Display modes for icon, icon + keyword, or keyword-only keys
 - Icon picker and media-key target picker in key editing
+- Debug-only icon style tuning page for validating console icon and button shadow values
 
 ## Install
 
@@ -57,6 +59,14 @@ If Windows keeps an old HID descriptor cached after an update, remove the paired
 - Multi-touch page swipe can be enabled or disabled in Settings.
 - Loop page swipe controls whether swiping past the first or last page wraps around.
 - `Previous page` and `Next page` are available as assignable key actions.
+
+## Console UI
+
+- Console UI uses a dedicated settings layout and console-style buttons.
+- Console layout editing separates layout sizing from button editing.
+- Row height is stored by row position, while row drag changes row order.
+- Button drag editing swaps buttons between slots instead of changing row sizes.
+- New console pages start with a 3x3 placeholder layout.
 
 ## Notes
 
