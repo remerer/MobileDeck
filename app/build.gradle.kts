@@ -12,8 +12,8 @@ android {
         applicationId = "com.remerer.mobiledeck"
         minSdk = 24
         targetSdk = 35
-        versionCode = 19
-        versionName = "1.3.0"
+        versionCode = 20
+        versionName = "1.3.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

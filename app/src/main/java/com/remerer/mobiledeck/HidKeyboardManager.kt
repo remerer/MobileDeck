@@ -571,6 +571,11 @@ class HidKeyboardManager(
                 "BACKSPACE" -> 0x2A
                 "TAB" -> 0x2B
                 "SPACE" -> 0x2C
+                "DELETE", "DEL" -> 0x4C
+                "RIGHT", "ARROWRIGHT" -> 0x4F
+                "LEFT", "ARROWLEFT" -> 0x50
+                "DOWN", "ARROWDOWN" -> 0x51
+                "UP", "ARROWUP" -> 0x52
                 "F1" -> 0x3A
                 "F2" -> 0x3B
                 "F3" -> 0x3C

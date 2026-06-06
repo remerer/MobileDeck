@@ -88,6 +88,7 @@ private val ConsoleLightColorScheme = lightColorScheme(
 fun MobileDeckTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
     style: MobileDeckThemeStyle = MobileDeckThemeStyle.Classic,
+    fontSizeScale: Float = 1f,
     content: @Composable () -> Unit
 ) {
     val colorScheme = when (style) {
@@ -97,7 +98,7 @@ fun MobileDeckTheme(
 
     MaterialTheme(
         colorScheme = colorScheme,
-        typography = Typography,
+        typography = Typography.scaled(fontSizeScale),
         content = content
     )
 }

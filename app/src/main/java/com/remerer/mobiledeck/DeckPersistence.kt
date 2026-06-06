@@ -179,23 +179,7 @@ fun loadConsoleLayout(context: Context): ConsoleLayoutConfig {
     return runCatching {
         val trimmed = raw.trim()
         if (trimmed.startsWith("{")) {
-            val root = JSONObject(trimmed)
-            val rowsArray = root.getJSONArray("rows")
-            val weightsArray = root.optJSONArray("rowWeights")
-            ConsoleLayoutConfig(
-                rows = List(rowsArray.length()) { rowIndex ->
-                    val row = rowsArray.getJSONArray(rowIndex)
-                    List(row.length()) { index -> row.getInt(index) }
-                },
-                rowWeights = if (weightsArray == null) {
-                    emptyList()
-                } else {
-                    List(weightsArray.length()) { index -> weightsArray.getDouble(index).toFloat() }
-                },
-                sidebarFraction = root.optDouble("sidebarFraction", CONSOLE_DEFAULT_SIDEBAR_FRACTION.toDouble())
-                    .toFloat()
-                    .coerceIn(CONSOLE_MIN_SIDEBAR_FRACTION, CONSOLE_MAX_SIDEBAR_FRACTION)
-            )
+            decodeConsoleLayout(JSONObject(trimmed))
         } else {
             val array = JSONArray(trimmed)
             ConsoleLayoutConfig(
@@ -209,6 +193,52 @@ fun loadConsoleLayout(context: Context): ConsoleLayoutConfig {
 }
 
 fun saveConsoleLayout(context: Context, layout: ConsoleLayoutConfig) {
+    context.deckPrefs().edit().putString(PREF_CONSOLE_LAYOUT, encodeConsoleLayout(layout).toString()).apply()
+}
+
+fun loadConsoleLayouts(context: Context): Map<Int, ConsoleLayoutConfig> {
+    val raw = context.deckPrefs().getString(PREF_CONSOLE_LAYOUTS, null) ?: return emptyMap()
+    return runCatching {
+        val root = JSONObject(raw)
+        buildMap {
+            val keys = root.keys()
+            while (keys.hasNext()) {
+                val key = keys.next()
+                val pageId = key.toIntOrNull() ?: continue
+                put(pageId, decodeConsoleLayout(root.getJSONObject(key)))
+            }
+        }
+    }.getOrDefault(emptyMap())
+}
+
+fun saveConsoleLayouts(context: Context, layouts: Map<Int, ConsoleLayoutConfig>) {
+    val root = JSONObject()
+    layouts.forEach { (pageId, layout) ->
+        root.put(pageId.toString(), encodeConsoleLayout(layout))
+    }
+    context.deckPrefs().edit().putString(PREF_CONSOLE_LAYOUTS, root.toString()).apply()
+}
+
+fun decodeConsoleLayout(root: JSONObject): ConsoleLayoutConfig {
+    val rowsArray = root.getJSONArray("rows")
+    val weightsArray = root.optJSONArray("rowWeights")
+    return ConsoleLayoutConfig(
+        rows = List(rowsArray.length()) { rowIndex ->
+            val row = rowsArray.getJSONArray(rowIndex)
+            List(row.length()) { index -> row.getInt(index) }
+        },
+        rowWeights = if (weightsArray == null) {
+            emptyList()
+        } else {
+            List(weightsArray.length()) { index -> weightsArray.getDouble(index).toFloat() }
+        },
+        sidebarFraction = root.optDouble("sidebarFraction", CONSOLE_DEFAULT_SIDEBAR_FRACTION.toDouble())
+            .toFloat()
+            .coerceIn(CONSOLE_MIN_SIDEBAR_FRACTION, CONSOLE_MAX_SIDEBAR_FRACTION)
+    )
+}
+
+fun encodeConsoleLayout(layout: ConsoleLayoutConfig): JSONObject {
     val rowsArray = JSONArray()
     layout.rows.forEach { row ->
         val rowArray = JSONArray()
@@ -224,7 +254,7 @@ fun saveConsoleLayout(context: Context, layout: ConsoleLayoutConfig) {
             "sidebarFraction",
             layout.sidebarFraction.coerceIn(CONSOLE_MIN_SIDEBAR_FRACTION, CONSOLE_MAX_SIDEBAR_FRACTION).toDouble()
         )
-    context.deckPrefs().edit().putString(PREF_CONSOLE_LAYOUT, root.toString()).apply()
+    return root
 }
 
 fun normalizedConsoleRowWeights(layout: ConsoleLayoutConfig, rowCount: Int = layout.rows.size): List<Float> {
@@ -273,6 +303,7 @@ fun encodeDeckButton(button: DeckButton): JSONObject {
         .put("spanRows", button.spanRows)
         .put("appWidgetId", button.appWidgetId)
         .put("appWidgetTouchable", button.appWidgetTouchable)
+        .put("controlStyle", button.controlStyle.name)
 }
 
 fun decodeDeckButton(item: JSONObject, fallbackPosition: Int): DeckButton {
@@ -294,7 +325,10 @@ fun decodeDeckButton(item: JSONObject, fallbackPosition: Int): DeckButton {
         spanColumns = item.optInt("spanColumns", 1).coerceIn(1, MAX_BUTTON_SPAN_COLUMNS),
         spanRows = item.optInt("spanRows", 1).coerceIn(1, MAX_BUTTON_SPAN_ROWS),
         appWidgetId = item.optInt("appWidgetId", INVALID_APP_WIDGET_ID),
-        appWidgetTouchable = item.optBoolean("appWidgetTouchable", true)
+        appWidgetTouchable = item.optBoolean("appWidgetTouchable", true),
+        controlStyle = runCatching {
+            DeckControlStyle.valueOf(item.optString("controlStyle"))
+        }.getOrDefault(DeckControlStyle.Button)
     )
 }
 
@@ -549,6 +583,30 @@ fun saveDeckUiMode(context: Context, mode: DeckUiMode) {
     context.deckPrefs().edit().putString(PREF_DECK_UI_MODE, mode.name).apply()
 }
 
+fun loadClassicFontSizeOption(context: Context): DeckFontSizeOption {
+    return loadFontSizeOption(context, PREF_CLASSIC_FONT_SIZE)
+}
+
+fun saveClassicFontSizeOption(context: Context, option: DeckFontSizeOption) {
+    context.deckPrefs().edit().putString(PREF_CLASSIC_FONT_SIZE, option.name).apply()
+}
+
+fun loadConsoleFontSizeOption(context: Context): DeckFontSizeOption {
+    return loadFontSizeOption(context, PREF_CONSOLE_FONT_SIZE)
+}
+
+fun saveConsoleFontSizeOption(context: Context, option: DeckFontSizeOption) {
+    context.deckPrefs().edit().putString(PREF_CONSOLE_FONT_SIZE, option.name).apply()
+}
+
+private fun loadFontSizeOption(context: Context, key: String): DeckFontSizeOption {
+    return runCatching {
+        DeckFontSizeOption.valueOf(
+            context.deckPrefs().getString(key, null) ?: DeckFontSizeOption.System.name
+        )
+    }.getOrDefault(DeckFontSizeOption.System)
+}
+
 fun shouldShowClassicTutorial(context: Context): Boolean {
     return !context.deckPrefs().getBoolean(PREF_CLASSIC_TUTORIAL_SEEN, false)
 }
@@ -576,8 +634,11 @@ const val PREF_CLASSIC_DECK_BACKGROUND_TYPE = "classic_deck_background_type"
 const val PREF_CLASSIC_DECK_BACKGROUND_COLOR = "classic_deck_background_color"
 const val PREF_CLASSIC_DECK_BACKGROUND_IMAGE_URI = "classic_deck_background_image_uri"
 const val PREF_DECK_UI_MODE = "deck_ui_mode"
+const val PREF_CLASSIC_FONT_SIZE = "classic_font_size"
+const val PREF_CONSOLE_FONT_SIZE = "console_font_size"
 const val PREF_CLASSIC_TUTORIAL_SEEN = "classic_tutorial_seen"
 const val PREF_CONSOLE_LAYOUT = "console_layout"
+const val PREF_CONSOLE_LAYOUTS = "console_layouts"
 const val PREF_CONSOLE_PANEL_CONNECTION = "console_panel_connection"
 const val PREF_CONSOLE_PANEL_MESSAGE = "console_panel_message"
 const val PREF_CONSOLE_PANEL_CLOCK = "console_panel_clock"

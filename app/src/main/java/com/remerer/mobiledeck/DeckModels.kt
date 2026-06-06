@@ -23,7 +23,6 @@ enum class EditActionPanel(@StringRes val labelRes: Int) {
     AppCommand(R.string.app_command_target),
     KeyboardInput(R.string.action_keyboard_input),
     Widget(R.string.action_widget),
-    MediaKey(R.string.action_media_key),
     RunCommand(R.string.action_run_command),
     Utility(R.string.action_utility)
 }
@@ -32,6 +31,14 @@ enum class DeckDisplayMode(@StringRes val labelRes: Int) {
     IconOnly(R.string.display_icon_only),
     IconAndText(R.string.display_icon_and_text),
     KeywordOnly(R.string.display_keyword_only)
+}
+
+enum class DeckControlStyle(@StringRes val labelRes: Int) {
+    Button(R.string.control_style_button),
+    TrimSlider(R.string.control_style_trim_slider),
+    TrimKnob(R.string.control_style_trim_knob),
+    InfiniteWheel(R.string.control_style_infinite_wheel),
+    JoyPad(R.string.control_style_joypad)
 }
 
 enum class PageSwipeAxis(@StringRes val labelRes: Int, @StringRes val shortLabelRes: Int) {
@@ -53,6 +60,17 @@ enum class PageSwipeMode(@StringRes val labelRes: Int) {
 enum class DeckUiMode(@StringRes val labelRes: Int) {
     Classic(R.string.deck_ui_classic),
     Console(R.string.deck_ui_console)
+}
+
+enum class DeckFontSizeOption(
+    @StringRes val labelRes: Int,
+    @StringRes val shortLabelRes: Int,
+    val scale: Float
+) {
+    System(R.string.font_size_system, R.string.font_size_system_short, 1.0f),
+    Small(R.string.font_size_small, R.string.font_size_small_short, 0.90f),
+    Medium(R.string.font_size_medium, R.string.font_size_medium_short, 1.0f),
+    Large(R.string.font_size_large, R.string.font_size_large_short, 1.12f)
 }
 
 enum class ClassicDeckBackgroundType(@StringRes val labelRes: Int) {
@@ -88,7 +106,8 @@ data class DeckButton(
     val spanColumns: Int = 1,
     val spanRows: Int = 1,
     val appWidgetId: Int = INVALID_APP_WIDGET_ID,
-    val appWidgetTouchable: Boolean = true
+    val appWidgetTouchable: Boolean = true,
+    val controlStyle: DeckControlStyle = DeckControlStyle.Button
 )
 
 data class UtilityChoice(

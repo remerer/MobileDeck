@@ -97,6 +97,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
@@ -126,6 +127,7 @@ import androidx.compose.material.icons.filled.Computer
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.GridView
+import androidx.compose.material.icons.filled.Help
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Keyboard
@@ -177,9 +179,11 @@ import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.Outline
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.Shader
 import androidx.compose.ui.graphics.ShaderBrush
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.geometry.CornerRadius
@@ -231,12 +235,14 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import kotlin.math.abs
+import kotlin.math.atan2
+import kotlin.math.cos
 import kotlin.math.roundToInt
+import kotlin.math.sin
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         window.setBackgroundDrawable(ColorDrawable(AndroidColor.BLACK))
         window.decorView.setBackgroundColor(AndroidColor.BLACK)
         enableEdgeToEdge()
@@ -390,23 +396,28 @@ private fun MobileDeckApp() {
     var classicSolidButtonBackground by remember { mutableStateOf(loadClassicSolidButtonBackground(context)) }
     var classicDeckBackground by remember { mutableStateOf(loadClassicDeckBackground(context)) }
     var deckUiMode by remember { mutableStateOf(loadDeckUiMode(context)) }
-    var consoleLayout by remember { mutableStateOf(loadConsoleLayout(context)) }
+    var classicFontSize by remember { mutableStateOf(loadClassicFontSizeOption(context)) }
+    var consoleFontSize by remember { mutableStateOf(loadConsoleFontSizeOption(context)) }
+    val initialConsoleLayouts = remember { loadConsoleLayouts(context) }
+    var consoleLayouts by remember { mutableStateOf(initialConsoleLayouts) }
+    var consoleLayout by remember { mutableStateOf(initialConsoleLayouts[activeDeckPageId] ?: loadConsoleLayout(context)) }
     var consolePanelOptions by remember { mutableStateOf(loadConsolePanelOptions(context)) }
     var lastPageDelta by remember { mutableStateOf(1) }
     var pageAnimationSequence by remember { mutableStateOf(0) }
     var editingButton by remember { mutableStateOf<DeckButton?>(null) }
     var pendingNewButtonId by remember { mutableStateOf<Int?>(null) }
     var pendingNewButtonCreatedPageId by remember { mutableStateOf<Int?>(null) }
-    var consoleButtonPickerRow by remember { mutableStateOf<Int?>(null) }
     var consoleLayoutEditorInitialMode by remember { mutableStateOf(ConsoleLayoutEditMode.Layout) }
     var pendingWidgetButtonId by remember { mutableStateOf<Int?>(null) }
     var pendingWidgetId by remember { mutableStateOf<Int?>(null) }
+    var pendingExportJson by remember { mutableStateOf<String?>(null) }
     var logs by remember { mutableStateOf(emptyList<ActivityLog>()) }
     var consoleLayoutDiagnostics by remember { mutableStateOf(emptyList<String>()) }
     var page by remember { mutableStateOf(AppPage.Deck) }
     var showClassicTutorial by remember { mutableStateOf(shouldShowClassicTutorial(context)) }
     var classicTutorialStep by remember { mutableStateOf(SettingsTutorialStep.Bluetooth) }
     var confirmSettingsButtonRestore by remember { mutableStateOf(false) }
+    var debugKeepScreenOn by remember { mutableStateOf(false) }
     var confirmEmptyPageDeletePageId by remember { mutableStateOf<Int?>(null) }
     val activeDeckPage = deckPages.firstOrNull { it.id == activeDeckPageId } ?: deckPages.first()
     val deckButtons = activeDeckPage.buttons
@@ -632,6 +643,103 @@ private fun MobileDeckApp() {
         )
     }
 
+    fun currentDeckBundleSnapshot(): DeckBundleSnapshot {
+        return DeckBundleSnapshot(
+            pages = deckPages,
+            consoleLayouts = consoleLayouts + (activeDeckPageId to consoleLayout),
+            columns = deckColumns,
+            rows = deckRows,
+            spacing = deckSpacing,
+            pageSwipeAxis = pageSwipeAxis,
+            pageSwipeMode = pageSwipeMode,
+            pageSwipeAnimation = pageSwipeAnimation,
+            infinitePageSwipe = infinitePageSwipe,
+            buttonVibrationLevel = buttonVibrationLevel,
+            classicSolidButtonBackground = classicSolidButtonBackground,
+            classicDeckBackground = classicDeckBackground,
+            deckUiMode = deckUiMode,
+            classicFontSize = classicFontSize,
+            consoleFontSize = consoleFontSize,
+            consolePanelOptions = consolePanelOptions
+        )
+    }
+
+    fun applyImportedDeckBundle(imported: ImportedDeckBundle) {
+        val importedPages = ensureSettingsButton(imported.pages, darkTheme).ifEmpty {
+            defaultDeckPages(darkTheme = darkTheme)
+        }
+        val importedLayouts = imported.consoleLayouts
+            .filterKeys { pageId -> importedPages.any { it.id == pageId } }
+        val nextActivePageId = importedPages.first().id
+        val nextConsoleLayout = importedLayouts[nextActivePageId] ?: defaultConsoleLayout(importedPages.first().buttons)
+
+        deckPages = importedPages
+        activeDeckPageId = nextActivePageId
+        deckColumns = imported.columns
+        deckRows = imported.rows
+        deckSpacing = imported.spacing
+        pageSwipeAxis = imported.pageSwipeAxis
+        pageSwipeMode = imported.pageSwipeMode
+        pageSwipeAnimation = imported.pageSwipeAnimation
+        infinitePageSwipe = imported.infinitePageSwipe
+        buttonVibrationLevel = imported.buttonVibrationLevel
+        classicSolidButtonBackground = imported.classicSolidButtonBackground
+        classicDeckBackground = imported.classicDeckBackground
+        deckUiMode = imported.deckUiMode
+        classicFontSize = imported.classicFontSize
+        consoleFontSize = imported.consoleFontSize
+        consolePanelOptions = imported.consolePanelOptions
+        consoleLayouts = importedLayouts
+        consoleLayout = nextConsoleLayout
+
+        saveDeckPages(context, importedPages)
+        saveDeckColumns(context, deckColumns)
+        saveDeckRows(context, deckRows)
+        saveDeckSpacing(context, deckSpacing)
+        savePageSwipeAxis(context, pageSwipeAxis)
+        savePageSwipeMode(context, pageSwipeMode)
+        savePageSwipeAnimation(context, pageSwipeAnimation)
+        saveInfinitePageSwipe(context, infinitePageSwipe)
+        saveButtonVibrationLevel(context, buttonVibrationLevel)
+        saveClassicSolidButtonBackground(context, classicSolidButtonBackground)
+        saveClassicDeckBackground(context, classicDeckBackground)
+        saveDeckUiMode(context, deckUiMode)
+        saveClassicFontSizeOption(context, classicFontSize)
+        saveConsoleFontSizeOption(context, consoleFontSize)
+        saveConsolePanelOptions(context, consolePanelOptions)
+        saveConsoleLayouts(context, importedLayouts)
+        saveConsoleLayout(context, nextConsoleLayout)
+    }
+
+    val exportDeckBundleLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/json")
+    ) { uri ->
+        val json = pendingExportJson
+        pendingExportJson = null
+        if (uri == null || json == null) return@rememberLauncherForActivityResult
+        runCatching {
+            context.contentResolver.openOutputStream(uri)?.use { output ->
+                output.write(json.toByteArray(Charsets.UTF_8))
+            }
+        }.onFailure { error ->
+            Log.e("MobileDeck", "Failed to export deck bundle", error)
+        }
+    }
+
+    val importDeckBundleLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        runCatching {
+            val raw = context.contentResolver.openInputStream(uri)?.use { input ->
+                input.readBytes().toString(Charsets.UTF_8)
+            } ?: return@runCatching
+            applyImportedDeckBundle(context.importDeckBundleJson(raw))
+        }.onFailure { error ->
+            Log.e("MobileDeck", "Failed to import deck bundle", error)
+        }
+    }
+
     fun addDeckButton(position: Int? = null, editAfterCreate: Boolean = false) {
         val colors = defaultDeckColors(darkTheme)
         val buttonCapacity = pageButtonCapacity(activeDeckPage.id, deckPages, deckColumns, deckRows)
@@ -672,6 +780,51 @@ private fun MobileDeckApp() {
         }
     }
 
+    fun addConsoleButton(rowIndex: Int) {
+        val visibleRows = consoleLayoutRowIds(
+            consoleLayout,
+            activeDeckPage.buttons.filterNot { buttonAppAction(it) == DeckActionType.Settings },
+            DEFAULT_COLUMNS,
+            DEFAULT_ROWS
+        ).ifEmpty { listOf(emptyList()) }
+        val safeRowIndex = rowIndex.coerceIn(visibleRows.indices)
+        val colors = defaultDeckColors(darkTheme)
+        val newButton = DeckButton(
+            id = nextDeckButtonId(deckPages.flatMap { it.buttons }),
+            title = "Explorer",
+            subtitle = "Win+E",
+            icon = ICON_AUTO,
+            iconImageUri = "",
+            displayMode = DeckDisplayMode.IconAndText,
+            actionType = DeckActionType.Hotkey,
+            payload = "WIN+E",
+            color = colors[activeDeckPage.buttons.size % colors.size],
+            position = (activeDeckPage.buttons.maxOfOrNull { it.position } ?: -1) + 1
+        )
+        val updatedPages = updateDeckPage(deckPages, activeDeckPage.id) { pageConfig ->
+            pageConfig.buttons + newButton
+        }
+        val updatedLayoutBase = consoleLayout.copy(
+            rows = visibleRows.mapIndexed { index, row ->
+                if (index == safeRowIndex) row + newButton.id else row
+            }
+        )
+        val updatedLayout = updatedLayoutBase.copy(
+            rowWeights = normalizedConsoleRowWeights(updatedLayoutBase, updatedLayoutBase.rows.size)
+        )
+        deckPages = updatedPages
+        saveDeckPages(context, updatedPages)
+        val updatedLayouts = consoleLayouts + (activeDeckPage.id to updatedLayout)
+        consoleLayouts = updatedLayouts
+        consoleLayout = updatedLayout
+        saveConsoleLayouts(context, updatedLayouts)
+        saveConsoleLayout(context, updatedLayout)
+        pendingNewButtonId = newButton.id
+        pendingNewButtonCreatedPageId = null
+        editingButton = newButton
+        addConsoleLayoutDiagnostic("add console button row=${safeRowIndex + 1} id=${newButton.id}")
+    }
+
     fun consolePlaceholderButtons(startId: Int, startPosition: Int, count: Int): List<DeckButton> {
         val colors = defaultDeckColors(darkTheme)
         val icons = listOf(
@@ -709,6 +862,69 @@ private fun MobileDeckApp() {
         )
     }
 
+    fun saveConsoleLayoutForPage(pageId: Int, layout: ConsoleLayoutConfig) {
+        val updatedLayouts = consoleLayouts + (pageId to layout)
+        consoleLayouts = updatedLayouts
+        saveConsoleLayouts(context, updatedLayouts)
+        if (pageId == activeDeckPageId) {
+            consoleLayout = layout
+            saveConsoleLayout(context, layout)
+        }
+    }
+
+    fun removeConsoleLayoutForPage(pageId: Int) {
+        val updatedLayouts = consoleLayouts - pageId
+        consoleLayouts = updatedLayouts
+        saveConsoleLayouts(context, updatedLayouts)
+    }
+
+    fun consoleLayoutForPage(pageConfig: DeckPageConfig): ConsoleLayoutConfig {
+        return consoleLayouts[pageConfig.id] ?: defaultConsoleLayout(pageConfig.buttons)
+    }
+
+    fun ensureUniqueConsoleLayoutSlots() {
+        val visibleButtons = activeDeckPage.buttons.filterNot { buttonAppAction(it) == DeckActionType.Settings }
+        val buttonById = visibleButtons.associateBy { it.id }
+        val rows = consoleLayoutRowIds(consoleLayout, visibleButtons, DEFAULT_COLUMNS, DEFAULT_ROWS)
+        val seenIds = mutableSetOf<Int>()
+        var nextId = nextDeckButtonId(deckPages.flatMap { it.buttons })
+        var nextPosition = (activeDeckPage.buttons.maxOfOrNull { it.position } ?: -1) + 1
+        val clonedButtons = mutableListOf<DeckButton>()
+        var changed = false
+        val updatedRows = rows.map { row ->
+            row.map { buttonId ->
+                if (seenIds.add(buttonId)) {
+                    buttonId
+                } else {
+                    val source = buttonById[buttonId] ?: return@map buttonId
+                    changed = true
+                    val clone = source.copy(id = nextId++, position = nextPosition++)
+                    clonedButtons += clone
+                    clone.id
+                }
+            }
+        }
+        if (!changed) return
+        val updatedPages = updateDeckPage(deckPages, activeDeckPage.id) { pageConfig ->
+            pageConfig.buttons + clonedButtons
+        }
+        val updatedLayout = consoleLayout.copy(rows = updatedRows)
+        deckPages = updatedPages
+        saveDeckPages(context, updatedPages)
+        val updatedLayouts = consoleLayouts + (activeDeckPage.id to updatedLayout)
+        consoleLayouts = updatedLayouts
+        consoleLayout = updatedLayout
+        saveConsoleLayouts(context, updatedLayouts)
+        saveConsoleLayout(context, updatedLayout)
+        addConsoleLayoutDiagnostic("duplicated console slots cloned count=${clonedButtons.size}")
+    }
+
+    LaunchedEffect(page, activeDeckPageId, consoleLayout.rows, activeDeckPage.buttons) {
+        if (page == AppPage.ConsoleLayoutEditor) {
+            ensureUniqueConsoleLayoutSlots()
+        }
+    }
+
     fun saveConsoleLayoutForActivePage(updated: ConsoleLayoutConfig, removeEmptyRows: Boolean = false) {
         val activeButtonIds = activeDeckPage.buttons.map { it.id }.toSet()
         val cleanedBase = if (removeEmptyRows) {
@@ -735,7 +951,8 @@ private fun MobileDeckApp() {
             )
             val nextIndex = currentIndex.coerceAtMost(remainingPages.lastIndex)
             val nextPage = remainingPages[nextIndex]
-            val nextLayout = defaultConsoleLayout(nextPage.buttons)
+            val nextLayout = consoleLayoutForPage(nextPage)
+            removeConsoleLayoutForPage(activeDeckPage.id)
             deckPages = remainingPages
             activeDeckPageId = nextPage.id
             consoleLayout = nextLayout
@@ -744,8 +961,7 @@ private fun MobileDeckApp() {
             addConsoleLayoutDiagnostic("empty console page deleted; active=${nextPage.name}")
             return
         }
-        consoleLayout = cleaned
-        saveConsoleLayout(context, cleaned)
+        saveConsoleLayoutForPage(activeDeckPage.id, cleaned)
     }
 
     fun addDeckPage() {
@@ -772,8 +988,7 @@ private fun MobileDeckApp() {
         saveDeckPages(context, updatedPages)
         if (consolePage) {
             val updatedLayout = consoleThreeByThreeLayout(newButtons)
-            consoleLayout = updatedLayout
-            saveConsoleLayout(context, updatedLayout)
+            saveConsoleLayoutForPage(newPage.id, updatedLayout)
         }
     }
 
@@ -784,7 +999,10 @@ private fun MobileDeckApp() {
         val nextIndex = currentIndex.coerceAtMost(updatedPages.lastIndex)
         deckPages = updatedPages
         activeDeckPageId = updatedPages[nextIndex].id
+        removeConsoleLayoutForPage(pageId)
+        consoleLayout = consoleLayoutForPage(updatedPages[nextIndex])
         saveDeckPages(context, updatedPages)
+        saveConsoleLayout(context, consoleLayout)
     }
 
     fun deleteActiveDeckPage() {
@@ -802,6 +1020,8 @@ private fun MobileDeckApp() {
         }
         deckPages = updatedPages
         activeDeckPageId = firstPage.id
+        consoleLayout = consoleLayoutForPage(firstPage)
+        saveConsoleLayout(context, consoleLayout)
         saveDeckPages(context, updatedPages)
     }
 
@@ -843,6 +1063,9 @@ private fun MobileDeckApp() {
         val currentPages = deckPages.map { pageConfig ->
             pageConfig.copy(buttons = pageConfig.buttons.filterNot { existing -> existing.id == button.id })
         }
+        val currentLayout = consoleLayout.copy(
+            rows = consoleLayout.rows.map { row -> row.filterNot { it == button.id } }
+        )
         val updatedPages = if (createdPageId != null && currentPages.size > 1) {
             currentPages.filterNot { pageConfig ->
                 pageConfig.id == createdPageId && pageConfig.buttons.isEmpty()
@@ -855,6 +1078,7 @@ private fun MobileDeckApp() {
             activeDeckPageId = updatedPages.first().id
         }
         saveDeckPages(context, updatedPages)
+        saveConsoleLayoutForActivePage(currentLayout, removeEmptyRows = true)
         pendingNewButtonId = null
         pendingNewButtonCreatedPageId = null
         editingButton = null
@@ -911,11 +1135,13 @@ private fun MobileDeckApp() {
             lastPageDelta = delta
             pageAnimationSequence += 1
             activeDeckPageId = deckPages[target].id
+            consoleLayout = consoleLayoutForPage(deckPages[target])
+            saveConsoleLayout(context, consoleLayout)
         }
     }
 
-    fun pressDeckButton(button: DeckButton) {
-        val delivered = when (button.actionType) {
+    fun performDeckButtonAction(button: DeckButton, payloadOverride: String = button.payload): Boolean {
+        return when (button.actionType) {
             DeckActionType.Settings -> {
                 page = AppPage.Settings
                 true
@@ -932,12 +1158,12 @@ private fun MobileDeckApp() {
                 switchDeckPage(1)
                 true
             }
-            DeckActionType.MediaKey -> hidManager.sendMediaKey(button.payload)
-            DeckActionType.Hotkey -> hidManager.sendHotkey(button.payload)
-            DeckActionType.Text -> hidManager.sendText(button.payload)
-            DeckActionType.RunCommand -> hidManager.runWindowsCommand(button.payload)
-            DeckActionType.Utility -> runUtilityAction(context, button.payload)
-            DeckActionType.AppCommand -> when (appCommandAction(button.payload)) {
+            DeckActionType.MediaKey -> hidManager.sendMediaKey(payloadOverride)
+            DeckActionType.Hotkey -> hidManager.sendHotkey(payloadOverride)
+            DeckActionType.Text -> hidManager.sendText(payloadOverride)
+            DeckActionType.RunCommand -> hidManager.runWindowsCommand(payloadOverride)
+            DeckActionType.Utility -> runUtilityAction(context, payloadOverride)
+            DeckActionType.AppCommand -> when (appCommandAction(payloadOverride)) {
                 DeckActionType.Settings -> {
                     page = AppPage.Settings
                     true
@@ -957,11 +1183,14 @@ private fun MobileDeckApp() {
                 else -> false
             }
         }
+    }
+
+    fun logDeckButtonAction(button: DeckButton, payload: String, delivered: Boolean) {
         val note = when {
-            buttonAppAction(button) == DeckActionType.Settings -> "opened settings"
-            buttonAppAction(button) == DeckActionType.BluetoothStatus -> "opened connection"
-            buttonAppAction(button) == DeckActionType.PreviousPage -> "previous page"
-            buttonAppAction(button) == DeckActionType.NextPage -> "next page"
+            buttonAppAction(button.actionType, payload) == DeckActionType.Settings -> "opened settings"
+            buttonAppAction(button.actionType, payload) == DeckActionType.BluetoothStatus -> "opened connection"
+            buttonAppAction(button.actionType, payload) == DeckActionType.PreviousPage -> "previous page"
+            buttonAppAction(button.actionType, payload) == DeckActionType.NextPage -> "next page"
             delivered -> "sent"
             button.actionType == DeckActionType.AppCommand -> "not supported by Bluetooth keyboard"
             button.actionType == DeckActionType.Utility -> "utility unavailable"
@@ -971,11 +1200,28 @@ private fun MobileDeckApp() {
         logs = listOf(
             ActivityLog(
                 buttonTitle = button.title,
-                payload = button.payload,
+                payload = payload,
                 delivered = delivered,
                 note = note
             )
         ) + logs.take(9)
+    }
+
+    fun pressDeckButton(button: DeckButton) {
+        val delivered = performDeckButtonAction(button)
+        logDeckButtonAction(button, button.payload, delivered)
+    }
+
+    fun pressTrimButton(button: DeckButton, step: Int) {
+        if (step == 0) return
+        val payload = controlPayloadForStep(button, step)
+        if (payload.isBlank()) return
+        var delivered = false
+        val repeatCount = 1
+        repeat(repeatCount) {
+            delivered = performDeckButtonAction(button, payload) || delivered
+        }
+        logDeckButtonAction(button, payload, delivered)
     }
 
     fun moveDeckButtonToSlot(button: DeckButton, targetPosition: Int) {
@@ -1025,14 +1271,26 @@ private fun MobileDeckApp() {
     }
 
     val appColors = deckThemeColors(deckUiMode, darkTheme)
+    val bluetoothConnected = hidStatus.state == HidConnectionState.Connected
+    val companionConnected = false
+    val shouldKeepScreenOn = bluetoothConnected || companionConnected || (BuildConfig.DEBUG && debugKeepScreenOn)
     SideEffect {
         (context as? Activity)?.window?.let { activityWindow ->
             val backgroundColor = appColors.backgroundGradient.first().toArgb()
             activityWindow.setBackgroundDrawable(ColorDrawable(backgroundColor))
             activityWindow.decorView.setBackgroundColor(backgroundColor)
+            if (shouldKeepScreenOn) {
+                activityWindow.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            } else {
+                activityWindow.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            }
         }
     }
-    MobileDeckTheme(style = deckUiMode.toThemeStyle()) {
+    val activeFontSize = if (deckUiMode == DeckUiMode.Console) consoleFontSize else classicFontSize
+    MobileDeckTheme(
+        style = deckUiMode.toThemeStyle(),
+        fontSizeScale = activeFontSize.scale
+    ) {
     CompositionLocalProvider(LocalDeckThemeColors provides appColors) {
     Scaffold(
         modifier = Modifier
@@ -1101,6 +1359,7 @@ private fun MobileDeckApp() {
                     onPageSwipe = ::switchDeckPage,
                     onAddPage = ::addDeckPage,
                     onButtonPressed = ::pressDeckButton,
+                    onTrimStep = ::pressTrimButton,
                     onButtonTouchStarted = { context.applicationContext.vibrateButtonPress(buttonVibrationLevel) },
                     onButtonTouchEnded = { context.applicationContext.vibrateButtonPress(buttonVibrationLevel) },
                     onButtonEdit = {},
@@ -1164,6 +1423,7 @@ private fun MobileDeckApp() {
                     onResetPage = ::resetFirstDeckPage,
                     onButtonEdit = { editingButton = it },
                     onButtonDragStarted = { context.applicationContext.vibrateButtonPress(buttonVibrationLevel) },
+                    onTrimStep = ::pressTrimButton,
                     onButtonMoved = ::moveDeckButtonToSlot,
                     onButtonDeleted = ::deleteDeckButton,
                     onEmptySlotPressed = { slot -> addDeckButton(slot, editAfterCreate = true) }
@@ -1221,9 +1481,8 @@ private fun MobileDeckApp() {
                         )
                         val updated = updatedBase.copy(rowWeights = normalizedConsoleRowWeights(updatedBase, updatedBase.rows.size))
                         deckPages = updatedPages
-                        saveConsoleLayout(context, updated)
                         saveDeckPages(context, updatedPages)
-                        consoleLayout = updated
+                        saveConsoleLayoutForPage(activeDeckPage.id, updated)
                         addConsoleLayoutDiagnostic("add row saved targetRow=${insertIndex + 1} rows=${updated.rows.size} weights=${updated.rowWeights.size}")
                     } else {
                         addConsoleLayoutDiagnostic("add row ignored max rows reached")
@@ -1285,8 +1544,7 @@ private fun MobileDeckApp() {
                 },
                 onReset = {
                     val updated = defaultConsoleLayout(deckButtons)
-                    consoleLayout = updated
-                    saveConsoleLayout(context, updated)
+                    saveConsoleLayoutForPage(activeDeckPage.id, updated)
                     addConsoleLayoutDiagnostic("reset console layout rows=${updated.rows.size}")
                 },
                 onLayoutChange = { updated ->
@@ -1298,28 +1556,33 @@ private fun MobileDeckApp() {
                     addConsoleLayoutDiagnostic("layout changed rows=${merged.rows.size} weights=${merged.rowWeights.size}")
                 },
                 onPickButton = { rowIndex ->
-                    addConsoleLayoutDiagnostic("open button picker row=${rowIndex + 1}")
-                    consoleButtonPickerRow = rowIndex
+                    addConsoleButton(rowIndex)
                 },
-                onRemoveButton = { rowIndex, buttonId ->
+                onRemoveButton = { rowIndex, buttonIndex ->
                     val rows = consoleLayoutRowIds(
                         consoleLayout,
                         activeDeckPage.buttons.filterNot { buttonAppAction(it) == DeckActionType.Settings },
                         DEFAULT_COLUMNS,
                         DEFAULT_ROWS
                     )
-                    val updated = consoleLayout.copy(
-                        rows = rows.mapIndexed { index, row ->
-                            if (index == rowIndex) row.filterNot { it == buttonId } else row
+                    val buttonId = rows.getOrNull(rowIndex)?.getOrNull(buttonIndex)
+                    if (buttonId != null) {
+                        val updated = consoleLayout.copy(
+                            rows = rows.mapIndexed { index, row ->
+                                if (index == rowIndex) row.filterIndexed { itemIndex, _ -> itemIndex != buttonIndex } else row
+                            }
+                        )
+                        val remainingOccurrences = updated.rows.flatten().count { it == buttonId }
+                        if (remainingOccurrences == 0) {
+                            val updatedPages = updateDeckPage(deckPages, activeDeckPage.id) { pageConfig ->
+                                pageConfig.buttons.filterNot { it.id == buttonId }
+                            }
+                            deckPages = updatedPages
+                            saveDeckPages(context, updatedPages)
                         }
-                    )
-                    val updatedPages = updateDeckPage(deckPages, activeDeckPage.id) { pageConfig ->
-                        pageConfig.buttons.filterNot { it.id == buttonId }
+                        saveConsoleLayoutForActivePage(updated, removeEmptyRows = true)
+                        addConsoleLayoutDiagnostic("remove button row=${rowIndex + 1} index=${buttonIndex + 1} id=$buttonId")
                     }
-                    deckPages = updatedPages
-                    saveDeckPages(context, updatedPages)
-                    saveConsoleLayoutForActivePage(updated, removeEmptyRows = true)
-                    addConsoleLayoutDiagnostic("remove button row=${rowIndex + 1} id=$buttonId")
                 },
                 onMoveButton = { rowIndex, fromIndex, delta ->
                     val rows = consoleLayoutRowIds(
@@ -1416,10 +1679,13 @@ private fun MobileDeckApp() {
                 classicSolidButtonBackground = classicSolidButtonBackground,
                 classicDeckBackground = classicDeckBackground,
                 deckUiMode = deckUiMode,
+                classicFontSize = classicFontSize,
+                consoleFontSize = consoleFontSize,
                 consolePanelOptions = consolePanelOptions,
                 pairingDiscoverable = pairingDiscoverable,
                 showClassicTutorial = showClassicTutorial,
                 classicTutorialStep = classicTutorialStep,
+                debugKeepScreenOn = debugKeepScreenOn,
                 onLayoutEditor = {
                     context.applicationContext.vibrateButtonPress(buttonVibrationLevel)
                     page = AppPage.LayoutEditor
@@ -1428,6 +1694,14 @@ private fun MobileDeckApp() {
                     context.applicationContext.vibrateButtonPress(buttonVibrationLevel)
                     consoleLayoutEditorInitialMode = editMode
                     page = AppPage.ConsoleLayoutEditor
+                },
+                onExportBundle = {
+                    pendingExportJson = context.createDeckBundleJson(currentDeckBundleSnapshot())
+                    val fileName = "mobiledeck-${SimpleDateFormat("yyyyMMdd-HHmm", Locale.US).format(Date())}.json"
+                    exportDeckBundleLauncher.launch(fileName)
+                },
+                onImportBundle = {
+                    importDeckBundleLauncher.launch(arrayOf("application/json", "text/*", "*/*"))
                 },
                 onOpenIconStyleTest = {
                     if (BuildConfig.DEBUG) {
@@ -1464,6 +1738,16 @@ private fun MobileDeckApp() {
                     context.applicationContext.vibrateButtonPress(buttonVibrationLevel)
                     classicSolidButtonBackground = enabled
                     saveClassicSolidButtonBackground(context, enabled)
+                },
+                onClassicFontSizeChange = { option ->
+                    context.applicationContext.vibrateButtonPress(buttonVibrationLevel)
+                    classicFontSize = option
+                    saveClassicFontSizeOption(context, option)
+                },
+                onConsoleFontSizeChange = { option ->
+                    context.applicationContext.vibrateButtonPress(buttonVibrationLevel)
+                    consoleFontSize = option
+                    saveConsoleFontSizeOption(context, option)
                 },
                 onClassicDeckBackgroundChange = { background ->
                     context.applicationContext.vibrateButtonPress(buttonVibrationLevel)
@@ -1530,6 +1814,10 @@ private fun MobileDeckApp() {
                     classicTutorialStep = SettingsTutorialStep.Bluetooth
                     showClassicTutorial = true
                 },
+                onDebugKeepScreenOnChange = { enabled ->
+                    context.applicationContext.vibrateButtonPress(buttonVibrationLevel)
+                    debugKeepScreenOn = enabled
+                },
                 onDismissClassicTutorial = {
                     showClassicTutorial = false
                     classicTutorialStep = SettingsTutorialStep.Bluetooth
@@ -1541,35 +1829,6 @@ private fun MobileDeckApp() {
                 },
             )
         }
-    }
-
-    consoleButtonPickerRow?.let { rowIndex ->
-        ConsoleButtonPickerDialog(
-            buttons = deckButtons,
-            assignedIds = consoleLayout.rows.flatten().toSet(),
-            onDismiss = { consoleButtonPickerRow = null },
-            onSelect = { button ->
-                val rows = consoleLayoutRowIds(
-                    consoleLayout,
-                    activeDeckPage.buttons.filterNot { buttonAppAction(it) == DeckActionType.Settings },
-                    DEFAULT_COLUMNS,
-                    DEFAULT_ROWS
-                ).ifEmpty { listOf(emptyList()) }
-                val safeRowIndex = rowIndex.coerceIn(rows.indices)
-                addConsoleLayoutDiagnostic("select button row=${safeRowIndex + 1} id=${button.id} assigned=${button.id in consoleLayout.rows.flatten().toSet()}")
-                val updatedBase = ConsoleLayoutConfig(
-                    rows = rows.mapIndexed { index, row ->
-                        if (index == safeRowIndex) row + button.id else row
-                    },
-                    rowWeights = consoleLayout.rowWeights,
-                    sidebarFraction = consoleLayout.sidebarFraction
-                )
-                val updated = updatedBase.copy(rowWeights = normalizedConsoleRowWeights(updatedBase, rows.size))
-                saveConsoleLayoutForActivePage(updated)
-                addConsoleLayoutDiagnostic("select button saved row=${safeRowIndex + 1} count=${updated.rows[safeRowIndex].size}")
-                consoleButtonPickerRow = null
-            }
-        )
     }
 
     editingButton?.let { button ->
@@ -1671,16 +1930,21 @@ private fun SettingsPage(
     classicSolidButtonBackground: Boolean,
     classicDeckBackground: ClassicDeckBackground,
     deckUiMode: DeckUiMode,
+    classicFontSize: DeckFontSizeOption,
+    consoleFontSize: DeckFontSizeOption,
     consolePanelOptions: ConsolePanelOptions,
     pairingDiscoverable: Boolean,
     showClassicTutorial: Boolean,
     classicTutorialStep: SettingsTutorialStep,
+    debugKeepScreenOn: Boolean,
     pageName: String,
     pageCount: Int,
     pairedHosts: List<PairedHidHost>,
     onBack: () -> Unit,
     onLayoutEditor: () -> Unit,
     onConsoleLayoutEditor: (ConsoleLayoutEditMode) -> Unit,
+    onExportBundle: () -> Unit,
+    onImportBundle: () -> Unit,
     onOpenIconStyleTest: () -> Unit,
     onPageSwipeAxisChange: (PageSwipeAxis) -> Unit,
     onPageSwipeModeChange: (PageSwipeMode) -> Unit,
@@ -1688,6 +1952,8 @@ private fun SettingsPage(
     onInfinitePageSwipeChange: (Boolean) -> Unit,
     onButtonVibrationLevelChange: (ButtonVibrationLevel) -> Unit,
     onClassicSolidButtonBackgroundChange: (Boolean) -> Unit,
+    onClassicFontSizeChange: (DeckFontSizeOption) -> Unit,
+    onConsoleFontSizeChange: (DeckFontSizeOption) -> Unit,
     onClassicDeckBackgroundChange: (ClassicDeckBackground) -> Unit,
     onPickClassicDeckBackgroundImage: () -> Unit,
     onDeckUiModeChange: (DeckUiMode) -> Unit,
@@ -1704,6 +1970,7 @@ private fun SettingsPage(
     onAddButton: () -> Unit,
     onAddPage: () -> Unit,
     onShowClassicTutorial: () -> Unit,
+    onDebugKeepScreenOnChange: (Boolean) -> Unit,
     onDismissClassicTutorial: () -> Unit,
     onClassicTutorialStepChange: (SettingsTutorialStep) -> Unit
 ) {
@@ -1758,12 +2025,14 @@ private fun SettingsPage(
                         pageSwipeAnimation = pageSwipeAnimation,
                         infinitePageSwipe = infinitePageSwipe,
                         buttonVibrationLevel = buttonVibrationLevel,
+                        consoleFontSize = consoleFontSize,
                         consolePanelOptions = consolePanelOptions,
                         pageName = pageName,
                         pageCount = pageCount,
                         pairedHosts = pairedHosts,
                         pairingDiscoverable = pairingDiscoverable,
                         logs = logs,
+                        debugKeepScreenOn = debugKeepScreenOn,
                         onStart = onStart,
                         onStop = onStop,
                         onMakeDiscoverable = onMakeDiscoverable,
@@ -1774,11 +2043,15 @@ private fun SettingsPage(
                         onPageSwipeAnimationChange = onPageSwipeAnimationChange,
                         onInfinitePageSwipeChange = onInfinitePageSwipeChange,
                         onButtonVibrationLevelChange = onButtonVibrationLevelChange,
+                        onConsoleFontSizeChange = onConsoleFontSizeChange,
                         onConsolePanelOptionsChange = onConsolePanelOptionsChange,
                         onConsoleLayoutEditor = onConsoleLayoutEditor,
                         onAddPage = onAddPage,
+                        onExportBundle = onExportBundle,
+                        onImportBundle = onImportBundle,
                         onOpenIconStyleTest = onOpenIconStyleTest,
-                        onShowClassicTutorial = onShowClassicTutorial
+                        onShowClassicTutorial = onShowClassicTutorial,
+                        onDebugKeepScreenOnChange = onDebugKeepScreenOnChange
                     )
                 } else {
                     ClassicSettingsContent(
@@ -1793,25 +2066,31 @@ private fun SettingsPage(
                         infinitePageSwipe = infinitePageSwipe,
                         buttonVibrationLevel = buttonVibrationLevel,
                         classicSolidButtonBackground = classicSolidButtonBackground,
+                        classicFontSize = classicFontSize,
                         classicDeckBackground = classicDeckBackground,
                         pageName = pageName,
                         pageCount = pageCount,
                         logs = logs,
+                        debugKeepScreenOn = debugKeepScreenOn,
                         onPageSwipeAxisChange = onPageSwipeAxisChange,
                         onPageSwipeModeChange = onPageSwipeModeChange,
                         onPageSwipeAnimationChange = onPageSwipeAnimationChange,
                         onInfinitePageSwipeChange = onInfinitePageSwipeChange,
                         onButtonVibrationLevelChange = onButtonVibrationLevelChange,
                         onClassicSolidButtonBackgroundChange = onClassicSolidButtonBackgroundChange,
+                        onClassicFontSizeChange = onClassicFontSizeChange,
                         onClassicDeckBackgroundChange = onClassicDeckBackgroundChange,
                         onPickClassicDeckBackgroundImage = onPickClassicDeckBackgroundImage,
                         onLayoutEditor = onLayoutEditor,
+                        onExportBundle = onExportBundle,
+                        onImportBundle = onImportBundle,
                         onOpenIconStyleTest = onOpenIconStyleTest,
                         onColumnsChange = onColumnsChange,
                         onRowsChange = onRowsChange,
                         onSpacingChange = onSpacingChange,
                         onAddPage = onAddPage,
-                        onShowClassicTutorial = onShowClassicTutorial
+                        onShowClassicTutorial = onShowClassicTutorial,
+                        onDebugKeepScreenOnChange = onDebugKeepScreenOnChange
                     )
                 }
             }
@@ -2686,25 +2965,31 @@ private fun ClassicSettingsContent(
     infinitePageSwipe: Boolean,
     buttonVibrationLevel: ButtonVibrationLevel,
     classicSolidButtonBackground: Boolean,
+    classicFontSize: DeckFontSizeOption,
     classicDeckBackground: ClassicDeckBackground,
     pageName: String,
     pageCount: Int,
     logs: List<ActivityLog>,
+    debugKeepScreenOn: Boolean,
     onPageSwipeAxisChange: (PageSwipeAxis) -> Unit,
     onPageSwipeModeChange: (PageSwipeMode) -> Unit,
     onPageSwipeAnimationChange: (Boolean) -> Unit,
     onInfinitePageSwipeChange: (Boolean) -> Unit,
     onButtonVibrationLevelChange: (ButtonVibrationLevel) -> Unit,
     onClassicSolidButtonBackgroundChange: (Boolean) -> Unit,
+    onClassicFontSizeChange: (DeckFontSizeOption) -> Unit,
     onClassicDeckBackgroundChange: (ClassicDeckBackground) -> Unit,
     onPickClassicDeckBackgroundImage: () -> Unit,
     onLayoutEditor: () -> Unit,
+    onExportBundle: () -> Unit,
+    onImportBundle: () -> Unit,
     onOpenIconStyleTest: () -> Unit,
     onColumnsChange: (Int) -> Unit,
     onRowsChange: (Int) -> Unit,
     onSpacingChange: (Int) -> Unit,
     onAddPage: () -> Unit,
-    onShowClassicTutorial: () -> Unit
+    onShowClassicTutorial: () -> Unit,
+    onDebugKeepScreenOnChange: (Boolean) -> Unit
 ) {
     SettingsDetailContent(
         mode = DeckUiMode.Classic,
@@ -2740,9 +3025,11 @@ private fun ClassicSettingsContent(
             ClassicButtonSettingsCard(
                 buttonVibrationLevel = buttonVibrationLevel,
                 classicSolidButtonBackground = classicSolidButtonBackground,
+                classicFontSize = classicFontSize,
                 onLayoutEditor = onLayoutEditor,
                 onButtonVibrationLevelChange = onButtonVibrationLevelChange,
-                onClassicSolidButtonBackgroundChange = onClassicSolidButtonBackgroundChange
+                onClassicSolidButtonBackgroundChange = onClassicSolidButtonBackgroundChange,
+                onClassicFontSizeChange = onClassicFontSizeChange
             )
         }
         item {
@@ -2752,12 +3039,26 @@ private fun ClassicSettingsContent(
                 onPickImage = onPickClassicDeckBackgroundImage
             )
         }
-        item {
-            SettingsDiagnosticsCard(logs)
+        if (BuildConfig.DEBUG) {
+            item {
+                SettingsSwitchRow(
+                    icon = Icons.Filled.Settings,
+                    iconColor = ClassicButtonAccent,
+                    title = stringResource(R.string.debug_keep_screen_on_title),
+                    subtitle = stringResource(R.string.debug_keep_screen_on_desc),
+                    checked = debugKeepScreenOn,
+                    onCheckedChange = onDebugKeepScreenOnChange
+                )
+            }
+            item {
+                SettingsDiagnosticsCard(logs)
+            }
         }
         item {
             SettingsAppInfoRow(
                 mode = DeckUiMode.Classic,
+                onExportBundle = onExportBundle,
+                onImportBundle = onImportBundle,
                 onOpenIconStyleTest = onOpenIconStyleTest,
                 onShowClassicTutorial = onShowClassicTutorial
             )
@@ -2775,12 +3076,14 @@ private fun ConsoleSettingsContent(
     pageSwipeAnimation: Boolean,
     infinitePageSwipe: Boolean,
     buttonVibrationLevel: ButtonVibrationLevel,
+    consoleFontSize: DeckFontSizeOption,
     consolePanelOptions: ConsolePanelOptions,
     pageName: String,
     pageCount: Int,
     pairedHosts: List<PairedHidHost>,
     pairingDiscoverable: Boolean,
     logs: List<ActivityLog>,
+    debugKeepScreenOn: Boolean,
     onStart: () -> Unit,
     onStop: () -> Unit,
     onMakeDiscoverable: () -> Unit,
@@ -2791,11 +3094,15 @@ private fun ConsoleSettingsContent(
     onPageSwipeAnimationChange: (Boolean) -> Unit,
     onInfinitePageSwipeChange: (Boolean) -> Unit,
     onButtonVibrationLevelChange: (ButtonVibrationLevel) -> Unit,
+    onConsoleFontSizeChange: (DeckFontSizeOption) -> Unit,
     onConsolePanelOptionsChange: (ConsolePanelOptions) -> Unit,
     onConsoleLayoutEditor: (ConsoleLayoutEditMode) -> Unit,
     onAddPage: () -> Unit,
+    onExportBundle: () -> Unit,
+    onImportBundle: () -> Unit,
     onOpenIconStyleTest: () -> Unit,
-    onShowClassicTutorial: () -> Unit
+    onShowClassicTutorial: () -> Unit,
+    onDebugKeepScreenOnChange: (Boolean) -> Unit
 ) {
     SettingsDetailContent(
         mode = DeckUiMode.Console,
@@ -2861,6 +3168,12 @@ private fun ConsoleSettingsContent(
                         onOptionsChange = onConsolePanelOptionsChange
                     )
                 }
+                item {
+                    ConsoleFontSizeSettingRow(
+                        fontSize = consoleFontSize,
+                        onFontSizeChange = onConsoleFontSizeChange
+                    )
+                }
             }
             ConsoleSettingsCategory.Controls -> {
                 item {
@@ -2906,11 +3219,24 @@ private fun ConsoleSettingsContent(
                 }
             }
             ConsoleSettingsCategory.App -> {
-                item {
-                    SettingsDiagnosticsCard(logs)
+                if (BuildConfig.DEBUG) {
+                    item {
+                        ConsoleSwitchRow(
+                            icon = Icons.Filled.Settings,
+                            title = stringResource(R.string.debug_keep_screen_on_title),
+                            subtitle = stringResource(R.string.debug_keep_screen_on_desc),
+                            checked = debugKeepScreenOn,
+                            onCheckedChange = onDebugKeepScreenOnChange
+                        )
+                    }
+                    item {
+                        SettingsDiagnosticsCard(logs)
+                    }
                 }
                 item {
                     ConsoleSettingsAppInfoRow(
+                        onExportBundle = onExportBundle,
+                        onImportBundle = onImportBundle,
                         onOpenIconStyleTest = onOpenIconStyleTest,
                         onShowClassicTutorial = onShowClassicTutorial
                     )
@@ -3057,6 +3383,8 @@ private fun ConsoleSettingsHeader(
 @Composable
 private fun SettingsAppInfoRow(
     mode: DeckUiMode,
+    onExportBundle: () -> Unit,
+    onImportBundle: () -> Unit,
     onOpenIconStyleTest: () -> Unit,
     onShowClassicTutorial: () -> Unit
 ) {
@@ -3085,6 +3413,40 @@ private fun SettingsAppInfoRow(
                 )
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    shape = RoundedCornerShape(8.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = accent.copy(alpha = 0.82f),
+                        contentColor = Color.White
+                    ),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                    onClick = onExportBundle
+                ) {
+                    Text(
+                        text = stringResource(R.string.export_bundle),
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                Button(
+                    shape = RoundedCornerShape(8.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = accent.copy(alpha = 0.82f),
+                        contentColor = Color.White
+                    ),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                    onClick = onImportBundle
+                ) {
+                    Text(
+                        text = stringResource(R.string.import_bundle),
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
                 if (BuildConfig.DEBUG) {
                     Button(
                         shape = RoundedCornerShape(8.dp),
@@ -4564,9 +4926,11 @@ private fun ClassicLayoutControlsCard(
 private fun ClassicButtonSettingsCard(
     buttonVibrationLevel: ButtonVibrationLevel,
     classicSolidButtonBackground: Boolean,
+    classicFontSize: DeckFontSizeOption,
     onLayoutEditor: () -> Unit,
     onButtonVibrationLevelChange: (ButtonVibrationLevel) -> Unit,
-    onClassicSolidButtonBackgroundChange: (Boolean) -> Unit
+    onClassicSolidButtonBackgroundChange: (Boolean) -> Unit,
+    onClassicFontSizeChange: (DeckFontSizeOption) -> Unit
 ) {
     ClassicConceptSectionCard(
         icon = Icons.Filled.TouchApp,
@@ -4610,6 +4974,22 @@ private fun ClassicButtonSettingsCard(
                     checked = classicSolidButtonBackground,
                     accent = ClassicButtonAccent,
                     onCheckedChange = onClassicSolidButtonBackgroundChange
+                )
+            }
+        )
+        ClassicSettingsControlRow(
+            icon = Icons.Filled.TextFields,
+            iconColor = ClassicButtonAccent,
+            title = stringResource(R.string.settings_font_size),
+            subtitle = stringResource(R.string.settings_font_size_desc),
+            trailing = {
+                SettingsSegmentedControl(
+                    options = DeckFontSizeOption.values().toList(),
+                    selected = classicFontSize,
+                    label = { stringResource(it.shortLabelRes) },
+                    accent = ClassicButtonAccent,
+                    borderless = true,
+                    onSelected = onClassicFontSizeChange
                 )
             }
         )
@@ -5334,6 +5714,7 @@ private fun ConsoleSettingsPreview(
 
     BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
         val previewHeight = (maxWidth / deviceRatio).coerceIn(126.dp, 220.dp)
+        val darkTheme = isSystemInDarkTheme()
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -5345,7 +5726,7 @@ private fun ConsoleSettingsPreview(
         ) {
             Column(
                 modifier = Modifier
-                    .width(96.dp)
+                    .width(118.dp)
                     .fillMaxHeight()
                     .clip(RoundedCornerShape(16.dp))
                     .background(colors.consoleSidebar)
@@ -5360,22 +5741,46 @@ private fun ConsoleSettingsPreview(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
-                val previewItems = listOf(
-                    panelOptions.showConnection,
-                    panelOptions.showMessage,
-                    panelOptions.showClock,
-                    panelOptions.showDate
-                ).filter { it }
-                repeat(previewItems.size.coerceIn(1, 4)) { index ->
-                    Box(
+                val panelRows = listOf(
+                    R.string.console_panel_connection to panelOptions.showConnection,
+                    R.string.console_panel_message to panelOptions.showMessage,
+                    R.string.console_panel_clock to panelOptions.showClock,
+                    R.string.console_panel_date to panelOptions.showDate
+                )
+                panelRows.forEach { (labelRes, enabled) ->
+                    Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(if (index == 1) 24.dp else 18.dp)
-                            .clip(RoundedCornerShape(5.dp))
-                            .background(
-                                if (index == 1) Color(0xFF00A6E7).copy(alpha = 0.65f)
-                                else colors.cardBackground
-                            )
+                            .height(20.dp)
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(colors.cardBackground.copy(alpha = if (enabled) 0.72f else 0.30f))
+                            .padding(horizontal = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(5.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(5.dp)
+                                .clip(CircleShape)
+                                .background(if (enabled) colors.consoleButtonFeatured else colors.textMuted)
+                        )
+                        Text(
+                            text = stringResource(labelRes),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (enabled) colors.textPrimary else colors.textMuted,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.weight(1f))
+                if (panelOptions.showClock) {
+                    Text(
+                        text = "23:41",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = colors.textPrimary,
+                        maxLines = 1
                     )
                 }
             }
@@ -5389,54 +5794,112 @@ private fun ConsoleSettingsPreview(
                     modifier = Modifier.weight(1f),
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    repeat(5) { index ->
-                        val shape = RoundedCornerShape(14.dp)
-                        Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .fillMaxHeight()
-                                .consoleButtonDropShadow(
-                                    shape = shape,
-                                    darkTheme = isSystemInDarkTheme(),
-                                    pressed = false
-                                )
-                                .clip(shape)
-                                .background(consoleButtonPreviewColor(index))
-                        )
-                    }
+                    ConsoleSettingsPreviewButton(
+                        modifier = Modifier.weight(1.2f),
+                        icon = Icons.Filled.PlayArrow,
+                        title = stringResource(R.string.media_play_pause),
+                        subtitle = "Media",
+                        selected = true,
+                        darkTheme = darkTheme
+                    )
+                    ConsoleSettingsPreviewButton(
+                        modifier = Modifier.weight(1f),
+                        icon = Icons.Filled.SkipPrevious,
+                        title = stringResource(R.string.media_previous),
+                        subtitle = "Key",
+                        darkTheme = darkTheme
+                    )
+                    ConsoleSettingsPreviewButton(
+                        modifier = Modifier.weight(1f),
+                        icon = Icons.Filled.VolumeUp,
+                        title = stringResource(R.string.media_volume_up),
+                        subtitle = "Trim",
+                        darkTheme = darkTheme
+                    )
                 }
                 Row(
                     modifier = Modifier.weight(1f),
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    repeat(4) { index ->
-                        val shape = RoundedCornerShape(14.dp)
-                        Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .fillMaxHeight()
-                                .consoleButtonDropShadow(
-                                    shape = shape,
-                                    darkTheme = isSystemInDarkTheme(),
-                                    pressed = false
-                                )
-                                .clip(shape)
-                                .background(consoleButtonPreviewColor(index + 5).copy(alpha = 0.9f))
-                        )
-                    }
+                    ConsoleSettingsPreviewButton(
+                        modifier = Modifier.weight(1f),
+                        icon = Icons.Filled.Keyboard,
+                        title = "Explorer",
+                        subtitle = "Win+E",
+                        darkTheme = darkTheme
+                    )
+                    ConsoleSettingsPreviewButton(
+                        modifier = Modifier.weight(1f),
+                        icon = Icons.Filled.Settings,
+                        title = stringResource(R.string.action_settings),
+                        subtitle = "Deck",
+                        darkTheme = darkTheme
+                    )
+                    ConsoleSettingsPreviewButton(
+                        modifier = Modifier.weight(1f),
+                        icon = Icons.Filled.Apps,
+                        title = stringResource(R.string.control_style_joypad),
+                        subtitle = stringResource(R.string.joypad_mode_8_way),
+                        darkTheme = darkTheme
+                    )
                 }
             }
         }
     }
 }
 
-private fun consoleButtonPreviewColor(index: Int): Color {
-    return when (index % 5) {
-        0 -> Color(0xFF145AA8)
-        1 -> Color(0xFF1D2936)
-        2 -> Color(0xFF294E25)
-        3 -> Color(0xFFB85B00)
-        else -> Color(0xFF4D2578)
+@Composable
+private fun ConsoleSettingsPreviewButton(
+    modifier: Modifier = Modifier,
+    icon: ImageVector,
+    title: String,
+    subtitle: String,
+    selected: Boolean = false,
+    darkTheme: Boolean
+) {
+    val colors = LocalDeckThemeColors.current
+    val shape = RoundedCornerShape(14.dp)
+    Row(
+        modifier = modifier
+            .fillMaxHeight()
+            .consoleButtonDropShadow(shape = shape, darkTheme = darkTheme, pressed = selected)
+            .clip(shape)
+            .background(if (selected) colors.consoleButtonFeatured else colors.consoleButtonDefault)
+            .border(
+                1.dp,
+                if (selected) colors.consoleButtonFeatured.copy(alpha = 0.8f) else Color.White.copy(alpha = if (darkTheme) 0.10f else 0.38f),
+                shape
+            )
+            .padding(horizontal = 9.dp, vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(7.dp)
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            modifier = Modifier.size(18.dp),
+            tint = colors.textPrimary
+        )
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.Center
+        ) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.labelMedium,
+                color = colors.textPrimary,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.labelSmall,
+                color = colors.textSecondary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
     }
 }
 
@@ -5635,6 +6098,27 @@ private fun ConsoleVibrationSettingRow(
 }
 
 @Composable
+private fun ConsoleFontSizeSettingRow(
+    fontSize: DeckFontSizeOption,
+    onFontSizeChange: (DeckFontSizeOption) -> Unit
+) {
+    ConsoleSettingRow(
+        icon = Icons.Filled.TextFields,
+        title = stringResource(R.string.settings_font_size),
+        subtitle = stringResource(R.string.settings_font_size_desc),
+        trailing = {
+            SettingsSegmentedControl(
+                options = DeckFontSizeOption.values().toList(),
+                selected = fontSize,
+                label = { stringResource(it.shortLabelRes) },
+                borderless = true,
+                onSelected = onFontSizeChange
+            )
+        }
+    )
+}
+
+@Composable
 private fun ConsolePageSummaryRow(
     pageName: String,
     pageCount: Int,
@@ -5656,6 +6140,8 @@ private fun ConsolePageSummaryRow(
 
 @Composable
 private fun ConsoleSettingsAppInfoRow(
+    onExportBundle: () -> Unit,
+    onImportBundle: () -> Unit,
     onOpenIconStyleTest: () -> Unit,
     onShowClassicTutorial: () -> Unit
 ) {
@@ -5683,6 +6169,8 @@ private fun ConsoleSettingsAppInfoRow(
                 )
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                ConsolePillButton(text = stringResource(R.string.export_bundle), onClick = onExportBundle)
+                ConsolePillButton(text = stringResource(R.string.import_bundle), onClick = onImportBundle)
                 if (BuildConfig.DEBUG) {
                     ConsolePillButton(text = "아이콘 테스트", onClick = onOpenIconStyleTest)
                 }
@@ -6524,6 +7012,7 @@ private fun LayoutEditorPage(
     onResetPage: () -> Unit,
     onButtonEdit: (DeckButton) -> Unit,
     onButtonDragStarted: () -> Unit,
+    onTrimStep: (DeckButton, Int) -> Unit,
     onButtonMoved: (DeckButton, Int) -> Unit,
     onButtonDeleted: (DeckButton) -> Unit,
     onEmptySlotPressed: (Int) -> Unit
@@ -6634,6 +7123,7 @@ private fun LayoutEditorPage(
                     onPageSwipe = onPageSwipe,
                     onAddPage = onAddPage,
                     onButtonPressed = onButtonEdit,
+                    onTrimStep = onTrimStep,
                     onButtonTouchStarted = onButtonDragStarted,
                     onButtonEdit = onButtonEdit,
                     onButtonMoved = onButtonMoved,
@@ -6809,6 +7299,7 @@ private fun DeckPage(
     onPageSwipe: (Int) -> Unit,
     onAddPage: () -> Unit,
     onButtonPressed: (DeckButton) -> Unit,
+    onTrimStep: (DeckButton, Int) -> Unit,
     onButtonTouchStarted: () -> Unit = {},
     onButtonTouchEnded: () -> Unit = {},
     onButtonEdit: (DeckButton) -> Unit,
@@ -6860,6 +7351,7 @@ private fun DeckPage(
                 onSettings = onConsoleSettings,
                 onPageSwipe = onPageSwipe,
                 onButtonPressed = onButtonPressed,
+                onTrimStep = onTrimStep,
                 onButtonTouchStarted = onButtonTouchStarted,
                 onButtonTouchEnded = onButtonTouchEnded
             )
@@ -6909,6 +7401,7 @@ private fun DeckPage(
                     previewMode = previewMode,
                     showTitle = target.pageId == deckPages.firstOrNull()?.id,
                     onButtonPressed = onButtonPressed,
+                    onTrimStep = onTrimStep,
                     onButtonTouchStarted = onButtonTouchStarted,
                     onButtonTouchEnded = onButtonTouchEnded,
                     onButtonEdit = onButtonEdit,
@@ -7156,6 +7649,7 @@ private fun ConsoleDeckSurface(
     onSettings: () -> Unit,
     onPageSwipe: (Int) -> Unit,
     onButtonPressed: (DeckButton) -> Unit,
+    onTrimStep: (DeckButton, Int) -> Unit,
     onButtonTouchStarted: () -> Unit,
     onButtonTouchEnded: () -> Unit
 ) {
@@ -7230,18 +7724,11 @@ private fun ConsoleDeckSurface(
                                 appWidgetHost = appWidgetHost,
                                 appWidgetManager = appWidgetManager,
                                 onButtonPressed = onButtonPressed,
+                                onTrimStep = onTrimStep,
                                 onButtonTouchStarted = onButtonTouchStarted,
                                 onButtonTouchEnded = onButtonTouchEnded
                             )
                         }
-                        PageIndicator(
-                            modifier = Modifier
-                                .align(Alignment.BottomCenter)
-                                .padding(bottom = 2.dp),
-                            pageCount = deckPages.size,
-                            activeIndex = deckPages.indexOfFirst { it.id == activePageId }.coerceAtLeast(0),
-                            axis = PageSwipeAxis.Horizontal
-                        )
                     }
                 }
             }
@@ -7259,6 +7746,14 @@ private fun ConsoleDeckSurface(
                 )
             }
         }
+            PageIndicator(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 2.dp),
+                pageCount = deckPages.size,
+                activeIndex = deckPages.indexOfFirst { it.id == activePageId }.coerceAtLeast(0),
+                axis = PageSwipeAxis.Horizontal
+            )
         }
     }
 }
@@ -7274,6 +7769,7 @@ private fun ConsoleButtonRows(
     appWidgetHost: AppWidgetHost?,
     appWidgetManager: AppWidgetManager?,
     onButtonPressed: (DeckButton) -> Unit,
+    onTrimStep: (DeckButton, Int) -> Unit,
     onButtonTouchStarted: () -> Unit,
     onButtonTouchEnded: () -> Unit
 ) {
@@ -7295,10 +7791,17 @@ private fun ConsoleButtonRows(
                     horizontalArrangement = Arrangement.spacedBy(spacing)
                 ) {
                     rowButtons.forEach { button ->
-                        DeckKey(
-                            modifier = Modifier
+                        val keyModifier = if (button.isTrimControl()) {
+                            Modifier
+                                .width(rowHeight)
+                                .fillMaxHeight()
+                        } else {
+                            Modifier
                                 .weight(button.spanColumns.coerceAtLeast(1).toFloat())
-                                .fillMaxHeight(),
+                                .fillMaxHeight()
+                        }
+                        DeckKey(
+                            modifier = keyModifier,
                             button = button,
                             status = status,
                             appWidgetHost = appWidgetHost,
@@ -7312,6 +7815,7 @@ private fun ConsoleButtonRows(
                             cellSize = rowHeight,
                             spacing = spacing,
                             onPressed = { onButtonPressed(button) },
+                            onTrimStep = { step -> onTrimStep(button, step) },
                             onPressFeedback = onButtonTouchStarted,
                             onReleaseFeedback = onButtonTouchEnded,
                             onEdit = {},
@@ -7711,10 +8215,17 @@ private fun ConsoleLayoutEditorPage(
     ).ifEmpty { listOf(emptyList()) }
     var selectedRowIndex by remember { mutableStateOf(0) }
     var editMode by remember(initialEditMode) { mutableStateOf(initialEditMode) }
-    var selectedButtonId by remember { mutableStateOf<Int?>(rows.firstOrNull()?.firstOrNull()) }
+    var selectedButtonSlot by remember {
+        mutableStateOf(rows.firstOrNull()?.indices?.firstOrNull()?.let { ConsoleButtonSlotKey(0, it) })
+    }
+    var dragInProgress by remember { mutableStateOf(false) }
     LaunchedEffect(rows) {
         selectedRowIndex = selectedRowIndex.coerceIn(0, rows.lastIndex.coerceAtLeast(0))
-        selectedButtonId = selectedButtonId?.takeIf { id -> rows.any { id in it } }
+        selectedButtonSlot = selectedButtonSlot?.takeIf { slot ->
+            slot.rowIndex in rows.indices && slot.buttonIndex in rows[slot.rowIndex].indices
+        } ?: rows.firstOrNull { it.isNotEmpty() }?.let { row ->
+            ConsoleButtonSlotKey(rows.indexOf(row), 0)
+        }
     }
     fun addRowAndSelect() {
         if (rows.size < MAX_CONSOLE_LAYOUT_ROWS) {
@@ -7726,7 +8237,8 @@ private fun ConsoleLayoutEditorPage(
     LazyColumn(
         modifier = modifier.background(Brush.linearGradient(colors.backgroundGradient)),
         contentPadding = PaddingValues(12.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+        userScrollEnabled = !dragInProgress
     ) {
         item {
             Surface(
@@ -7790,13 +8302,12 @@ private fun ConsoleLayoutEditorPage(
                     activePageIndex = activePageIndex,
                     pageCount = pageCount,
                     selectedRowIndex = selectedRowIndex,
-                    selectedButtonId = selectedButtonId,
+                    selectedButtonSlot = selectedButtonSlot,
                     editMode = editMode,
                     onSelectRow = { selectedRowIndex = it.coerceIn(rows.indices) },
-                    onSelectButton = { button ->
-                        selectedButtonId = button.id
-                        val rowIndex = rows.indexOfFirst { button.id in it }
-                        if (rowIndex >= 0) selectedRowIndex = rowIndex
+                    onSelectButton = { rowIndex, buttonIndex, _ ->
+                        selectedButtonSlot = ConsoleButtonSlotKey(rowIndex, buttonIndex)
+                        selectedRowIndex = rowIndex.coerceIn(rows.indices)
                     },
                     onPickButton = { rowIndex ->
                         selectedRowIndex = rowIndex.coerceIn(rows.indices)
@@ -7819,24 +8330,31 @@ private fun ConsoleLayoutEditorPage(
                     onMoveButtonTo = { fromRowIndex, fromIndex, toRowIndex, toIndex ->
                         onMoveButtonTo(fromRowIndex, fromIndex, toRowIndex, toIndex)
                         selectedRowIndex = toRowIndex.coerceIn(rows.indices)
+                        selectedButtonSlot = ConsoleButtonSlotKey(toRowIndex, toIndex)
                     },
-                    onLayoutChange = onLayoutChange
+                    onLayoutChange = onLayoutChange,
+                    onDragStateChange = { dragInProgress = it }
                 )
             }
         }
         if (editMode == ConsoleLayoutEditMode.Buttons) {
             item {
-                val selectedButton = selectedButtonId?.let { buttonById[it] }
-                val selectedButtonRow = selectedButtonId?.let { id -> rows.indexOfFirst { id in it } } ?: -1
-                val safeRowIndex = selectedButtonRow.takeIf { it >= 0 } ?: selectedRowIndex.coerceIn(rows.indices)
+                val selectedButton = selectedButtonSlot?.let { slot ->
+                    rows.getOrNull(slot.rowIndex)?.getOrNull(slot.buttonIndex)?.let { id -> buttonById[id] }
+                }
+                val safeRowIndex = selectedButtonSlot?.rowIndex?.takeIf { it in rows.indices }
+                    ?: selectedRowIndex.coerceIn(rows.indices)
+                val safeButtonIndex = selectedButtonSlot?.buttonIndex?.takeIf { index ->
+                    index in rows.getOrNull(safeRowIndex).orEmpty().indices
+                } ?: -1
                 ConsoleButtonEditPanel(
                     selectedButton = selectedButton,
                     onPickButton = { onPickButton(safeRowIndex) },
                     onEditButton = { selectedButton?.let(onEditButton) },
                     onRemoveButton = {
-                        selectedButton?.let { button ->
-                            onRemoveButton(safeRowIndex, button.id)
-                            selectedButtonId = null
+                        if (selectedButton != null && safeButtonIndex >= 0) {
+                            onRemoveButton(safeRowIndex, safeButtonIndex)
+                            selectedButtonSlot = null
                         }
                     }
                 )
@@ -8245,16 +8763,14 @@ private fun ConsoleButtonDragHandle(
     onDragStart: () -> Unit,
     onDragOffset: (Float, Float) -> Unit,
     onDragStop: () -> Unit,
-    onMoveBy: (rowDelta: Int, columnDelta: Int) -> Unit,
-    onPreviewMove: (rowDelta: Int, columnDelta: Int) -> Unit
+    onMoveBy: (dragX: Float, dragY: Float) -> Unit,
+    onPreviewMove: (dragX: Float, dragY: Float) -> Unit
 ) {
     val colors = LocalDeckThemeColors.current
     val darkTheme = isSystemInDarkTheme()
     var dragging by remember { mutableStateOf(false) }
     var dragX by remember { mutableStateOf(0f) }
     var dragY by remember { mutableStateOf(0f) }
-    var pendingRowDelta by remember { mutableStateOf(0) }
-    var pendingColumnDelta by remember { mutableStateOf(0) }
     Surface(
         modifier = modifier
             .size(width = 42.dp, height = 34.dp)
@@ -8264,9 +8780,7 @@ private fun ConsoleButtonDragHandle(
                         dragging = true
                         dragX = 0f
                         dragY = 0f
-                        pendingRowDelta = 0
-                        pendingColumnDelta = 0
-                        onPreviewMove(0, 0)
+                        onPreviewMove(0f, 0f)
                         onSelect()
                         onDragStart()
                     },
@@ -8274,24 +8788,20 @@ private fun ConsoleButtonDragHandle(
                         dragging = false
                         dragX = 0f
                         dragY = 0f
-                        pendingRowDelta = 0
-                        pendingColumnDelta = 0
-                        onPreviewMove(0, 0)
+                        onPreviewMove(0f, 0f)
                         onDragOffset(0f, 0f)
                         onDragStop()
                     },
                     onDragEnd = {
-                        val rowDelta = pendingRowDelta
-                        val columnDelta = pendingColumnDelta
+                        val finalDragX = dragX
+                        val finalDragY = dragY
                         dragging = false
                         dragX = 0f
                         dragY = 0f
-                        pendingRowDelta = 0
-                        pendingColumnDelta = 0
-                        if (rowDelta != 0 || columnDelta != 0) {
-                            onMoveBy(rowDelta, columnDelta)
+                        if (finalDragX != 0f || finalDragY != 0f) {
+                            onMoveBy(finalDragX, finalDragY)
                         } else {
-                            onPreviewMove(0, 0)
+                            onPreviewMove(0f, 0f)
                             onDragOffset(0f, 0f)
                         }
                         onDragStop()
@@ -8300,20 +8810,8 @@ private fun ConsoleButtonDragHandle(
                         change.consume()
                         dragX += dragAmount.x
                         dragY += dragAmount.y
-                        val horizontalDominant = abs(dragX) > abs(dragY)
-                        val threshold = if (horizontalDominant) horizontalThresholdPx else verticalThresholdPx
-                        val primary = if (horizontalDominant) dragX else dragY
-                        val direction = if (primary > 0f) 1 else -1
-                        val moveDelta = (abs(primary) / threshold.coerceAtLeast(1f)).toInt() * direction
-                        pendingRowDelta = if (horizontalDominant) 0 else moveDelta
-                        pendingColumnDelta = if (horizontalDominant) moveDelta else 0
-                        val residualPrimary = primary - moveDelta * threshold.coerceAtLeast(1f)
-                        if (horizontalDominant) {
-                            onDragOffset(residualPrimary, dragY * 0.18f)
-                        } else {
-                            onDragOffset(dragX * 0.18f, residualPrimary)
-                        }
-                        onPreviewMove(pendingRowDelta, pendingColumnDelta)
+                        onDragOffset(dragX, dragY)
+                        onPreviewMove(dragX, dragY)
                     }
                 )
             },
@@ -8588,10 +9086,10 @@ private fun ConsoleLayoutTuningPreview(
     activePageIndex: Int,
     pageCount: Int,
     selectedRowIndex: Int,
-    selectedButtonId: Int?,
+    selectedButtonSlot: ConsoleButtonSlotKey?,
     editMode: ConsoleLayoutEditMode,
     onSelectRow: (Int) -> Unit,
-    onSelectButton: (DeckButton) -> Unit,
+    onSelectButton: (Int, Int, DeckButton) -> Unit,
     onPickButton: (Int) -> Unit,
     onPreviousPage: () -> Unit,
     onNextPage: () -> Unit,
@@ -8601,7 +9099,8 @@ private fun ConsoleLayoutTuningPreview(
     onRemoveRow: (Int) -> Unit,
     onMoveRow: (Int, Int) -> Unit,
     onMoveButtonTo: (Int, Int, Int, Int) -> Unit,
-    onLayoutChange: (ConsoleLayoutConfig) -> Unit
+    onLayoutChange: (ConsoleLayoutConfig) -> Unit,
+    onDragStateChange: (Boolean) -> Unit
 ) {
     val colors = LocalDeckThemeColors.current
     val density = LocalDensity.current
@@ -8617,6 +9116,7 @@ private fun ConsoleLayoutTuningPreview(
         var workingSidebarFraction by remember(layout.sidebarFraction) {
             mutableStateOf(layout.sidebarFraction)
         }
+        val workingLayout = layout.copy(sidebarFraction = workingSidebarFraction)
         val contentPadding = 12.dp
         val contentGap = 14.dp
         val bottomControlsGap = 10.dp
@@ -8660,9 +9160,9 @@ private fun ConsoleLayoutTuningPreview(
                             .fillMaxHeight()
                             .padding(end = editOverlayEndInset),
                         rows = rowButtons,
-                        layout = layout,
+                        layout = workingLayout,
                         selectedRowIndex = selectedRowIndex,
-                        selectedButtonId = selectedButtonId,
+                        selectedButtonSlot = selectedButtonSlot,
                         editMode = editMode,
                         onSelectRow = onSelectRow,
                         onSelectButton = onSelectButton,
@@ -8670,7 +9170,10 @@ private fun ConsoleLayoutTuningPreview(
                         onRemoveRow = onRemoveRow,
                         onMoveRow = onMoveRow,
                         onMoveButtonTo = onMoveButtonTo,
-                        onLayoutChange = onLayoutChange
+                        onLayoutChange = { updated ->
+                            onLayoutChange(updated.copy(sidebarFraction = workingSidebarFraction))
+                        },
+                        onDragStateChange = onDragStateChange
                     )
                 }
                 Box(
@@ -8731,7 +9234,7 @@ private fun ConsoleLayoutTuningPreview(
                     val totalWidthPx = with(density) { contentWidth.toPx() }.coerceAtLeast(1f)
                     workingSidebarFraction = (workingSidebarFraction + deltaPx / totalWidthPx)
                         .coerceIn(CONSOLE_MIN_SIDEBAR_FRACTION, CONSOLE_MAX_SIDEBAR_FRACTION)
-                    onLayoutChange(layout.copy(sidebarFraction = workingSidebarFraction))
+                    onLayoutChange(workingLayout.copy(sidebarFraction = workingSidebarFraction))
                 }
             )
         }
@@ -8807,15 +9310,16 @@ private fun ConsoleLayoutPreviewRows(
     rows: List<List<DeckButton>>,
     layout: ConsoleLayoutConfig,
     selectedRowIndex: Int,
-    selectedButtonId: Int?,
+    selectedButtonSlot: ConsoleButtonSlotKey?,
     editMode: ConsoleLayoutEditMode,
     onSelectRow: (Int) -> Unit,
-    onSelectButton: (DeckButton) -> Unit,
+    onSelectButton: (Int, Int, DeckButton) -> Unit,
     onPickButton: (Int) -> Unit,
     onRemoveRow: (Int) -> Unit,
     onMoveRow: (Int, Int) -> Unit,
     onMoveButtonTo: (Int, Int, Int, Int) -> Unit,
-    onLayoutChange: (ConsoleLayoutConfig) -> Unit
+    onLayoutChange: (ConsoleLayoutConfig) -> Unit,
+    onDragStateChange: (Boolean) -> Unit
 ) {
     val colors = LocalDeckThemeColors.current
     val density = LocalDensity.current
@@ -8864,13 +9368,107 @@ private fun ConsoleLayoutPreviewRows(
             val baseOffsetPx = with(density) { (rowTops[targetIndex] - rowTops[rowIndex]).toPx() }
             return (targetIndex - rowIndex) to (dragOffsetPx - baseOffsetPx)
         }
+        val buttonPreviewBounds = safeRows.mapIndexed { rowIndex, row ->
+            val gapWidth = buttonSpacing * (row.size - 1).coerceAtLeast(0).toFloat()
+            val fixedWidth = row.fold(0.dp) { total, button ->
+                if (button.isTrimControl()) total + rowHeights[rowIndex] else total
+            }
+            val weightedButtons = row.filterNot { it.isTrimControl() }
+            val totalButtonWeight = weightedButtons
+                .sumOf { it.spanColumns.coerceAtLeast(1).toDouble() }
+                .toFloat()
+                .takeIf { it > 0f } ?: 1f
+            val flexibleWidth = (previewRowsWidth - gapWidth - fixedWidth).coerceAtLeast(1.dp)
+            var left = 0.dp
+            row.map { button ->
+                val width = if (button.isTrimControl()) {
+                    rowHeights[rowIndex]
+                } else {
+                    flexibleWidth * (button.spanColumns.coerceAtLeast(1).toFloat() / totalButtonWeight)
+                }
+                ConsoleButtonPreviewBounds(left = left, width = width)
+                    .also { left += width + buttonSpacing }
+            }
+        }
+        fun buttonSwapPreviewOffset(rowIndex: Int, buttonIndex: Int, move: ButtonPreviewMove?): ConsoleButtonPreviewOffset {
+            if (move == null) return ConsoleButtonPreviewOffset.Zero
+            val fromBounds = buttonPreviewBounds.getOrNull(move.fromRowIndex)?.getOrNull(move.fromIndex)
+                ?: return ConsoleButtonPreviewOffset.Zero
+            val toBounds = buttonPreviewBounds.getOrNull(move.toRowIndex)?.getOrNull(move.toIndex)
+                ?: return ConsoleButtonPreviewOffset.Zero
+            return when {
+                rowIndex == move.fromRowIndex && buttonIndex == move.fromIndex -> {
+                    ConsoleButtonPreviewOffset(
+                        x = toBounds.left - fromBounds.left,
+                        y = rowTops[move.toRowIndex] - rowTops[move.fromRowIndex]
+                    )
+                }
+                rowIndex == move.toRowIndex && buttonIndex == move.toIndex -> {
+                    ConsoleButtonPreviewOffset(
+                        x = fromBounds.left - toBounds.left,
+                        y = rowTops[move.fromRowIndex] - rowTops[move.toRowIndex]
+                    )
+                }
+                else -> ConsoleButtonPreviewOffset.Zero
+            }
+        }
+        fun buttonSwapPreviewScale(rowIndex: Int, buttonIndex: Int, move: ButtonPreviewMove?): ConsoleButtonPreviewScale {
+            if (move == null) return ConsoleButtonPreviewScale.Normal
+            val fromBounds = buttonPreviewBounds.getOrNull(move.fromRowIndex)?.getOrNull(move.fromIndex)
+                ?: return ConsoleButtonPreviewScale.Normal
+            val toBounds = buttonPreviewBounds.getOrNull(move.toRowIndex)?.getOrNull(move.toIndex)
+                ?: return ConsoleButtonPreviewScale.Normal
+            return when {
+                rowIndex == move.fromRowIndex && buttonIndex == move.fromIndex -> {
+                    ConsoleButtonPreviewScale(
+                        x = (toBounds.width.value / fromBounds.width.value.coerceAtLeast(1f)).coerceAtLeast(0.1f),
+                        y = (rowHeights[move.toRowIndex].value / rowHeights[move.fromRowIndex].value.coerceAtLeast(1f)).coerceAtLeast(0.1f)
+                    )
+                }
+                rowIndex == move.toRowIndex && buttonIndex == move.toIndex -> {
+                    ConsoleButtonPreviewScale(
+                        x = (fromBounds.width.value / toBounds.width.value.coerceAtLeast(1f)).coerceAtLeast(0.1f),
+                        y = (rowHeights[move.fromRowIndex].value / rowHeights[move.toRowIndex].value.coerceAtLeast(1f)).coerceAtLeast(0.1f)
+                    )
+                }
+                else -> ConsoleButtonPreviewScale.Normal
+            }
+        }
+        fun resolveButtonDragMove(fromRowIndex: Int, fromIndex: Int, dragX: Float, dragY: Float): ButtonPreviewMove? {
+            val fromBounds = buttonPreviewBounds.getOrNull(fromRowIndex)?.getOrNull(fromIndex) ?: return null
+            val sourceCenterX = fromBounds.left + fromBounds.width / 2f
+            val sourceCenterY = rowTops.getOrNull(fromRowIndex)?.let { it + rowHeights[fromRowIndex] / 2f } ?: return null
+            val draggedCenterX = sourceCenterX + with(density) { dragX.toDp() }
+            val draggedCenterY = sourceCenterY + with(density) { dragY.toDp() }
+            val targetRowIndex = rowHeights.indices.minByOrNull { index ->
+                abs(with(density) { ((rowTops[index] + rowHeights[index] / 2f) - draggedCenterY).toPx() })
+            } ?: return null
+            val targetRowBounds = buttonPreviewBounds.getOrNull(targetRowIndex).orEmpty()
+            if (targetRowBounds.isEmpty()) return null
+            val targetIndex = targetRowBounds.indices.minByOrNull { index ->
+                val targetBounds = targetRowBounds[index]
+                abs(with(density) { ((targetBounds.left + targetBounds.width / 2f) - draggedCenterX).toPx() })
+            } ?: return null
+            return if (targetRowIndex == fromRowIndex && targetIndex == fromIndex) {
+                null
+            } else {
+                ButtonPreviewMove(fromRowIndex, fromIndex, targetRowIndex, targetIndex)
+            }
+        }
     var draggingRowIndex by remember { mutableStateOf<Int?>(null) }
     var rowDragOffsetPx by remember { mutableStateOf(0f) }
     var rowPreviewMove by remember { mutableStateOf<Pair<Int, Int>?>(null) }
-    var draggingButtonId by remember { mutableStateOf<Int?>(null) }
+    var draggingButtonSlot by remember { mutableStateOf<ConsoleButtonSlotKey?>(null) }
     var buttonDragOffsetX by remember { mutableStateOf(0f) }
     var buttonDragOffsetY by remember { mutableStateOf(0f) }
     var buttonPreviewMove by remember { mutableStateOf<ButtonPreviewMove?>(null) }
+        fun updateButtonDragPreview(fromRowIndex: Int, fromIndex: Int, dragX: Float, dragY: Float) {
+            val move = resolveButtonDragMove(fromRowIndex, fromIndex, dragX, dragY)
+            buttonPreviewMove = move
+            val previewOffset = buttonSwapPreviewOffset(fromRowIndex, fromIndex, move)
+            buttonDragOffsetX = dragX - with(density) { previewOffset.x.toPx() }
+            buttonDragOffsetY = dragY - with(density) { previewOffset.y.toPx() }
+        }
 
         Box(modifier = Modifier.fillMaxSize()) {
             safeRows.forEachIndexed { rowIndex, buttons ->
@@ -8921,52 +9519,46 @@ private fun ConsoleLayoutPreviewRows(
                             )
                         } else {
                             buttons.forEachIndexed { buttonIndex, button ->
-                                val draggingButton = draggingButtonId == button.id
-                                val previewButtonOffset = buttonPreviewMove?.let { move ->
-                                    if (move.fromRowIndex == rowIndex && move.toRowIndex == rowIndex) {
-                                        when {
-                                            buttonIndex == move.fromIndex -> (move.toIndex - move.fromIndex).toFloat()
-                                            move.fromIndex < move.toIndex && buttonIndex in (move.fromIndex + 1)..move.toIndex -> -1f
-                                            move.fromIndex > move.toIndex && buttonIndex in move.toIndex until move.fromIndex -> 1f
-                                            else -> 0f
-                                        }
-                                    } else {
-                                        0f
-                                    }
-                                } ?: 0f
-                                val animatedPreviewButtonOffset by animateFloatAsState(previewButtonOffset, label = "consoleButtonPreviewOffset")
-                                val previewButtonRowOffset = buttonPreviewMove?.let { move ->
-                                    if (move.fromRowIndex == rowIndex && move.toRowIndex != rowIndex) {
-                                        rowTops[move.toRowIndex] - rowTops[move.fromRowIndex]
-                                    } else {
-                                        0.dp
-                                    }
-                                } ?: 0.dp
-                                val animatedPreviewButtonRowOffset by animateDpAsState(previewButtonRowOffset, label = "consoleButtonPreviewRowOffset")
-                                Box(
-                                    modifier = Modifier
+                                val slotKey = ConsoleButtonSlotKey(rowIndex, buttonIndex)
+                                val draggingButton = draggingButtonSlot == slotKey
+                                val selectedButton = selectedButtonSlot == slotKey
+                                val previewButtonOffset = buttonSwapPreviewOffset(rowIndex, buttonIndex, buttonPreviewMove)
+                                val previewButtonScale = buttonSwapPreviewScale(rowIndex, buttonIndex, buttonPreviewMove)
+                                val animatedPreviewButtonX by animateDpAsState(previewButtonOffset.x, label = "consoleButtonPreviewX")
+                                val animatedPreviewButtonY by animateDpAsState(previewButtonOffset.y, label = "consoleButtonPreviewY")
+                                val animatedPreviewScaleX by animateFloatAsState(previewButtonScale.x, label = "consoleButtonPreviewScaleX")
+                                val animatedPreviewScaleY by animateFloatAsState(previewButtonScale.y, label = "consoleButtonPreviewScaleY")
+                                val previewButtonModifier = if (button.isTrimControl()) {
+                                    Modifier
+                                        .width(rowHeights[rowIndex])
+                                        .fillMaxHeight()
+                                } else {
+                                    Modifier
                                         .weight(button.spanColumns.coerceAtLeast(1).toFloat())
                                         .fillMaxHeight()
+                                }
+                                Box(
+                                    modifier = previewButtonModifier
                                         .zIndex(if (draggingButton) 6f else 0f)
                                         .graphicsLayer {
-                                            val widthWithGap = size.width + with(density) { buttonSpacing.toPx() }
-                                            val previewX = animatedPreviewButtonOffset * widthWithGap
-                                            val previewY = with(density) { animatedPreviewButtonRowOffset.toPx() }
+                                            val previewX = with(density) { animatedPreviewButtonX.toPx() }
+                                            val previewY = with(density) { animatedPreviewButtonY.toPx() }
                                             translationX = if (draggingButton) previewX + buttonDragOffsetX else previewX
                                             translationY = if (draggingButton) previewY + buttonDragOffsetY else previewY
                                             alpha = if (draggingButton) 0.72f else 1f
-                                            scaleX = if (draggingButton) 0.985f else 1f
-                                            scaleY = if (draggingButton) 0.985f else 1f
+                                            transformOrigin = TransformOrigin(0f, 0f)
+                                            scaleX = animatedPreviewScaleX * if (draggingButton) 0.985f else 1f
+                                            scaleY = animatedPreviewScaleY * if (draggingButton) 0.985f else 1f
                                         }
                                 ) {
                                     ConsoleLayoutPreviewButton(
                                         modifier = Modifier.fillMaxSize(),
                                         button = button,
-                                        selected = editMode == ConsoleLayoutEditMode.Buttons && selectedButtonId == button.id,
+                                        selected = editMode == ConsoleLayoutEditMode.Buttons && selectedButton,
                                         onClick = {
                                             if (editMode == ConsoleLayoutEditMode.Buttons) {
                                                 onSelectRow(rowIndex)
-                                                onSelectButton(button)
+                                                onSelectButton(rowIndex, buttonIndex, button)
                                             }
                                         }
                                     )
@@ -8976,59 +9568,42 @@ private fun ConsoleLayoutPreviewRows(
                                                 .align(Alignment.CenterStart)
                                                 .offset(x = (-21).dp)
                                                 .zIndex(8f),
-                                            selected = selectedButtonId == button.id,
+                                            selected = selectedButton,
                                             horizontalThresholdPx = with(density) {
                                                 ((previewRowsWidth - buttonSpacing * (DEFAULT_COLUMNS - 1).toFloat()) / DEFAULT_COLUMNS.toFloat() + buttonSpacing).toPx()
                                             },
                                             verticalThresholdPx = with(density) { (rowHeights[rowIndex] * 0.48f + rowSpacing * 0.5f).toPx() },
                                             onSelect = {
                                                 onSelectRow(rowIndex)
-                                                onSelectButton(button)
+                                                onSelectButton(rowIndex, buttonIndex, button)
                                             },
                                             onDragStart = {
-                                                draggingButtonId = button.id
+                                                draggingButtonSlot = slotKey
                                                 buttonDragOffsetX = 0f
                                                 buttonDragOffsetY = 0f
                                                 buttonPreviewMove = null
+                                                onDragStateChange(true)
                                             },
                                             onDragOffset = { x, y ->
-                                                buttonDragOffsetX = x
-                                                buttonDragOffsetY = y
+                                                updateButtonDragPreview(rowIndex, buttonIndex, x, y)
                                             },
                                             onDragStop = {
-                                                draggingButtonId = null
+                                                draggingButtonSlot = null
                                                 buttonDragOffsetX = 0f
                                                 buttonDragOffsetY = 0f
                                                 buttonPreviewMove = null
+                                                onDragStateChange(false)
                                             },
-                                            onMoveBy = { rowDelta, columnDelta ->
-                                                val targetRowIndex = (rowIndex + rowDelta).coerceIn(safeRows.indices)
-                                                val targetIndex = if (rowDelta == 0) {
-                                                    (buttonIndex + columnDelta).coerceIn(safeRows[rowIndex].indices)
-                                                } else {
-                                                    buttonIndex.coerceIn(0, safeRows[targetRowIndex].size)
-                                                }
-                                                if (targetRowIndex != rowIndex || targetIndex != buttonIndex) {
-                                                    onMoveButtonTo(rowIndex, buttonIndex, targetRowIndex, targetIndex)
-                                                    onSelectRow(targetRowIndex)
-                                                    onSelectButton(button)
-                                                    draggingButtonId = button.id
-                                                    buttonDragOffsetX = 0f
-                                                    buttonDragOffsetY = 0f
+                                            onMoveBy = { dragX, dragY ->
+                                                val move = resolveButtonDragMove(rowIndex, buttonIndex, dragX, dragY)
+                                                if (move != null) {
+                                                    onMoveButtonTo(move.fromRowIndex, move.fromIndex, move.toRowIndex, move.toIndex)
+                                                    onSelectRow(move.toRowIndex)
+                                                    onSelectButton(move.toRowIndex, move.toIndex, button)
                                                 }
                                             },
-                                            onPreviewMove = { rowDelta, columnDelta ->
-                                                val targetRowIndex = (rowIndex + rowDelta).coerceIn(safeRows.indices)
-                                                val targetIndex = if (rowDelta == 0) {
-                                                    (buttonIndex + columnDelta).coerceIn(safeRows[rowIndex].indices)
-                                                } else {
-                                                    buttonIndex.coerceIn(0, safeRows[targetRowIndex].size)
-                                                }
-                                                buttonPreviewMove = if (rowDelta != 0 || columnDelta != 0) {
-                                                    ButtonPreviewMove(rowIndex, buttonIndex, targetRowIndex, targetIndex)
-                                                } else {
-                                                    null
-                                                }
+                                            onPreviewMove = { dragX, dragY ->
+                                                updateButtonDragPreview(rowIndex, buttonIndex, dragX, dragY)
                                             }
                                         )
                                     }
@@ -9091,6 +9666,7 @@ private fun ConsoleLayoutPreviewRows(
                         draggingRowIndex = rowIndex
                         rowDragOffsetPx = 0f
                         rowPreviewMove = null
+                        onDragStateChange(true)
                     },
                     onDragOffset = { offsetPx ->
                         rowDragOffsetPx = offsetPx
@@ -9099,6 +9675,7 @@ private fun ConsoleLayoutPreviewRows(
                         draggingRowIndex = null
                         rowDragOffsetPx = 0f
                         rowPreviewMove = null
+                        onDragStateChange(false)
                     },
                     onMoveBy = { delta ->
                         val targetIndex = (rowIndex + delta).coerceIn(safeRows.indices)
@@ -9155,6 +9732,50 @@ private data class ButtonPreviewMove(
     val toRowIndex: Int,
     val toIndex: Int
 )
+
+private data class ConsoleButtonPreviewBounds(
+    val left: Dp,
+    val width: Dp
+)
+
+private data class ConsoleButtonPreviewOffset(
+    val x: Dp,
+    val y: Dp
+) {
+    companion object {
+        val Zero = ConsoleButtonPreviewOffset(0.dp, 0.dp)
+    }
+}
+
+private data class ConsoleButtonPreviewScale(
+    val x: Float,
+    val y: Float
+) {
+    companion object {
+        val Normal = ConsoleButtonPreviewScale(1f, 1f)
+    }
+}
+
+private data class ConsoleButtonSlotKey(
+    val rowIndex: Int,
+    val buttonIndex: Int
+)
+
+private enum class ButtonVisualShape {
+    Horizontal,
+    Square,
+    Vertical
+}
+
+private fun buttonVisualShape(width: Dp, height: Dp): ButtonVisualShape {
+    val safeHeight = height.value.coerceAtLeast(1f)
+    val ratio = width.value / safeHeight
+    return when {
+        ratio >= 1.55f -> ButtonVisualShape.Horizontal
+        ratio <= 0.72f -> ButtonVisualShape.Vertical
+        else -> ButtonVisualShape.Square
+    }
+}
 
 @Composable
 private fun ConsoleRaisedButtonFrame(
@@ -9811,7 +10432,7 @@ private fun Modifier.pageSwipeGesture(
             var totalDrag = Offset.Zero
             var maxPointerCount = 0
             var multiTouchActive = false
-            val eventPass = if (preferChildGestures) PointerEventPass.Final else PointerEventPass.Initial
+            val eventPass = PointerEventPass.Final
 
             fun resetTracking() {
                 tracking = false
@@ -9823,7 +10444,7 @@ private fun Modifier.pageSwipeGesture(
 
             while (true) {
                 val event = awaitPointerEvent(eventPass)
-                if (preferChildGestures && event.changes.any { it.isConsumed }) {
+                if (event.changes.any { it.isConsumed }) {
                     resetTracking()
                     continue
                 }
@@ -9978,6 +10599,7 @@ private fun ButtonGrid(
     previewMode: Boolean,
     showTitle: Boolean,
     onButtonPressed: (DeckButton) -> Unit,
+    onTrimStep: (DeckButton, Int) -> Unit,
     onButtonTouchStarted: () -> Unit,
     onButtonTouchEnded: () -> Unit,
     onButtonEdit: (DeckButton) -> Unit,
@@ -10105,6 +10727,7 @@ private fun ButtonGrid(
                         spacing = spacing,
                         swapPreviewOffset = previewOffsetFor(button),
                         onPressed = { onButtonPressed(button) },
+                        onTrimStep = { step -> onTrimStep(button, step) },
                         onPressFeedback = onButtonTouchStarted,
                         onReleaseFeedback = onButtonTouchEnded,
                         onEdit = { onButtonEdit(button) },
@@ -10244,6 +10867,761 @@ private fun EmptyDeckSlot(
     }
 }
 
+private fun Modifier.trimSwitchGesture(
+    enabled: Boolean,
+    style: DeckControlStyle,
+    joyPadEightWay: Boolean,
+    onPress: () -> Unit,
+    onRelease: () -> Unit,
+    onPreviewStep: (Int) -> Unit,
+    onActiveStepChange: (Int) -> Unit,
+    onStep: (Int) -> Unit
+): Modifier {
+    if (!enabled) return this
+    return pointerInput(style, joyPadEightWay, onStep, onPreviewStep, onActiveStepChange) {
+        fun levelForMagnitude(magnitude: Float): Int {
+            return when {
+                magnitude >= 0.72f -> 3
+                magnitude >= 0.38f -> 2
+                magnitude > 0f -> 1
+                else -> 0
+            }
+        }
+
+        fun normalizedDegrees(degrees: Float): Float {
+            var normalized = degrees
+            while (normalized > 180f) normalized -= 360f
+            while (normalized < -180f) normalized += 360f
+            return normalized
+        }
+
+        fun stepFromSignedMagnitude(signedMagnitude: Float): Int {
+            val deadZone = 0.16f
+            val magnitude = abs(signedMagnitude)
+            if (magnitude <= deadZone) return 0
+            val normalizedMagnitude = ((magnitude - deadZone) / (1f - deadZone)).coerceIn(0f, 1f)
+            val direction = if (signedMagnitude > 0f) 1 else -1
+            return direction * levelForMagnitude(normalizedMagnitude)
+        }
+
+        fun sliderStepFor(position: Offset, previousStep: Int): Int {
+            val horizontal = size.width >= size.height * 1.15f
+            val start = if (horizontal) size.width * 0.12f else size.height * 0.12f
+            val end = if (horizontal) size.width * 0.88f else size.height * 0.88f
+            val center = if (horizontal) size.width / 2f else size.height / 2f
+            val axisPosition = if (horizontal) position.x else position.y
+            val clampedPosition = axisPosition.coerceIn(start, end)
+            val halfRange = ((end - start) / 2f).coerceAtLeast(1f)
+            val signedMagnitude = if (horizontal) {
+                ((clampedPosition - center) / halfRange).coerceIn(-1f, 1f)
+            } else {
+                ((center - clampedPosition) / halfRange).coerceIn(-1f, 1f)
+            }
+            val step = stepFromSignedMagnitude(signedMagnitude)
+            val outsideTrack = if (horizontal) {
+                position.x !in start..end || position.y !in 0f..size.height.toFloat()
+            } else {
+                position.x !in 0f..size.width.toFloat() || position.y !in start..end
+            }
+            return if (step == 0 && outsideTrack) {
+                previousStep
+            } else {
+                step
+            }
+        }
+
+        fun knobStepFor(position: Offset, previousStep: Int): Int {
+            val center = Offset(size.width / 2f, size.height / 2f)
+            val fromCenter = position - center
+            if (abs(fromCenter.x) < size.width * 0.08f && abs(fromCenter.y) < size.height * 0.08f) {
+                return 0
+            }
+            val angleDegrees = atan2(fromCenter.y, fromCenter.x) * 180f / Math.PI.toFloat()
+            val rawDeltaFromTop = normalizedDegrees(angleDegrees + 90f)
+            val deltaFromTop = if (abs(rawDeltaFromTop) > 126f && previousStep != 0) {
+                if (previousStep > 0) 126f else -126f
+            } else {
+                rawDeltaFromTop.coerceIn(-126f, 126f)
+            }
+            val signedMagnitude = deltaFromTop / 126f
+            val step = stepFromSignedMagnitude(signedMagnitude)
+            return if (step == 0 && (
+                    position.x !in 0f..size.width.toFloat() ||
+                        position.y !in 0f..size.height.toFloat()
+                )
+            ) {
+                previousStep
+            } else {
+                step
+            }
+        }
+
+        fun joyPadStepFor(position: Offset, previousStep: Int): Int {
+            val center = Offset(size.width / 2f, size.height / 2f)
+            val fromCenter = position - center
+            val distance = maxOf(abs(fromCenter.x), abs(fromCenter.y))
+            val deadZone = minOf(size.width, size.height) * 0.14f
+            if (distance <= deadZone) {
+                return if (
+                    previousStep != 0 &&
+                    (position.x !in 0f..size.width.toFloat() || position.y !in 0f..size.height.toFloat())
+                ) {
+                    previousStep
+                } else {
+                    0
+                }
+            }
+            if (!joyPadEightWay) {
+                return if (abs(fromCenter.x) >= abs(fromCenter.y)) {
+                    if (fromCenter.x > 0f) JOYPAD_STEP_RIGHT else JOYPAD_STEP_LEFT
+                } else {
+                    if (fromCenter.y < 0f) JOYPAD_STEP_UP else JOYPAD_STEP_DOWN
+                }
+            }
+            val angle = (atan2(fromCenter.y, fromCenter.x) * 180f / Math.PI.toFloat() + 360f) % 360f
+            return when (((angle + 22.5f) / 45f).toInt() % 8) {
+                0 -> JOYPAD_STEP_RIGHT
+                1 -> JOYPAD_STEP_DOWN_RIGHT
+                2 -> JOYPAD_STEP_DOWN
+                3 -> JOYPAD_STEP_DOWN_LEFT
+                4 -> JOYPAD_STEP_LEFT
+                5 -> JOYPAD_STEP_UP_LEFT
+                6 -> JOYPAD_STEP_UP
+                else -> JOYPAD_STEP_UP_RIGHT
+            }
+        }
+
+        fun infiniteWheelAngleFor(position: Offset): Float? {
+            val center = Offset(size.width / 2f, size.height / 2f)
+            val fromCenter = position - center
+            val minimumRadius = minOf(size.width, size.height) * 0.12f
+            if (fromCenter.getDistance() < minimumRadius) return null
+            return atan2(fromCenter.y, fromCenter.x) * 180f / Math.PI.toFloat()
+        }
+
+        fun stepFor(totalDrag: Offset, downPosition: Offset, currentPosition: Offset, dragDelta: Offset, previousStep: Int): Int {
+            return if (style == DeckControlStyle.TrimSlider) {
+                sliderStepFor(currentPosition, previousStep)
+            } else if (style == DeckControlStyle.JoyPad) {
+                joyPadStepFor(currentPosition, previousStep)
+            } else {
+                knobStepFor(currentPosition, previousStep)
+            }
+        }
+
+        awaitEachGesture {
+            val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+            down.consume()
+            var totalDrag = Offset.Zero
+            var currentPosition = down.position
+            var lastStep = if (style == DeckControlStyle.InfiniteWheel) {
+                0
+            } else {
+                stepFor(totalDrag, down.position, currentPosition, Offset.Zero, 0)
+            }
+            var joyPadActiveStep = 0
+            var wheelPreviousAngle = infiniteWheelAngleFor(down.position)
+            var wheelAngleAccumulator = 0f
+            var wheelVisualTick = 0
+            val wheelDegreesPerNotch = 360f / INFINITE_WHEEL_NOTCHES_PER_REVOLUTION.toFloat()
+            fun setJoyPadStep(nextStep: Int) {
+                if (style != DeckControlStyle.JoyPad || nextStep == joyPadActiveStep) return
+                if (joyPadActiveStep != 0) {
+                    onStep(joyPadReleaseStep(joyPadActiveStep))
+                }
+                joyPadActiveStep = nextStep
+                if (joyPadActiveStep != 0) {
+                    onStep(joyPadActiveStep)
+                }
+            }
+            try {
+                onPress()
+                onPreviewStep(lastStep)
+                if (style == DeckControlStyle.JoyPad) {
+                    setJoyPadStep(lastStep)
+                } else {
+                    onActiveStepChange(lastStep)
+                }
+                while (true) {
+                    val event = awaitPointerEvent(PointerEventPass.Initial)
+                    val change = event.changes.firstOrNull { it.id == down.id }
+                    if (change != null) {
+                        currentPosition = change.position
+                        val dragDelta = currentPosition - change.previousPosition
+                        totalDrag += dragDelta
+                        change.consume()
+                        if (style == DeckControlStyle.InfiniteWheel) {
+                            val nextAngle = infiniteWheelAngleFor(currentPosition)
+                            if (wheelPreviousAngle != null && nextAngle != null) {
+                                wheelAngleAccumulator += normalizedDegrees(nextAngle - wheelPreviousAngle!!)
+                                while (wheelAngleAccumulator >= wheelDegreesPerNotch) {
+                                    wheelVisualTick += 1
+                                    onPreviewStep(wheelVisualTick)
+                                    onStep(1)
+                                    wheelAngleAccumulator -= wheelDegreesPerNotch
+                                }
+                                while (wheelAngleAccumulator <= -wheelDegreesPerNotch) {
+                                    wheelVisualTick -= 1
+                                    onPreviewStep(wheelVisualTick)
+                                    onStep(-1)
+                                    wheelAngleAccumulator += wheelDegreesPerNotch
+                                }
+                            }
+                            if (nextAngle != null) {
+                                wheelPreviousAngle = nextAngle
+                            }
+                        } else {
+                            lastStep = stepFor(totalDrag, down.position, currentPosition, dragDelta, lastStep)
+                            onPreviewStep(lastStep)
+                            if (style == DeckControlStyle.JoyPad) {
+                                setJoyPadStep(lastStep)
+                            } else {
+                                onActiveStepChange(lastStep)
+                            }
+                        }
+                    }
+                    if (event.changes.all { it.changedToUp() || !it.pressed }) {
+                        break
+                    }
+                }
+            } finally {
+                if (joyPadActiveStep != 0) {
+                    onStep(joyPadReleaseStep(joyPadActiveStep))
+                    joyPadActiveStep = 0
+                }
+                onActiveStepChange(0)
+                onRelease()
+                if (style != DeckControlStyle.InfiniteWheel) {
+                    onPreviewStep(0)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TrimSwitchContent(
+    modifier: Modifier = Modifier,
+    button: DeckButton,
+    visualMode: DeckUiMode,
+    contentColor: Color,
+    cellSize: Dp,
+    visualStep: Int
+) {
+    val isConsole = visualMode == DeckUiMode.Console
+    val colors = LocalDeckThemeColors.current
+    val darkTheme = isSystemInDarkTheme()
+    val trimAccent = if (isConsole) Color(0xFF3D8EFF) else button.color
+    val inactiveStroke = contentColor.copy(alpha = if (darkTheme) 0.34f else 0.48f)
+    val style = button.controlStyle
+    val title = buttonDisplayTitle(button).ifBlank { stringResource(style.labelRes) }
+    val animatedStep by animateFloatAsState(
+        targetValue = visualStep.toFloat(),
+        animationSpec = tween(durationMillis = 120),
+        label = "trimSwitchStep"
+    )
+    val activeFraction = (animatedStep / 3f).coerceIn(-1f, 1f)
+    Box(
+        modifier = modifier.padding(if (isConsole) 8.dp else 7.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        if (style == DeckControlStyle.JoyPad) {
+            Canvas(modifier = Modifier.matchParentSize()) {
+                val eightWay = joyPadPayloadParts(button.payload).eightWay
+                val padSize = minOf(size.width, size.height) * if (isConsole) 0.76f else 0.72f
+                val arm = padSize * 0.34f
+                val block = padSize * 0.35f
+                val center = Offset(size.width / 2f, size.height / 2f)
+                val selected = joyPadBaseStep(animatedStep.roundToInt())
+                fun isPadBlockActive(step: Int): Boolean {
+                    return selected == step ||
+                        (step == JOYPAD_STEP_UP && (selected == JOYPAD_STEP_UP_LEFT || selected == JOYPAD_STEP_UP_RIGHT)) ||
+                        (step == JOYPAD_STEP_DOWN && (selected == JOYPAD_STEP_DOWN_LEFT || selected == JOYPAD_STEP_DOWN_RIGHT)) ||
+                        (step == JOYPAD_STEP_LEFT && (selected == JOYPAD_STEP_UP_LEFT || selected == JOYPAD_STEP_DOWN_LEFT)) ||
+                        (step == JOYPAD_STEP_RIGHT && (selected == JOYPAD_STEP_UP_RIGHT || selected == JOYPAD_STEP_DOWN_RIGHT))
+                }
+                fun blockColor(step: Int): Color {
+                    return if (isPadBlockActive(step)) {
+                        trimAccent.copy(alpha = 0.92f)
+                    } else {
+                        colors.consoleButtonDefault.copy(alpha = if (isConsole) 0.78f else 0.48f)
+                    }
+                }
+                fun drawPadBlock(step: Int, topLeft: Offset, blockSize: Size) {
+                    val active = isPadBlockActive(step)
+                    val corner = block * if (isConsole) 0.18f else 0.22f
+                    drawRoundRect(
+                        color = Color.Black.copy(alpha = if (darkTheme) 0.36f else 0.16f),
+                        topLeft = topLeft + Offset(0f, block * 0.08f),
+                        size = blockSize,
+                        cornerRadius = CornerRadius(corner, corner)
+                    )
+                    drawRoundRect(
+                        brush = Brush.radialGradient(
+                            colors = listOf(
+                                contentColor.copy(alpha = if (active) 0.22f else 0.16f),
+                                blockColor(step),
+                                Color.Black.copy(alpha = if (darkTheme) 0.34f else 0.12f)
+                            ),
+                            center = Offset(topLeft.x + blockSize.width * 0.34f, topLeft.y + blockSize.height * 0.28f),
+                            radius = maxOf(blockSize.width, blockSize.height)
+                        ),
+                        topLeft = topLeft,
+                        size = blockSize,
+                        cornerRadius = CornerRadius(corner, corner)
+                    )
+                    drawRoundRect(
+                        color = if (active) trimAccent.copy(alpha = 0.88f) else inactiveStroke.copy(alpha = 0.42f),
+                        topLeft = topLeft,
+                        size = blockSize,
+                        cornerRadius = CornerRadius(corner, corner),
+                        style = Stroke(width = if (active) 1.5.dp.toPx() else 1.dp.toPx())
+                    )
+                    val arrowColor = if (active) Color.White.copy(alpha = 0.94f) else contentColor.copy(alpha = 0.84f)
+                    val arrowSize = minOf(blockSize.width, blockSize.height) * 0.20f
+                    val arrowCenter = Offset(topLeft.x + blockSize.width / 2f, topLeft.y + blockSize.height / 2f)
+                    val path = Path()
+                    when (joyPadBaseStep(step)) {
+                        JOYPAD_STEP_UP -> {
+                            path.moveTo(arrowCenter.x, arrowCenter.y - arrowSize)
+                            path.lineTo(arrowCenter.x - arrowSize, arrowCenter.y + arrowSize * 0.70f)
+                            path.lineTo(arrowCenter.x + arrowSize, arrowCenter.y + arrowSize * 0.70f)
+                        }
+                        JOYPAD_STEP_DOWN -> {
+                            path.moveTo(arrowCenter.x, arrowCenter.y + arrowSize)
+                            path.lineTo(arrowCenter.x - arrowSize, arrowCenter.y - arrowSize * 0.70f)
+                            path.lineTo(arrowCenter.x + arrowSize, arrowCenter.y - arrowSize * 0.70f)
+                        }
+                        JOYPAD_STEP_LEFT -> {
+                            path.moveTo(arrowCenter.x - arrowSize, arrowCenter.y)
+                            path.lineTo(arrowCenter.x + arrowSize * 0.70f, arrowCenter.y - arrowSize)
+                            path.lineTo(arrowCenter.x + arrowSize * 0.70f, arrowCenter.y + arrowSize)
+                        }
+                        else -> {
+                            path.moveTo(arrowCenter.x + arrowSize, arrowCenter.y)
+                            path.lineTo(arrowCenter.x - arrowSize * 0.70f, arrowCenter.y - arrowSize)
+                            path.lineTo(arrowCenter.x - arrowSize * 0.70f, arrowCenter.y + arrowSize)
+                        }
+                    }
+                    path.close()
+                    drawPath(path = path, color = arrowColor)
+                }
+                if (eightWay) {
+                    val diagonalSize = padSize * 0.23f
+                    fun drawDiagonal(step: Int, xSign: Float, ySign: Float) {
+                        drawRoundRect(
+                            color = blockColor(step).copy(alpha = if (selected == step) 0.76f else 0.36f),
+                            topLeft = Offset(
+                                center.x + xSign * padSize * 0.31f - diagonalSize / 2f,
+                                center.y + ySign * padSize * 0.31f - diagonalSize / 2f
+                            ),
+                            size = Size(diagonalSize, diagonalSize),
+                            cornerRadius = CornerRadius(diagonalSize * 0.32f, diagonalSize * 0.32f)
+                        )
+                    }
+                    drawDiagonal(JOYPAD_STEP_UP_LEFT, -1f, -1f)
+                    drawDiagonal(JOYPAD_STEP_UP_RIGHT, 1f, -1f)
+                    drawDiagonal(JOYPAD_STEP_DOWN_LEFT, -1f, 1f)
+                    drawDiagonal(JOYPAD_STEP_DOWN_RIGHT, 1f, 1f)
+                }
+                drawPadBlock(
+                    JOYPAD_STEP_UP,
+                    Offset(center.x - arm / 2f, center.y - padSize / 2f),
+                    Size(arm, block)
+                )
+                drawPadBlock(
+                    JOYPAD_STEP_DOWN,
+                    Offset(center.x - arm / 2f, center.y + padSize / 2f - block),
+                    Size(arm, block)
+                )
+                drawPadBlock(
+                    JOYPAD_STEP_LEFT,
+                    Offset(center.x - padSize / 2f, center.y - arm / 2f),
+                    Size(block, arm)
+                )
+                drawPadBlock(
+                    JOYPAD_STEP_RIGHT,
+                    Offset(center.x + padSize / 2f - block, center.y - arm / 2f),
+                    Size(block, arm)
+                )
+                drawCircle(
+                    color = Color.Black.copy(alpha = if (darkTheme) 0.42f else 0.18f),
+                    radius = arm * 0.28f,
+                    center = center + Offset(0f, arm * 0.04f)
+                )
+                drawCircle(
+                    brush = Brush.radialGradient(
+                        colors = listOf(contentColor.copy(alpha = 0.36f), Color.Black.copy(alpha = 0.28f)),
+                        center = Offset(center.x - arm * 0.10f, center.y - arm * 0.12f),
+                        radius = arm * 0.42f
+                    ),
+                    radius = arm * 0.24f,
+                    center = center
+                )
+            }
+            Text(
+                text = title,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .padding(horizontal = 4.dp),
+                style = MaterialTheme.typography.labelSmall,
+                color = contentColor.copy(alpha = 0.80f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.Center,
+                fontWeight = FontWeight.SemiBold
+            )
+        } else if (style == DeckControlStyle.InfiniteWheel) {
+            Canvas(modifier = Modifier.matchParentSize()) {
+                val wheelRadius = minOf(size.width, size.height) * if (isConsole) 0.38f else 0.34f
+                val center = Offset(size.width / 2f, size.height / 2f)
+                val rotationOffset = animatedStep * (360f / INFINITE_WHEEL_NOTCHES_PER_REVOLUTION.toFloat())
+                drawCircle(
+                    color = Color.Black.copy(alpha = if (darkTheme) 0.34f else 0.12f),
+                    radius = wheelRadius * 1.02f,
+                    center = center + Offset(0f, wheelRadius * 0.08f)
+                )
+                repeat(INFINITE_WHEEL_NOTCHES_PER_REVOLUTION) { index ->
+                    val angle = ((index * (360f / INFINITE_WHEEL_NOTCHES_PER_REVOLUTION)) + rotationOffset) *
+                        (Math.PI.toFloat() / 180f)
+                    val major = index % 3 == 0
+                    drawLine(
+                        color = if (major) trimAccent.copy(alpha = if (isConsole) 0.70f else 0.58f) else inactiveStroke.copy(alpha = 0.58f),
+                        start = Offset(
+                            x = center.x + cos(angle) * wheelRadius * if (major) 1.16f else 1.12f,
+                            y = center.y + sin(angle) * wheelRadius * if (major) 1.16f else 1.12f
+                        ),
+                        end = Offset(
+                            x = center.x + cos(angle) * wheelRadius * if (major) 1.30f else 1.24f,
+                            y = center.y + sin(angle) * wheelRadius * if (major) 1.30f else 1.24f
+                        ),
+                        strokeWidth = if (major) 1.6.dp.toPx() else 1.dp.toPx(),
+                        cap = StrokeCap.Round
+                    )
+                }
+                drawCircle(
+                    brush = Brush.radialGradient(
+                        colors = listOf(
+                            contentColor.copy(alpha = if (darkTheme) 0.22f else 0.38f),
+                            colors.consoleButtonDefault.copy(alpha = if (isConsole) 0.70f else 0.42f),
+                            Color.Black.copy(alpha = if (darkTheme) 0.42f else 0.16f)
+                        ),
+                        center = Offset(center.x - wheelRadius * 0.35f, center.y - wheelRadius * 0.45f),
+                        radius = wheelRadius * 1.28f
+                    ),
+                    radius = wheelRadius,
+                    center = center
+                )
+                drawCircle(
+                    color = Color.Black.copy(alpha = if (darkTheme) 0.58f else 0.22f),
+                    radius = wheelRadius,
+                    center = center,
+                    style = Stroke(width = 1.4.dp.toPx())
+                )
+                drawCircle(
+                    color = trimAccent.copy(alpha = if (isConsole) 0.90f else 0.78f),
+                    radius = wheelRadius * 1.03f,
+                    center = center,
+                    style = Stroke(width = if (isConsole) 2.2.dp.toPx() else 1.8.dp.toPx())
+                )
+                val markerAngle = (-90f + rotationOffset) * (Math.PI.toFloat() / 180f)
+                val markerCenter = Offset(
+                    center.x + cos(markerAngle) * wheelRadius * 0.82f,
+                    center.y + sin(markerAngle) * wheelRadius * 0.82f
+                )
+                drawCircle(
+                    color = contentColor.copy(alpha = 0.82f),
+                    radius = wheelRadius * 0.08f,
+                    center = markerCenter
+                )
+                val arrowY = center.y
+                val arrowAlpha = if (isConsole) 0.70f else 0.58f
+                drawLine(
+                    color = trimAccent.copy(alpha = arrowAlpha),
+                    start = Offset(center.x - wheelRadius * 1.55f, arrowY - wheelRadius * 0.16f),
+                    end = Offset(center.x - wheelRadius * 1.70f, arrowY),
+                    strokeWidth = 1.5.dp.toPx(),
+                    cap = StrokeCap.Round
+                )
+                drawLine(
+                    color = trimAccent.copy(alpha = arrowAlpha),
+                    start = Offset(center.x - wheelRadius * 1.55f, arrowY + wheelRadius * 0.16f),
+                    end = Offset(center.x - wheelRadius * 1.70f, arrowY),
+                    strokeWidth = 1.5.dp.toPx(),
+                    cap = StrokeCap.Round
+                )
+                drawLine(
+                    color = trimAccent.copy(alpha = arrowAlpha),
+                    start = Offset(center.x + wheelRadius * 1.55f, arrowY - wheelRadius * 0.16f),
+                    end = Offset(center.x + wheelRadius * 1.70f, arrowY),
+                    strokeWidth = 1.5.dp.toPx(),
+                    cap = StrokeCap.Round
+                )
+                drawLine(
+                    color = trimAccent.copy(alpha = arrowAlpha),
+                    start = Offset(center.x + wheelRadius * 1.55f, arrowY + wheelRadius * 0.16f),
+                    end = Offset(center.x + wheelRadius * 1.70f, arrowY),
+                    strokeWidth = 1.5.dp.toPx(),
+                    cap = StrokeCap.Round
+                )
+            }
+            Text(
+                text = title,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .padding(horizontal = 4.dp),
+                style = MaterialTheme.typography.labelSmall,
+                color = contentColor.copy(alpha = 0.80f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.Center,
+                fontWeight = FontWeight.SemiBold
+            )
+        } else if (style == DeckControlStyle.TrimSlider) {
+            Canvas(modifier = Modifier.matchParentSize()) {
+                val center = Offset(size.width / 2f, size.height / 2f)
+                val horizontal = size.width >= size.height * 1.15f
+                val trackLength = if (horizontal) size.width * 0.78f else size.height * 0.74f
+                val trackThickness = if (horizontal) {
+                    minOf(size.height * 0.16f, size.width * 0.10f).coerceAtLeast(7.dp.toPx())
+                } else {
+                    minOf(size.width * 0.18f, size.height * 0.10f).coerceAtLeast(7.dp.toPx())
+                }
+                val trackLeft = if (horizontal) center.x - trackLength / 2f else center.x - trackThickness / 2f
+                val trackTop = if (horizontal) center.y - trackThickness / 2f else center.y - trackLength / 2f
+                val trackSize = if (horizontal) Size(trackLength, trackThickness) else Size(trackThickness, trackLength)
+                val trackCorner = trackThickness / 2f
+                val thumbRadius = minOf(size.width, size.height) * if (isConsole) 0.20f else 0.18f
+                val travel = (trackLength / 2f - thumbRadius * 0.82f).coerceAtLeast(1f)
+                val thumbCenter = if (horizontal) {
+                    Offset(center.x + activeFraction * travel, center.y)
+                } else {
+                    Offset(center.x, center.y - activeFraction * travel)
+                }
+                repeat(11) { index ->
+                    val tickPosition = if (horizontal) trackLeft + trackLength * (index / 10f) else trackTop + trackLength * (index / 10f)
+                    val major = index == 5
+                    if (horizontal) {
+                        val tickTop = center.y - thumbRadius * 1.46f
+                        drawLine(
+                            color = if (major) contentColor.copy(alpha = 0.70f) else inactiveStroke,
+                            start = Offset(tickPosition, tickTop),
+                            end = Offset(tickPosition, tickTop + if (major) thumbRadius * 0.34f else thumbRadius * 0.24f),
+                            strokeWidth = if (major) 1.7.dp.toPx() else 1.2.dp.toPx(),
+                            cap = StrokeCap.Round
+                        )
+                    } else {
+                        val tickLeft = center.x + thumbRadius * 1.05f
+                        drawLine(
+                            color = if (major) contentColor.copy(alpha = 0.70f) else inactiveStroke,
+                            start = Offset(tickLeft, tickPosition),
+                            end = Offset(tickLeft + if (major) thumbRadius * 0.34f else thumbRadius * 0.24f, tickPosition),
+                            strokeWidth = if (major) 1.7.dp.toPx() else 1.2.dp.toPx(),
+                            cap = StrokeCap.Round
+                        )
+                    }
+                }
+                drawRoundRect(
+                    color = Color.Black.copy(alpha = if (darkTheme) 0.48f else 0.18f),
+                    topLeft = if (horizontal) Offset(trackLeft, trackTop + trackThickness * 0.12f) else Offset(trackLeft + trackThickness * 0.12f, trackTop),
+                    size = if (horizontal) trackSize else Size(trackThickness, trackLength),
+                    cornerRadius = CornerRadius(trackCorner, trackCorner)
+                )
+                drawRoundRect(
+                    brush = if (horizontal) {
+                        Brush.horizontalGradient(
+                            colors = listOf(Color.Black.copy(alpha = 0.16f), colors.consoleButtonDefault.copy(alpha = 0.86f))
+                        )
+                    } else {
+                        Brush.verticalGradient(
+                            colors = listOf(colors.consoleButtonDefault.copy(alpha = 0.86f), Color.Black.copy(alpha = 0.16f))
+                        )
+                    },
+                    topLeft = Offset(trackLeft, trackTop),
+                    size = trackSize,
+                    cornerRadius = CornerRadius(trackCorner, trackCorner)
+                )
+                if (activeFraction != 0f) {
+                    if (horizontal) {
+                        val activeLeft = minOf(center.x, thumbCenter.x)
+                        val activeWidth = abs(thumbCenter.x - center.x).coerceAtLeast(trackThickness * 0.50f)
+                        drawRoundRect(
+                            brush = Brush.horizontalGradient(
+                                colors = listOf(trimAccent.copy(alpha = 0.58f), trimAccent.copy(alpha = 0.92f))
+                            ),
+                            topLeft = Offset(activeLeft, trackTop + trackThickness * 0.16f),
+                            size = Size(activeWidth, trackThickness * 0.68f),
+                            cornerRadius = CornerRadius(trackCorner, trackCorner)
+                        )
+                    } else {
+                        val activeTop = minOf(center.y, thumbCenter.y)
+                        val activeHeight = abs(thumbCenter.y - center.y).coerceAtLeast(trackThickness * 0.50f)
+                        drawRoundRect(
+                            brush = Brush.verticalGradient(
+                                colors = listOf(trimAccent.copy(alpha = 0.92f), trimAccent.copy(alpha = 0.58f))
+                            ),
+                            topLeft = Offset(trackLeft + trackThickness * 0.16f, activeTop),
+                            size = Size(trackThickness * 0.68f, activeHeight),
+                            cornerRadius = CornerRadius(trackCorner, trackCorner)
+                        )
+                    }
+                }
+                drawCircle(
+                    color = Color.Black.copy(alpha = if (darkTheme) 0.42f else 0.16f),
+                    radius = thumbRadius * 1.04f,
+                    center = thumbCenter + Offset(0f, thumbRadius * 0.10f)
+                )
+                drawCircle(
+                    brush = Brush.radialGradient(
+                        colors = listOf(
+                            Color.White.copy(alpha = if (isConsole) 0.16f else 0.72f),
+                            colors.consoleButtonDefault.copy(alpha = if (isConsole) 0.86f else 0.46f),
+                            Color.Black.copy(alpha = if (darkTheme) 0.34f else 0.12f)
+                        ),
+                        center = Offset(thumbCenter.x - thumbRadius * 0.30f, thumbCenter.y - thumbRadius * 0.38f),
+                        radius = thumbRadius * 1.22f
+                    ),
+                    radius = thumbRadius,
+                    center = thumbCenter
+                )
+                drawCircle(
+                    color = trimAccent.copy(alpha = if (isConsole) 0.92f else 0.66f),
+                    radius = thumbRadius,
+                    center = thumbCenter,
+                    style = Stroke(width = if (abs(activeFraction) > 0.01f) 1.8.dp.toPx() else 1.dp.toPx())
+                )
+                drawLine(
+                    color = if (abs(activeFraction) > 0.01f) trimAccent else contentColor.copy(alpha = 0.70f),
+                    start = if (horizontal) {
+                        Offset(thumbCenter.x, thumbCenter.y - thumbRadius * 0.36f)
+                    } else {
+                        Offset(thumbCenter.x - thumbRadius * 0.36f, thumbCenter.y)
+                    },
+                    end = if (horizontal) {
+                        Offset(thumbCenter.x, thumbCenter.y + thumbRadius * 0.36f)
+                    } else {
+                        Offset(thumbCenter.x + thumbRadius * 0.36f, thumbCenter.y)
+                    },
+                    strokeWidth = 1.8.dp.toPx(),
+                    cap = StrokeCap.Round
+                )
+            }
+            Text(
+                text = title,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth(),
+                style = if (cellSize < 74.dp) MaterialTheme.typography.labelSmall else MaterialTheme.typography.labelMedium,
+                color = contentColor.copy(alpha = 0.92f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.Center,
+                fontWeight = FontWeight.SemiBold
+            )
+        } else {
+            Canvas(modifier = Modifier.matchParentSize()) {
+                val knobRadius = minOf(size.width, size.height) * if (isConsole) 0.34f else 0.32f
+                val center = Offset(size.width / 2f, size.height / 2f)
+                val angleDegrees = -90f + activeFraction * 126f
+                val angle = angleDegrees * (Math.PI.toFloat() / 180f)
+                val arcTopLeft = Offset(center.x - knobRadius * 1.16f, center.y - knobRadius * 1.16f)
+                val arcSize = Size(knobRadius * 2.32f, knobRadius * 2.32f)
+                repeat(27) { index ->
+                    val tickAngle = (144f + index * (252f / 26f)) * (Math.PI.toFloat() / 180f)
+                    val major = index % 6 == 0
+                    drawLine(
+                        color = inactiveStroke.copy(alpha = if (major) 0.66f else 0.42f),
+                        start = Offset(
+                            center.x + cos(tickAngle) * knobRadius * 1.23f,
+                            center.y + sin(tickAngle) * knobRadius * 1.23f
+                        ),
+                        end = Offset(
+                            center.x + cos(tickAngle) * knobRadius * if (major) 1.38f else 1.32f,
+                            center.y + sin(tickAngle) * knobRadius * if (major) 1.38f else 1.32f
+                        ),
+                        strokeWidth = if (major) 1.3.dp.toPx() else 0.9.dp.toPx(),
+                        cap = StrokeCap.Round
+                    )
+                }
+                drawArc(
+                    color = Color.Black.copy(alpha = if (darkTheme) 0.42f else 0.14f),
+                    startAngle = 144f,
+                    sweepAngle = 252f,
+                    useCenter = false,
+                    topLeft = arcTopLeft,
+                    size = arcSize,
+                    style = Stroke(width = 5.dp.toPx(), cap = StrokeCap.Round)
+                )
+                if (activeFraction != 0f) {
+                    drawArc(
+                        color = trimAccent.copy(alpha = if (isConsole) 0.86f else 0.80f),
+                        startAngle = -90f,
+                        sweepAngle = activeFraction * 126f,
+                        useCenter = false,
+                        topLeft = arcTopLeft,
+                        size = arcSize,
+                        style = Stroke(width = 5.dp.toPx(), cap = StrokeCap.Round)
+                    )
+                }
+                drawCircle(
+                    color = Color.Black.copy(alpha = if (darkTheme) 0.38f else 0.14f),
+                    radius = knobRadius * 1.02f,
+                    center = center + Offset(0f, knobRadius * 0.08f)
+                )
+                drawCircle(
+                    brush = Brush.radialGradient(
+                        colors = listOf(
+                            contentColor.copy(alpha = if (darkTheme) 0.20f else 0.36f),
+                            colors.consoleButtonDefault.copy(alpha = if (isConsole) 0.72f else 0.42f),
+                            Color.Black.copy(alpha = if (darkTheme) 0.42f else 0.14f)
+                        ),
+                        center = Offset(center.x - knobRadius * 0.30f, center.y - knobRadius * 0.40f),
+                        radius = knobRadius * 1.30f
+                    ),
+                    radius = knobRadius,
+                    center = center
+                )
+                drawCircle(
+                    color = Color.Black.copy(alpha = if (darkTheme) 0.58f else 0.22f),
+                    radius = knobRadius,
+                    center = center,
+                    style = Stroke(width = 1.2.dp.toPx())
+                )
+                val indicatorStart = Offset(
+                    center.x + cos(angle) * knobRadius * 0.42f,
+                    center.y + sin(angle) * knobRadius * 0.42f
+                )
+                val indicatorEnd = Offset(
+                    center.x + cos(angle) * knobRadius * 0.76f,
+                    center.y + sin(angle) * knobRadius * 0.76f
+                )
+                drawLine(
+                    color = if (activeFraction == 0f) contentColor.copy(alpha = 0.76f) else trimAccent.copy(alpha = 0.96f),
+                    start = indicatorStart,
+                    end = indicatorEnd,
+                    strokeWidth = 2.dp.toPx(),
+                    cap = StrokeCap.Round
+                )
+            }
+            Text(
+                text = title,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .padding(horizontal = 4.dp),
+                style = MaterialTheme.typography.labelSmall,
+                color = contentColor.copy(alpha = 0.80f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.Center,
+                fontWeight = FontWeight.SemiBold
+            )
+        }
+    }
+}
+
 @Composable
 private fun DeckKey(
     modifier: Modifier = Modifier,
@@ -10262,6 +11640,7 @@ private fun DeckKey(
     swapPreviewOffset: Offset = Offset.Zero,
     contentScale: Float = 1f,
     onPressed: () -> Unit,
+    onTrimStep: (Int) -> Unit = {},
     onPressFeedback: () -> Unit,
     onReleaseFeedback: () -> Unit,
     onEdit: () -> Unit,
@@ -10295,18 +11674,54 @@ private fun DeckKey(
     val density = LocalDensity.current
     var dragOffset by remember(button.id) { mutableStateOf(Offset.Zero) }
     var dragInProgress by remember(button.id) { mutableStateOf(false) }
+    var suppressDragReturnAnimation by remember(button.id) { mutableStateOf(false) }
     var touchPressed by remember(button.id) { mutableStateOf(false) }
+    var trimVisualStep by remember(button.id) { mutableStateOf(0) }
+    var trimRepeatStep by remember(button.id) { mutableStateOf(0) }
+    LaunchedEffect(button.controlStyle, trimVisualStep, trimRepeatStep) {
+        if (button.controlStyle != DeckControlStyle.InfiniteWheel && trimVisualStep != 0 && trimRepeatStep == 0) {
+            delay(180)
+            trimVisualStep = 0
+        }
+    }
+    LaunchedEffect(button.id, button.controlStyle, trimRepeatStep) {
+        if (!button.controlStyle.usesTrimRepeatFrequency()) return@LaunchedEffect
+        var firstSend = true
+        while (trimRepeatStep != 0) {
+            onTrimStep(trimRepeatStep)
+            delay(trimRepeatDelayMillis(trimRepeatStep, firstSend))
+            firstSend = false
+        }
+    }
     val moveThresholdPx = with(density) { ((cellSize + spacing) * 0.55f).toPx() }
     val dragActive = dragInProgress && (abs(dragOffset.x) > moveThresholdPx || abs(dragOffset.y) > moveThresholdPx)
     val displayOffset = dragOffset + swapPreviewOffset
+    val spanColumns = button.effectiveSpanColumns(columns.coerceAtLeast(1), false)
+    val visualWidth = cellSize * spanColumns.toFloat() + spacing * (spanColumns - 1).coerceAtLeast(0).toFloat()
+    val visualHeight = cellSize * button.spanRows.coerceAtLeast(1).toFloat() + spacing * (button.spanRows - 1).coerceAtLeast(0).toFloat()
+    val visualShape = remember(visualWidth, visualHeight) { buttonVisualShape(visualWidth, visualHeight) }
     val animatedX by animateFloatAsState(
         targetValue = displayOffset.x,
-        animationSpec = tween(durationMillis = if (displayOffset == Offset.Zero) 140 else 80),
+        animationSpec = tween(
+            durationMillis = when {
+                suppressDragReturnAnimation -> 0
+                previewMode && displayOffset == Offset.Zero -> 0
+                displayOffset == Offset.Zero -> 140
+                else -> 80
+            }
+        ),
         label = "keyDragX"
     )
     val animatedY by animateFloatAsState(
         targetValue = displayOffset.y,
-        animationSpec = tween(durationMillis = if (displayOffset == Offset.Zero) 140 else 80),
+        animationSpec = tween(
+            durationMillis = when {
+                suppressDragReturnAnimation -> 0
+                previewMode && displayOffset == Offset.Zero -> 0
+                displayOffset == Offset.Zero -> 140
+                else -> 80
+            }
+        ),
         label = "keyDragY"
     )
     val animatedScale by animateFloatAsState(
@@ -10317,6 +11732,11 @@ private fun DeckKey(
     val displayTitle = buttonDisplayTitle(button)
     val hasWidget = button.appWidgetId != INVALID_APP_WIDGET_ID
     val letWidgetHandleTouch = hasWidget && button.appWidgetTouchable && !previewMode
+    LaunchedEffect(suppressDragReturnAnimation, dragInProgress, displayOffset) {
+        if (suppressDragReturnAnimation && !dragInProgress && displayOffset == Offset.Zero) {
+            suppressDragReturnAnimation = false
+        }
+    }
     val dragModifier = if (previewMode) {
         Modifier.pointerInput(button.id, columns, slot, cellSize, spacing) {
             fun targetPositionFor(offset: Offset): Int? {
@@ -10328,6 +11748,7 @@ private fun DeckKey(
             }
             detectDragGesturesAfterLongPress(
                 onDragStart = {
+                    suppressDragReturnAnimation = false
                     dragOffset = Offset.Zero
                     dragInProgress = true
                     onPressFeedback()
@@ -10343,13 +11764,18 @@ private fun DeckKey(
                 },
                 onDragEnd = {
                     if (!onDropDelete(dragOffset)) {
-                        targetPositionFor(dragOffset)?.let(onMove)
+                        val targetPosition = targetPositionFor(dragOffset)
+                        if (targetPosition != null) {
+                            suppressDragReturnAnimation = targetPosition != slot
+                            onMove(targetPosition)
+                        }
                     }
                     dragOffset = Offset.Zero
                     dragInProgress = false
                     onDragFinished()
                 },
                 onDragCancel = {
+                    suppressDragReturnAnimation = false
                     dragOffset = Offset.Zero
                     dragInProgress = false
                     onDragFinished()
@@ -10361,6 +11787,18 @@ private fun DeckKey(
     }
     val clickModifier = when {
         hasWidget || letWidgetHandleTouch -> Modifier
+        button.isTrimControl() && !previewMode -> Modifier.trimSwitchGesture(
+            enabled = enabled,
+            style = button.controlStyle,
+            joyPadEightWay = joyPadPayloadParts(button.payload).eightWay,
+            onPress = onPressFeedback,
+            onRelease = onReleaseFeedback,
+            onPreviewStep = { step -> trimVisualStep = step },
+            onActiveStepChange = { step ->
+                trimRepeatStep = if (button.controlStyle.usesTrimRepeatFrequency()) step else 0
+            },
+            onStep = onTrimStep
+        )
         previewMode -> Modifier.deckSlotGesture(
             enabled = enabled,
             onClick = onPressed
@@ -10412,8 +11850,8 @@ private fun DeckKey(
                 }
             )
             .graphicsLayer {
-                translationX = animatedX
-                translationY = animatedY
+                translationX = if (dragInProgress) displayOffset.x else animatedX
+                translationY = if (dragInProgress) displayOffset.y else animatedY
                 scaleX = animatedScale
                 scaleY = animatedScale
             }
@@ -10482,6 +11920,17 @@ private fun DeckKey(
             }
             return@Surface
         }
+        if (button.isTrimControl()) {
+            TrimSwitchContent(
+                modifier = Modifier.fillMaxSize(),
+                button = button,
+                visualMode = visualMode,
+                contentColor = contentColor,
+                cellSize = cellSize,
+                visualStep = trimVisualStep
+            )
+            return@Surface
+        }
         if (isConsole) {
             ConsoleRaisedButtonFrame(
                 modifier = Modifier.fillMaxSize(),
@@ -10503,6 +11952,7 @@ private fun DeckKey(
                         status = status,
                         contentColor = contentColor,
                         cellSize = cellSize,
+                        visualShape = visualShape,
                         contentScale = contentScale,
                         liftedContent = true
                     )
@@ -10516,6 +11966,7 @@ private fun DeckKey(
                 status = status,
                 contentColor = contentColor,
                 cellSize = cellSize,
+                visualShape = visualShape,
                 contentScale = contentScale
             )
             return@Surface
@@ -10628,6 +12079,7 @@ private fun ClassicDeckKeyContent(
     status: HidStatus,
     contentColor: Color,
     cellSize: Dp,
+    visualShape: ButtonVisualShape = ButtonVisualShape.Square,
     contentScale: Float = 1f,
     liftedContent: Boolean = false
 ) {
@@ -10637,6 +12089,80 @@ private fun ClassicDeckKeyContent(
     val hasSubtitle = subtitleText.isNotBlank()
     val showText = cellSize >= 72.dp && button.displayMode != DeckDisplayMode.IconOnly
     val showSubtitle = cellSize >= 86.dp && hasSubtitle
+    val horizontalLayout = visualShape == ButtonVisualShape.Horizontal &&
+        button.displayMode != DeckDisplayMode.IconOnly &&
+        showText
+    if (horizontalLayout) {
+        Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 12.dp, vertical = 8.dp)
+                .graphicsLayer {
+                    scaleX = contentScale
+                    scaleY = contentScale
+                },
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            if (button.displayMode != DeckDisplayMode.KeywordOnly) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxHeight()
+                        .widthIn(min = 42.dp, max = cellSize * 0.82f),
+                    contentAlignment = Alignment.Center
+                ) {
+                    DeckButtonIcon(
+                        button = button,
+                        tint = contentColor,
+                        large = false,
+                        lifted = liftedContent,
+                        shadowMaxSize = cellSize * 0.82f
+                    )
+                }
+            }
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.Center,
+                horizontalAlignment = Alignment.Start
+            ) {
+                if (hasTitle) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(5.dp)
+                    ) {
+                        if (buttonAppAction(button) == DeckActionType.BluetoothStatus) {
+                            Box(
+                                modifier = Modifier
+                                    .size(7.dp)
+                                    .clip(CircleShape)
+                                    .background(statusDotColor(status.state))
+                            )
+                        }
+                        LiftedText(
+                            text = displayTitle,
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = contentColor,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            lifted = liftedContent
+                        )
+                    }
+                }
+                if (showSubtitle) {
+                    LiftedText(
+                        text = subtitleText,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = contentColor.copy(alpha = 0.84f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        lifted = liftedContent
+                    )
+                }
+            }
+        }
+        return
+    }
     if (showText && button.displayMode == DeckDisplayMode.KeywordOnly) {
         Column(
             modifier = Modifier
@@ -11115,6 +12641,218 @@ private fun mediaIconForPayload(payload: String): ImageVector? {
     }
 }
 
+private const val TRIM_PAYLOAD_SEPARATOR = "|"
+private const val JOYPAD_STEP_UP = 10
+private const val JOYPAD_STEP_DOWN = -10
+private const val JOYPAD_STEP_LEFT = -20
+private const val JOYPAD_STEP_RIGHT = 20
+private const val JOYPAD_STEP_UP_LEFT = 30
+private const val JOYPAD_STEP_UP_RIGHT = 40
+private const val JOYPAD_STEP_DOWN_LEFT = -30
+private const val JOYPAD_STEP_DOWN_RIGHT = -40
+private const val JOYPAD_RELEASE_OFFSET = 1000
+private const val INFINITE_WHEEL_NOTCHES_PER_REVOLUTION = 24
+
+private fun DeckButton.isTrimControl(): Boolean {
+    return controlStyle == DeckControlStyle.TrimSlider ||
+        controlStyle == DeckControlStyle.TrimKnob ||
+        controlStyle == DeckControlStyle.InfiniteWheel ||
+        controlStyle == DeckControlStyle.JoyPad
+}
+
+private fun DeckControlStyle.usesTrimRepeatFrequency(): Boolean {
+    return this == DeckControlStyle.TrimSlider ||
+        this == DeckControlStyle.TrimKnob
+}
+
+private fun trimRepeatDelayMillis(step: Int, firstSend: Boolean): Long {
+    if (firstSend) return 0L
+    return when (abs(step)) {
+        1 -> 300L
+        2 -> 180L
+        else -> 95L
+    }
+}
+
+private fun trimPayload(lowerPayload: String, upperPayload: String): String {
+    val lower = normalizedTrimPayloadPart(lowerPayload, MEDIA_VOLUME_DOWN)
+    val upper = normalizedTrimPayloadPart(upperPayload, MEDIA_VOLUME_UP)
+    return "$lower$TRIM_PAYLOAD_SEPARATOR$upper"
+}
+
+private fun trimPayloadParts(payload: String): Pair<String, String> {
+    if (!payload.contains(TRIM_PAYLOAD_SEPARATOR)) {
+        return MEDIA_VOLUME_DOWN to MEDIA_VOLUME_UP
+    }
+    val parts = payload.split(TRIM_PAYLOAD_SEPARATOR, limit = 2)
+    val lower = normalizedTrimPayloadPart(parts.getOrNull(0), MEDIA_VOLUME_DOWN)
+    val upper = normalizedTrimPayloadPart(parts.getOrNull(1), MEDIA_VOLUME_UP)
+    return lower to upper
+}
+
+private fun normalizedTrimPayloadPart(payload: String?, fallback: String): String {
+    val trimmed = payload.orEmpty().trim()
+    if (trimmed.isBlank()) return fallback
+    return mediaKeyChoice(trimmed)?.payload ?: trimmed
+}
+
+private fun trimPayloadForStep(payload: String, step: Int): String {
+    val (lower, upper) = trimPayloadParts(payload)
+    return if (step >= 0) upper else lower
+}
+
+private enum class JoyPadDirection(
+    val key: String,
+    val step: Int,
+    @StringRes val labelRes: Int,
+    val defaultPressPayload: String
+) {
+    Up("up", JOYPAD_STEP_UP, R.string.joypad_up_action, "UP"),
+    Down("down", JOYPAD_STEP_DOWN, R.string.joypad_down_action, "DOWN"),
+    Left("left", JOYPAD_STEP_LEFT, R.string.joypad_left_action, "LEFT"),
+    Right("right", JOYPAD_STEP_RIGHT, R.string.joypad_right_action, "RIGHT"),
+    UpLeft("upLeft", JOYPAD_STEP_UP_LEFT, R.string.joypad_up_left_action, "UP+LEFT"),
+    UpRight("upRight", JOYPAD_STEP_UP_RIGHT, R.string.joypad_up_right_action, "UP+RIGHT"),
+    DownLeft("downLeft", JOYPAD_STEP_DOWN_LEFT, R.string.joypad_down_left_action, "DOWN+LEFT"),
+    DownRight("downRight", JOYPAD_STEP_DOWN_RIGHT, R.string.joypad_down_right_action, "DOWN+RIGHT");
+}
+
+private data class JoyPadActionPayloads(
+    val press: String,
+    val release: String = ""
+)
+
+private data class JoyPadPayloads(
+    val eightWay: Boolean = false,
+    val actions: Map<JoyPadDirection, JoyPadActionPayloads> = emptyMap()
+) {
+    fun action(direction: JoyPadDirection): JoyPadActionPayloads {
+        return actions[direction] ?: JoyPadActionPayloads(direction.defaultPressPayload)
+    }
+
+    fun withDirection(direction: JoyPadDirection, press: String, release: String): JoyPadPayloads {
+        return copy(actions = actions + (direction to JoyPadActionPayloads(press, release)))
+    }
+
+    fun withEightWay(enabled: Boolean): JoyPadPayloads {
+        return copy(eightWay = enabled)
+    }
+}
+
+private val joyPadCardinalDirections = listOf(
+    JoyPadDirection.Up,
+    JoyPadDirection.Down,
+    JoyPadDirection.Left,
+    JoyPadDirection.Right
+)
+
+private val joyPadDiagonalDirections = listOf(
+    JoyPadDirection.UpLeft,
+    JoyPadDirection.UpRight,
+    JoyPadDirection.DownLeft,
+    JoyPadDirection.DownRight
+)
+
+private val joyPadAllDirections = joyPadCardinalDirections + joyPadDiagonalDirections
+
+private fun joyPadDirectionForStep(step: Int): JoyPadDirection? {
+    val baseStep = joyPadBaseStep(step)
+    return joyPadAllDirections.firstOrNull { it.step == baseStep }
+}
+
+private fun joyPadReleaseStep(step: Int): Int {
+    return if (step > 0) step + JOYPAD_RELEASE_OFFSET else step - JOYPAD_RELEASE_OFFSET
+}
+
+private fun joyPadBaseStep(step: Int): Int {
+    return when {
+        step > JOYPAD_RELEASE_OFFSET -> step - JOYPAD_RELEASE_OFFSET
+        step < -JOYPAD_RELEASE_OFFSET -> step + JOYPAD_RELEASE_OFFSET
+        else -> step
+    }
+}
+
+private fun joyPadIsReleaseStep(step: Int): Boolean {
+    return abs(step) > JOYPAD_RELEASE_OFFSET
+}
+
+private fun joyPadPayload(payloads: JoyPadPayloads): String {
+    val directions = JSONObject()
+    joyPadAllDirections.forEach { direction ->
+        val action = payloads.action(direction)
+        directions.put(
+            direction.key,
+            JSONObject()
+                .put("press", action.press.trim())
+                .put("release", action.release.trim())
+        )
+    }
+    return JSONObject()
+        .put("kind", "joypad")
+        .put("version", 2)
+        .put("eightWay", payloads.eightWay)
+        .put("directions", directions)
+        .toString()
+}
+
+private fun joyPadPayload(
+    upPayload: String,
+    downPayload: String,
+    leftPayload: String,
+    rightPayload: String
+): String {
+    return joyPadPayload(
+        JoyPadPayloads(
+            actions = mapOf(
+                JoyPadDirection.Up to JoyPadActionPayloads(upPayload.ifBlank { "UP" }),
+                JoyPadDirection.Down to JoyPadActionPayloads(downPayload.ifBlank { "DOWN" }),
+                JoyPadDirection.Left to JoyPadActionPayloads(leftPayload.ifBlank { "LEFT" }),
+                JoyPadDirection.Right to JoyPadActionPayloads(rightPayload.ifBlank { "RIGHT" })
+            )
+        )
+    )
+}
+
+private fun joyPadPayloadParts(payload: String): JoyPadPayloads {
+    val trimmed = payload.trim()
+    if (trimmed.startsWith("{")) {
+        val parsed = runCatching {
+            val root = JSONObject(trimmed)
+            val directions = root.optJSONObject("directions") ?: JSONObject()
+            JoyPadPayloads(
+                eightWay = root.optBoolean("eightWay", false),
+                actions = joyPadAllDirections.associateWith { direction ->
+                    val item = directions.optJSONObject(direction.key)
+                    JoyPadActionPayloads(
+                        press = item?.optString("press").orEmpty().ifBlank { direction.defaultPressPayload },
+                        release = item?.optString("release").orEmpty()
+                    )
+                }
+            )
+        }.getOrNull()
+        if (parsed != null) return parsed
+    }
+    val parts = payload.split(TRIM_PAYLOAD_SEPARATOR, limit = 4)
+    return JoyPadPayloads(
+        actions = mapOf(
+            JoyPadDirection.Up to JoyPadActionPayloads(parts.getOrNull(0).orEmpty().ifBlank { "UP" }),
+            JoyPadDirection.Down to JoyPadActionPayloads(parts.getOrNull(1).orEmpty().ifBlank { "DOWN" }),
+            JoyPadDirection.Left to JoyPadActionPayloads(parts.getOrNull(2).orEmpty().ifBlank { "LEFT" }),
+            JoyPadDirection.Right to JoyPadActionPayloads(parts.getOrNull(3).orEmpty().ifBlank { "RIGHT" })
+        )
+    )
+}
+
+private fun controlPayloadForStep(button: DeckButton, step: Int): String {
+    if (button.controlStyle == DeckControlStyle.JoyPad) {
+        val payloads = joyPadPayloadParts(button.payload)
+        val direction = joyPadDirectionForStep(step) ?: JoyPadDirection.Up
+        val action = payloads.action(direction)
+        return if (joyPadIsReleaseStep(step)) action.release else action.press
+    }
+    return trimPayloadForStep(button.payload, step)
+}
+
 private fun iconVectorForKey(key: String): ImageVector? {
     return when (key) {
         ICON_SETTINGS -> Icons.Filled.Settings
@@ -11217,20 +12955,29 @@ private fun mediaKeyChoices(): List<MediaKeyChoice> {
 }
 
 private fun mediaKeyChoice(payload: String): MediaKeyChoice? {
-    val normalizedPayload = payload.uppercase()
-    val canonicalPayload = when (normalizedPayload) {
+    val normalizedPayload = payload
+        .trim()
+        .uppercase()
+        .replace("-", "_")
+        .replace(" ", "_")
+    val compactPayload = normalizedPayload.replace("_", "")
+    val canonicalPayload = when (compactPayload) {
+        "MUTE" -> MEDIA_MUTE
+        "STOP" -> MEDIA_STOP
+        "NEXT" -> MEDIA_NEXT
+        "PREVIOUS", "PREV" -> MEDIA_PREVIOUS
         "VOLUMEUP" -> MEDIA_VOLUME_UP
         "VOLUMEDOWN" -> MEDIA_VOLUME_DOWN
         "PLAYPAUSE", "PLAY", "PAUSE" -> MEDIA_PLAY_PAUSE
-        "NEXT_TRACK" -> MEDIA_NEXT
-        "PREV", "PREVIOUS_TRACK" -> MEDIA_PREVIOUS
+        "NEXTTRACK" -> MEDIA_NEXT
+        "PREVIOUSTRACK" -> MEDIA_PREVIOUS
         else -> normalizedPayload
     }
     return mediaKeyChoices().firstOrNull { it.payload == canonicalPayload }
 }
 
-private fun selectedMediaKeyChoice(payload: String): MediaKeyChoice {
-    return mediaKeyChoice(payload) ?: mediaKeyChoices().first()
+private fun selectedMediaKeyChoice(payload: String, fallbackPayload: String = MEDIA_MUTE): MediaKeyChoice {
+    return mediaKeyChoice(payload) ?: mediaKeyChoice(fallbackPayload) ?: mediaKeyChoices().first()
 }
 
 private fun utilityChoices(): List<UtilityChoice> {
@@ -11380,11 +13127,18 @@ private fun EditButtonDialog(
     var spanRows by remember(button.id) { mutableStateOf(button.spanRows) }
     var appWidgetId by remember(button.id) { mutableStateOf(button.appWidgetId) }
     var appWidgetTouchable by remember(button.id) { mutableStateOf(button.appWidgetTouchable) }
+    var controlStyle by remember(button.id) { mutableStateOf(button.controlStyle) }
+    var trimLowerPayload by remember(button.id) { mutableStateOf(trimPayloadParts(button.payload).first) }
+    var trimUpperPayload by remember(button.id) { mutableStateOf(trimPayloadParts(button.payload).second) }
+    var joyPadPayloads by remember(button.id) { mutableStateOf(joyPadPayloadParts(button.payload)) }
     var iconMenuExpanded by remember { mutableStateOf(false) }
     var mediaMenuExpanded by remember { mutableStateOf(false) }
+    var trimLowerMediaMenuExpanded by remember { mutableStateOf(false) }
+    var trimUpperMediaMenuExpanded by remember { mutableStateOf(false) }
     var appCommandMenuExpanded by remember { mutableStateOf(false) }
     var utilityMenuExpanded by remember { mutableStateOf(false) }
     var appPickerVisible by remember { mutableStateOf(false) }
+    var keyInputHelpVisible by remember { mutableStateOf(false) }
     var actionPanel by remember(button.id) {
         mutableStateOf(editPanelForButton(button))
     }
@@ -11412,10 +13166,11 @@ private fun EditButtonDialog(
             }
         }
     }
-    LaunchedEffect(button.appWidgetId, button.spanColumns, button.spanRows) {
+    LaunchedEffect(button.appWidgetId, button.spanColumns, button.spanRows, button.controlStyle) {
         if (button.appWidgetId == appWidgetId &&
             button.spanColumns == spanColumns &&
-            button.spanRows == spanRows
+            button.spanRows == spanRows &&
+            button.controlStyle == controlStyle
         ) {
             return@LaunchedEffect
         }
@@ -11432,6 +13187,10 @@ private fun EditButtonDialog(
         spanRows = button.spanRows
         appWidgetId = button.appWidgetId
         appWidgetTouchable = button.appWidgetTouchable
+        controlStyle = button.controlStyle
+        trimLowerPayload = trimPayloadParts(button.payload).first
+        trimUpperPayload = trimPayloadParts(button.payload).second
+        joyPadPayloads = joyPadPayloadParts(button.payload)
         actionPanel = editPanelForButton(button)
     }
     val appCommandActions = listOf(
@@ -11441,23 +13200,35 @@ private fun EditButtonDialog(
         DeckActionType.Settings
     )
     val selectedAppCommand = appCommandAction(payload) ?: DeckActionType.BluetoothStatus
+    val isTrimControl = controlStyle != DeckControlStyle.Button
     val selectedIcon = selectedIconChoice(icon)
     val selectedIconLabelRes = when {
         iconImageUri.startsWith(APP_ICON_URI_PREFIX) -> R.string.pick_app_icon
         iconImageUri.isNotBlank() -> R.string.pick_image
         else -> selectedIcon.labelRes
     }
-    val showIconInPreview = displayMode != DeckDisplayMode.KeywordOnly
+    val showIconInPreview = !isTrimControl && displayMode != DeckDisplayMode.KeywordOnly
     val showTitleInPreview = showTitleField
     val showSubtitleInput = actionPanel != EditActionPanel.AppCommand
     val showSubtitleInPreview = showSubtitleInput && showSubtitleField
     val showTextInPreview = showTitleInPreview || showSubtitleInPreview
     val selectedMedia = selectedMediaKeyChoice(payload)
+    val selectedTrimLowerMedia = selectedMediaKeyChoice(trimLowerPayload, MEDIA_VOLUME_DOWN)
+    val selectedTrimUpperMedia = selectedMediaKeyChoice(trimUpperPayload, MEDIA_VOLUME_UP)
     val selectedUtility = selectedUtilityChoice(payload)
     val canSave = (actionPanel == EditActionPanel.Widget || title.isNotBlank() || !showTitleInPreview) &&
         (!payloadRequired(actionType) || payload.isNotBlank())
     val configuration = LocalConfiguration.current
-    val dialogWidthFraction = if (configuration.screenWidthDp >= 900) 0.9f else 0.94f
+    val compactLandscapeDialog = configuration.screenHeightDp < 420
+    val dialogWidthFraction = when {
+        compactLandscapeDialog -> 0.98f
+        configuration.screenWidthDp >= 900 -> 0.9f
+        else -> 0.94f
+    }
+    val dialogHeightFraction = if (compactLandscapeDialog) 0.9f else 0.84f
+    val dialogPadding = if (compactLandscapeDialog) 10.dp else if (configuration.screenWidthDp >= 900) 14.dp else 12.dp
+    val dialogColumnSpacing = if (compactLandscapeDialog) 8.dp else 12.dp
+    val previewPaneWidth = if (compactLandscapeDialog) 176.dp else 208.dp
     fun shouldReplaceDefaultTitle(): Boolean {
         return title.isBlank() || title == "New key" || title == button.title
     }
@@ -11470,8 +13241,47 @@ private fun EditButtonDialog(
             displayMode = displayModeWith(showIcon = showIconInPreview, showText = newTitle.isNotBlank() || newSubtitle.isNotBlank())
         }
     }
+    fun applyControlStyle(style: DeckControlStyle) {
+        controlStyle = style
+        if (style == DeckControlStyle.Button) {
+            if (
+                actionPanel == EditActionPanel.KeyboardInput &&
+                (actionType == DeckActionType.MediaKey || payload.contains(TRIM_PAYLOAD_SEPARATOR))
+            ) {
+                actionType = DeckActionType.Hotkey
+                payload = "WIN+E"
+            }
+            return
+        }
+        icon = ICON_AUTO
+        iconImageUri = ""
+        displayMode = displayModeWith(showIcon = false, showText = showTextInPreview)
+        if (style == DeckControlStyle.JoyPad) {
+            actionType = DeckActionType.Hotkey
+            payload = joyPadPayload(joyPadPayloads)
+            setDefaultTitleIfAllowed(context.getString(R.string.control_style_joypad), "D-pad")
+            spanColumns = 2
+            spanRows = 2
+        } else {
+            actionType = DeckActionType.MediaKey
+            trimLowerPayload = trimLowerPayload.ifBlank { MEDIA_VOLUME_DOWN }
+            trimUpperPayload = trimUpperPayload.ifBlank { MEDIA_VOLUME_UP }
+            payload = trimPayload(trimLowerPayload, trimUpperPayload)
+            setDefaultTitleIfAllowed("Volume", "Trim")
+            if (style == DeckControlStyle.TrimSlider) {
+                spanColumns = 1
+                spanRows = 2
+            } else if (style == DeckControlStyle.TrimKnob || style == DeckControlStyle.InfiniteWheel) {
+                spanColumns = 2
+                spanRows = 2
+            }
+        }
+    }
     fun selectActionPanel(panel: EditActionPanel) {
         val previousActionType = actionType
+        if (panel != EditActionPanel.KeyboardInput && isTrimControl) {
+            controlStyle = DeckControlStyle.Button
+        }
         actionPanel = panel
         when (panel) {
             EditActionPanel.AppCommand -> {
@@ -11493,14 +13303,6 @@ private fun EditButtonDialog(
                 }
                 setDefaultTitleIfAllowed("Explorer", "Win+E")
             }
-            EditActionPanel.MediaKey -> {
-                actionType = DeckActionType.MediaKey
-                if (mediaKeyChoice(payload) == null) payload = MEDIA_MUTE
-                icon = ICON_AUTO
-                iconImageUri = ""
-                val media = mediaKeyChoice(payload) ?: mediaKeyChoice(MEDIA_MUTE)!!
-                setDefaultTitleIfAllowed(context.getString(media.labelRes))
-            }
             EditActionPanel.RunCommand -> {
                 actionType = DeckActionType.RunCommand
                 if (previousActionType != DeckActionType.RunCommand || payload.isBlank()) payload = "notepad"
@@ -11518,7 +13320,11 @@ private fun EditButtonDialog(
         }
     }
     fun editedButton(): DeckButton {
-        val savedPayload = if (actionType == DeckActionType.AppCommand) {
+        val savedPayload = if (controlStyle == DeckControlStyle.JoyPad) {
+            joyPadPayload(joyPadPayloads)
+        } else if (isTrimControl) {
+            trimPayload(trimLowerPayload, trimUpperPayload)
+        } else if (actionType == DeckActionType.AppCommand) {
             selectedAppCommand.name
         } else if (actionType == DeckActionType.MediaKey) {
             selectedMedia.payload
@@ -11532,15 +13338,16 @@ private fun EditButtonDialog(
         return button.copy(
             title = if (showTitleInPreview) title.trim() else "",
             subtitle = if (shouldHideSubtitleEditor(actionType, savedPayload) || !showSubtitleField) "" else subtitle.trim(),
-            icon = icon.trim(),
-            iconImageUri = iconImageUri,
+            icon = if (isTrimControl) "" else icon.trim(),
+            iconImageUri = if (isTrimControl) "" else iconImageUri,
             displayMode = displayModeWith(showIcon = showIconInPreview, showText = showTextInPreview),
             actionType = actionType,
             payload = savedPayload,
             spanColumns = spanColumns.coerceIn(1, MAX_BUTTON_SPAN_COLUMNS),
             spanRows = spanRows.coerceIn(1, MAX_BUTTON_SPAN_ROWS),
             appWidgetId = appWidgetId,
-            appWidgetTouchable = appWidgetTouchable
+            appWidgetTouchable = appWidgetTouchable,
+            controlStyle = controlStyle
         )
     }
 
@@ -11555,6 +13362,18 @@ private fun EditButtonDialog(
                 icon = ""
                 iconImageUri = appIconUri(app.packageName)
                 appPickerVisible = false
+            }
+        )
+    }
+    if (keyInputHelpVisible) {
+        AlertDialog(
+            onDismissRequest = { keyInputHelpVisible = false },
+            title = { Text(stringResource(R.string.key_input_help_title)) },
+            text = { Text(stringResource(R.string.key_input_help_body)) },
+            confirmButton = {
+                TextButton(onClick = { keyInputHelpVisible = false }) {
+                    Text(stringResource(R.string.confirm))
+                }
             }
         )
     }
@@ -11579,20 +13398,25 @@ private fun EditButtonDialog(
         val previewButton = button.copy(
             title = if (showTitleInPreview) title else "",
             subtitle = if (showSubtitleInPreview) subtitle else "",
-            icon = icon,
-            iconImageUri = iconImageUri,
+            icon = if (isTrimControl) "" else icon,
+            iconImageUri = if (isTrimControl) "" else iconImageUri,
             displayMode = displayModeWith(showIcon = showIconInPreview, showText = showTextInPreview),
             actionType = actionType,
-            payload = payload,
+            payload = when {
+                controlStyle == DeckControlStyle.JoyPad -> joyPadPayload(joyPadPayloads)
+                isTrimControl -> trimPayload(trimLowerPayload, trimUpperPayload)
+                else -> payload
+            },
             appWidgetId = appWidgetId,
             appWidgetTouchable = appWidgetTouchable,
             spanColumns = spanColumns,
-            spanRows = spanRows
+            spanRows = spanRows,
+            controlStyle = controlStyle
         )
         Surface(
             modifier = Modifier
                 .fillMaxWidth(dialogWidthFraction)
-                .fillMaxHeight(0.84f)
+                .fillMaxHeight(dialogHeightFraction)
                 .then(
                     if (consoleStyle) {
                         Modifier.consolePanelDropShadow(dialogShape, darkTheme)
@@ -11610,23 +13434,24 @@ private fun EditButtonDialog(
                 modifier = Modifier
                     .fillMaxWidth()
                     .border(1.dp, dialogBorder, dialogShape)
-                    .padding(if (consoleStyle) 14.dp else 12.dp)
+                    .padding(dialogPadding)
             ) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .weight(1f),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    horizontalArrangement = Arrangement.spacedBy(dialogColumnSpacing)
                 ) {
                     EditActionPanelRail(
                         selected = actionPanel,
                         accent = panelAccent,
                         consoleStyle = consoleStyle,
+                        compact = compactLandscapeDialog,
                         onSelected = ::selectActionPanel
                     )
 
                     KeyEditPreviewPane(
-                        modifier = Modifier.width(208.dp),
+                        modifier = Modifier.width(previewPaneWidth),
                         previewButton = previewButton,
                         status = status,
                         appWidgetHost = appWidgetHost,
@@ -11663,43 +13488,147 @@ private fun EditButtonDialog(
                                 )
                             }
                         }
+                        if (actionPanel == EditActionPanel.KeyboardInput) {
+                            item {
+                                KeyEditSettingRow(
+                                    icon = Icons.Filled.Keyboard,
+                                    title = stringResource(R.string.control_button_type),
+                                    consoleStyle = consoleStyle
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        ClassicEditDialogButton(
+                                            modifier = Modifier.weight(1f),
+                                            text = stringResource(R.string.control_style_button),
+                                            highlighted = controlStyle == DeckControlStyle.Button,
+                                            consoleStyle = consoleStyle,
+                                            onClick = { applyControlStyle(DeckControlStyle.Button) }
+                                        )
+                                        ClassicEditDialogButton(
+                                            modifier = Modifier.weight(1f),
+                                            text = stringResource(R.string.control_style_control_button),
+                                            highlighted = controlStyle != DeckControlStyle.Button,
+                                            consoleStyle = consoleStyle,
+                                            onClick = {
+                                                if (controlStyle == DeckControlStyle.Button) {
+                                                    applyControlStyle(DeckControlStyle.TrimSlider)
+                                                }
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+                            if (controlStyle != DeckControlStyle.Button) {
+                                item {
+                                    KeyEditSettingRow(
+                                        icon = Icons.Filled.SwapHoriz,
+                                        title = stringResource(R.string.control_style),
+                                        consoleStyle = consoleStyle
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            listOf(
+                                                DeckControlStyle.TrimSlider,
+                                                DeckControlStyle.TrimKnob,
+                                                DeckControlStyle.InfiniteWheel,
+                                                DeckControlStyle.JoyPad
+                                            ).forEach { style ->
+                                                ClassicEditDialogButton(
+                                                    modifier = Modifier.weight(1f),
+                                                    text = stringResource(style.labelRes),
+                                                    highlighted = controlStyle == style,
+                                                    consoleStyle = consoleStyle,
+                                                    onClick = { applyControlStyle(style) }
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
                         item {
                             KeyEditSettingRow(
                                 icon = Icons.Filled.TextFields,
                                 title = editActionValueLabel(actionPanel),
                                 consoleStyle = consoleStyle
                             ) {
-                                if (actionPanel == EditActionPanel.MediaKey) {
-                                    ExposedDropdownMenuBox(
-                                        expanded = mediaMenuExpanded,
-                                        onExpandedChange = { mediaMenuExpanded = !mediaMenuExpanded }
-                                    ) {
-                                        CompactKeyEditTextField(
-                                            modifier = Modifier
-                                                .menuAnchor()
-                                                .fillMaxWidth(),
-                                            value = stringResource(selectedMedia.labelRes),
-                                            onValueChange = {},
-                                            readOnly = true,
-                                            trailingIcon = {
-                                                ExposedDropdownMenuDefaults.TrailingIcon(expanded = mediaMenuExpanded)
-                                            }
-                                        )
-                                        ExposedDropdownMenu(
-                                            expanded = mediaMenuExpanded,
-                                            onDismissRequest = { mediaMenuExpanded = false }
+                                if (actionPanel == EditActionPanel.KeyboardInput && controlStyle == DeckControlStyle.JoyPad) {
+                                    JoyPadPayloadEditor(
+                                        payloads = joyPadPayloads,
+                                        consoleStyle = consoleStyle,
+                                        onChange = { updated ->
+                                            joyPadPayloads = updated
+                                            payload = joyPadPayload(updated)
+                                        }
+                                    )
+                                } else if (actionPanel == EditActionPanel.KeyboardInput && isTrimControl) {
+                                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        ExposedDropdownMenuBox(
+                                            expanded = trimUpperMediaMenuExpanded,
+                                            onExpandedChange = { trimUpperMediaMenuExpanded = !trimUpperMediaMenuExpanded }
                                         ) {
-                                            mediaKeyChoices().forEach { item ->
-                                                DropdownMenuItem(
-                                                    text = { Text(stringResource(item.labelRes)) },
-                                                    onClick = {
-                                                        payload = item.payload
-                                                        icon = ICON_AUTO
-                                                        iconImageUri = ""
-                                                        setDefaultTitleIfAllowed(context.getString(item.labelRes))
-                                                        mediaMenuExpanded = false
-                                                    }
-                                                )
+                                            CompactKeyEditTextField(
+                                                modifier = Modifier
+                                                    .menuAnchor()
+                                                    .fillMaxWidth(),
+                                                value = stringResource(selectedTrimUpperMedia.labelRes),
+                                                onValueChange = {},
+                                                readOnly = true,
+                                                label = stringResource(R.string.trim_upper_action),
+                                                trailingIcon = {
+                                                    ExposedDropdownMenuDefaults.TrailingIcon(expanded = trimUpperMediaMenuExpanded)
+                                                }
+                                            )
+                                            ExposedDropdownMenu(
+                                                expanded = trimUpperMediaMenuExpanded,
+                                                onDismissRequest = { trimUpperMediaMenuExpanded = false }
+                                            ) {
+                                                mediaKeyChoices().forEach { item ->
+                                                    DropdownMenuItem(
+                                                        text = { Text(stringResource(item.labelRes)) },
+                                                        onClick = {
+                                                            trimUpperPayload = item.payload
+                                                            payload = trimPayload(trimLowerPayload, trimUpperPayload)
+                                                            trimUpperMediaMenuExpanded = false
+                                                        }
+                                                    )
+                                                }
+                                            }
+                                        }
+                                        ExposedDropdownMenuBox(
+                                            expanded = trimLowerMediaMenuExpanded,
+                                            onExpandedChange = { trimLowerMediaMenuExpanded = !trimLowerMediaMenuExpanded }
+                                        ) {
+                                            CompactKeyEditTextField(
+                                                modifier = Modifier
+                                                    .menuAnchor()
+                                                    .fillMaxWidth(),
+                                                value = stringResource(selectedTrimLowerMedia.labelRes),
+                                                onValueChange = {},
+                                                readOnly = true,
+                                                label = stringResource(R.string.trim_lower_action),
+                                                trailingIcon = {
+                                                    ExposedDropdownMenuDefaults.TrailingIcon(expanded = trimLowerMediaMenuExpanded)
+                                                }
+                                            )
+                                            ExposedDropdownMenu(
+                                                expanded = trimLowerMediaMenuExpanded,
+                                                onDismissRequest = { trimLowerMediaMenuExpanded = false }
+                                            ) {
+                                                mediaKeyChoices().forEach { item ->
+                                                    DropdownMenuItem(
+                                                        text = { Text(stringResource(item.labelRes)) },
+                                                        onClick = {
+                                                            trimLowerPayload = item.payload
+                                                            payload = trimPayload(trimLowerPayload, trimUpperPayload)
+                                                            trimLowerMediaMenuExpanded = false
+                                                        }
+                                                    )
+                                                }
                                             }
                                         }
                                     }
@@ -11811,6 +13740,66 @@ private fun EditButtonDialog(
                                             )
                                         }
                                     }
+                                } else if (actionPanel == EditActionPanel.KeyboardInput) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        CompactKeyEditTextField(
+                                            modifier = Modifier.weight(1f),
+                                            value = payload,
+                                            onValueChange = {
+                                                actionType = DeckActionType.Hotkey
+                                                payload = it
+                                            },
+                                            enabled = true,
+                                            label = ""
+                                        )
+                                        Box {
+                                            OutlinedButton(
+                                                modifier = Modifier.height(48.dp),
+                                                shape = RoundedCornerShape(8.dp),
+                                                contentPadding = PaddingValues(horizontal = 12.dp),
+                                                onClick = { mediaMenuExpanded = true }
+                                            ) {
+                                                Text(
+                                                    text = stringResource(R.string.edit_value_media),
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            }
+                                            DropdownMenu(
+                                                expanded = mediaMenuExpanded,
+                                                onDismissRequest = { mediaMenuExpanded = false }
+                                            ) {
+                                                mediaKeyChoices().forEach { item ->
+                                                    DropdownMenuItem(
+                                                        text = { Text(stringResource(item.labelRes)) },
+                                                        onClick = {
+                                                            actionType = DeckActionType.MediaKey
+                                                            payload = item.payload
+                                                            controlStyle = DeckControlStyle.Button
+                                                            icon = ICON_AUTO
+                                                            iconImageUri = ""
+                                                            setDefaultTitleIfAllowed(context.getString(item.labelRes))
+                                                            mediaMenuExpanded = false
+                                                        }
+                                                    )
+                                                }
+                                            }
+                                        }
+                                        IconButton(
+                                            modifier = Modifier.size(48.dp),
+                                            onClick = { keyInputHelpVisible = true }
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Filled.Help,
+                                                contentDescription = stringResource(R.string.key_input_help_title),
+                                                tint = colors.textSecondary
+                                            )
+                                        }
+                                    }
                                 } else {
                                     CompactKeyEditTextField(
                                         modifier = Modifier.fillMaxWidth(),
@@ -11849,7 +13838,7 @@ private fun EditButtonDialog(
                                 }
                             }
                         }
-                        if (actionPanel != EditActionPanel.Widget) {
+                        if (actionPanel != EditActionPanel.Widget && !isTrimControl) {
                             item {
                                 KeyEditSettingRow(
                                     icon = if (iconImageUri.isBlank()) Icons.Filled.Keyboard else Icons.Filled.Image,
@@ -12430,13 +14419,14 @@ private fun EditActionPanelRail(
     selected: EditActionPanel,
     accent: Color,
     consoleStyle: Boolean = false,
+    compact: Boolean = false,
     onSelected: (EditActionPanel) -> Unit
 ) {
     val colors = LocalDeckThemeColors.current
     val railShape = RoundedCornerShape(if (consoleStyle) 16.dp else 12.dp)
     Column(
         modifier = Modifier
-            .width(88.dp)
+            .width(if (compact) 76.dp else 88.dp)
             .fillMaxHeight()
             .clip(railShape)
             .background(if (consoleStyle) colors.consoleButtonDefault.copy(alpha = 0.72f) else colors.toggleBackground.copy(alpha = 0.46f))
@@ -12446,15 +14436,15 @@ private fun EditActionPanelRail(
                 railShape
             )
             .verticalScroll(rememberScrollState())
-            .padding(6.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp)
+            .padding(if (compact) 5.dp else 6.dp),
+        verticalArrangement = Arrangement.spacedBy(if (compact) 5.dp else 6.dp)
     ) {
         EditActionPanel.values().forEach { panel ->
             val active = panel == selected
             Surface(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(78.dp),
+                    .height(if (compact) 66.dp else 78.dp),
                 shape = RoundedCornerShape(10.dp),
                 color = if (active) {
                     if (consoleStyle) accent else accent.copy(alpha = if (isSystemInDarkTheme()) 0.30f else 0.22f)
@@ -12481,12 +14471,12 @@ private fun EditActionPanelRail(
                         imageVector = editActionPanelIcon(panel),
                         contentDescription = null,
                         tint = if (active) Color.White else colors.textSecondary,
-                        modifier = Modifier.size(28.dp)
+                        modifier = Modifier.size(if (compact) 24.dp else 28.dp)
                     )
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(if (compact) 5.dp else 8.dp))
                     Text(
                         text = stringResource(panel.labelRes),
-                        style = MaterialTheme.typography.labelMedium,
+                        style = if (compact) MaterialTheme.typography.labelSmall else MaterialTheme.typography.labelMedium,
                         fontWeight = FontWeight.SemiBold,
                         color = if (active && consoleStyle) Color.White else if (active) colors.textPrimary else colors.textSecondary,
                         maxLines = 1,
@@ -12530,7 +14520,7 @@ private fun KeyEditPreviewPane(
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f)
-                .padding(top = 24.dp)
+                .padding(top = 10.dp)
         ) {
             Box(
                 modifier = Modifier
@@ -12551,14 +14541,16 @@ private fun KeyEditPreviewPane(
                 ) {
                     val spanColumns = previewButton.spanColumns.coerceAtLeast(1)
                     val spanRows = previewButton.spanRows.coerceAtLeast(1)
+                    val availableWidth = maxWidth * 0.92f
+                    val availableHeight = maxHeight * 0.92f
                     val previewWidth: Dp
                     val previewHeight: Dp
-                    if (maxWidth / maxHeight > previewRatio) {
-                        previewHeight = maxHeight
-                        previewWidth = maxHeight * previewRatio
+                    if (availableWidth / availableHeight > previewRatio) {
+                        previewHeight = availableHeight
+                        previewWidth = availableHeight * previewRatio
                     } else {
-                        previewWidth = maxWidth
-                        previewHeight = maxWidth / previewRatio
+                        previewWidth = availableWidth
+                        previewHeight = availableWidth / previewRatio
                     }
                     val previewCellSize = previewWidth / spanColumns.toFloat()
                     DeckKey(
@@ -12575,7 +14567,7 @@ private fun KeyEditPreviewPane(
                         slot = 0,
                         cellSize = previewCellSize,
                         spacing = 0.dp,
-                        contentScale = 1.12f,
+                        contentScale = 0.98f,
                         onPressed = {},
                         onPressFeedback = {},
                         onReleaseFeedback = {},
@@ -12588,7 +14580,7 @@ private fun KeyEditPreviewPane(
                 text = stringResource(R.string.preview),
                 modifier = Modifier
                     .align(Alignment.TopStart)
-                    .offset(x = 0.dp, y = (-22).dp)
+                    .offset(x = 0.dp, y = (-18).dp)
                     .zIndex(1f)
                     .padding(horizontal = 2.dp),
                 style = MaterialTheme.typography.titleSmall,
@@ -12662,6 +14654,7 @@ private fun KeyEditSettingRow(
     content: @Composable () -> Unit
 ) {
     val colors = LocalDeckThemeColors.current
+    val compact = LocalConfiguration.current.screenHeightDp < 420
     val shape = RoundedCornerShape(if (consoleStyle) 14.dp else 10.dp)
     Row(
         modifier = Modifier
@@ -12673,20 +14666,20 @@ private fun KeyEditSettingRow(
                 if (consoleStyle) Color.White.copy(alpha = if (isSystemInDarkTheme()) 0.10f else 0.38f) else colors.cardBorder,
                 shape
             )
-            .padding(horizontal = 10.dp, vertical = 8.dp),
+            .padding(horizontal = if (compact) 8.dp else 10.dp, vertical = if (compact) 6.dp else 8.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp)
+        horizontalArrangement = Arrangement.spacedBy(if (compact) 8.dp else 10.dp)
     ) {
         SettingsIconTile(icon, if (consoleStyle) colors.consoleButtonFeatured else ClassicButtonAccent)
         Row(
-            modifier = Modifier.width(92.dp),
+            modifier = Modifier.width(if (compact) 78.dp else 92.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Text(
                 modifier = Modifier.weight(1f),
                 text = title,
-                style = MaterialTheme.typography.titleSmall,
+                style = if (compact) MaterialTheme.typography.labelLarge else MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.SemiBold,
                 color = colors.textPrimary,
                 maxLines = 1,
@@ -12699,6 +14692,96 @@ private fun KeyEditSettingRow(
             contentAlignment = Alignment.CenterEnd
         ) {
             content()
+        }
+    }
+}
+
+@Composable
+private fun JoyPadPayloadEditor(
+    payloads: JoyPadPayloads,
+    consoleStyle: Boolean,
+    onChange: (JoyPadPayloads) -> Unit
+) {
+    val directions = if (payloads.eightWay) joyPadAllDirections else joyPadCardinalDirections
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            ClassicEditDialogButton(
+                modifier = Modifier.weight(1f),
+                text = stringResource(R.string.joypad_mode_4_way),
+                highlighted = !payloads.eightWay,
+                consoleStyle = consoleStyle,
+                onClick = { onChange(payloads.withEightWay(false)) }
+            )
+            ClassicEditDialogButton(
+                modifier = Modifier.weight(1f),
+                text = stringResource(R.string.joypad_mode_8_way),
+                highlighted = payloads.eightWay,
+                consoleStyle = consoleStyle,
+                onClick = { onChange(payloads.withEightWay(true)) }
+            )
+        }
+        directions.chunked(2).forEach { rowDirections ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                rowDirections.forEach { direction ->
+                    JoyPadDirectionPayloadEditor(
+                        modifier = Modifier.weight(1f),
+                        direction = direction,
+                        action = payloads.action(direction),
+                        onChange = { press, release ->
+                            onChange(payloads.withDirection(direction, press, release))
+                        }
+                    )
+                }
+                if (rowDirections.size == 1) {
+                    Spacer(modifier = Modifier.weight(1f))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun JoyPadDirectionPayloadEditor(
+    modifier: Modifier = Modifier,
+    direction: JoyPadDirection,
+    action: JoyPadActionPayloads,
+    onChange: (String, String) -> Unit
+) {
+    Column(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Text(
+            text = stringResource(direction.labelRes),
+            style = MaterialTheme.typography.labelMedium,
+            color = LocalDeckThemeColors.current.textSecondary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            CompactKeyEditTextField(
+                modifier = Modifier.weight(1f),
+                value = action.press,
+                onValueChange = { onChange(it, action.release) },
+                label = stringResource(R.string.joypad_press_action),
+                enabled = true
+            )
+            CompactKeyEditTextField(
+                modifier = Modifier.weight(1f),
+                value = action.release,
+                onValueChange = { onChange(action.press, it) },
+                label = stringResource(R.string.joypad_release_action),
+                enabled = true
+            )
         }
     }
 }
@@ -12842,7 +14925,7 @@ private fun editPanelForButton(button: DeckButton): EditActionPanel {
         DeckActionType.PreviousPage,
         DeckActionType.NextPage,
         DeckActionType.AppCommand -> EditActionPanel.AppCommand
-        DeckActionType.MediaKey -> EditActionPanel.MediaKey
+        DeckActionType.MediaKey,
         DeckActionType.Hotkey,
         DeckActionType.Text -> EditActionPanel.KeyboardInput
         DeckActionType.RunCommand -> EditActionPanel.RunCommand
@@ -12855,7 +14938,6 @@ private fun editActionPanelIcon(panel: EditActionPanel): ImageVector {
         EditActionPanel.AppCommand -> Icons.Filled.Settings
         EditActionPanel.KeyboardInput -> Icons.Filled.Keyboard
         EditActionPanel.Widget -> Icons.Filled.Apps
-        EditActionPanel.MediaKey -> Icons.Filled.PlayArrow
         EditActionPanel.RunCommand -> Icons.Filled.Apps
         EditActionPanel.Utility -> Icons.Filled.Apps
     }
@@ -12867,7 +14949,6 @@ private fun editActionValueLabel(panel: EditActionPanel): String {
         EditActionPanel.AppCommand -> stringResource(R.string.edit_value_app)
         EditActionPanel.KeyboardInput -> stringResource(R.string.edit_value_keyboard)
         EditActionPanel.Widget -> stringResource(R.string.edit_value_widget)
-        EditActionPanel.MediaKey -> stringResource(R.string.edit_value_media)
         EditActionPanel.RunCommand -> stringResource(R.string.edit_value_command)
         EditActionPanel.Utility -> stringResource(R.string.edit_value_utility)
     }
@@ -12924,6 +15005,7 @@ private fun ClassicEditDialogButton(
     onClick: () -> Unit
 ) {
     val colors = LocalDeckThemeColors.current
+    val compact = LocalConfiguration.current.screenHeightDp < 420
     val background = if (consoleStyle) {
         if (highlighted) colors.consoleButtonFeatured else colors.consoleButtonDefault
     } else if (highlighted) ClassicButtonAccent else colors.toggleBackground.copy(alpha = 0.48f)
@@ -12939,7 +15021,7 @@ private fun ClassicEditDialogButton(
             disabledContainerColor = if (consoleStyle) colors.consoleButtonDefault.copy(alpha = 0.38f) else colors.toggleBackground.copy(alpha = 0.25f),
             disabledContentColor = colors.textSecondary.copy(alpha = 0.45f)
         ),
-        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp)
+        contentPadding = PaddingValues(horizontal = if (compact) 8.dp else 20.dp, vertical = if (compact) 9.dp else 12.dp)
     ) {
         if (icon != null) {
             Icon(
@@ -12951,7 +15033,7 @@ private fun ClassicEditDialogButton(
         }
         Text(
             text = text,
-            style = MaterialTheme.typography.titleSmall,
+            style = if (compact) MaterialTheme.typography.labelMedium else MaterialTheme.typography.titleSmall,
             fontWeight = FontWeight.SemiBold,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
@@ -13122,6 +15204,7 @@ private fun MobileDeckPreview() {
                 onPageSwipe = {},
                 onAddPage = {},
                 onButtonPressed = {},
+                onTrimStep = { _, _ -> },
                 onButtonEdit = {},
                 onButtonMoved = { _, _ -> },
                 onEmptySlotPressed = {}
@@ -13181,6 +15264,7 @@ private fun ConsoleDeckPreviewContent() {
                 onSettings = {},
                 onPageSwipe = {},
                 onButtonPressed = {},
+                onTrimStep = { _, _ -> },
                 onButtonTouchStarted = {},
                 onButtonTouchEnded = {}
             )

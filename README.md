@@ -19,6 +19,9 @@ MobileDeck turns an Android phone into a Bluetooth HID macro deck for a Windows 
 - Console UI with a separate layout editor for sidebar width, row height, row order, and button swap editing
 - Display modes for icon, icon + keyword, or keyword-only keys
 - Icon picker and media-key target picker in key editing
+- Export and import deck bundles, including user-selected icon/background images for device-to-device transfer
+- Theme-specific font size options
+- Touch control keys for trim sliders, trim knobs, infinite wheels, and joypads
 
 ## Install
 
@@ -49,6 +52,7 @@ If Windows keeps an old HID descriptor cached after an update, remove the paired
 - Reset the first page from Layout editor while keeping the title area and Settings key.
 - In key editing, choose `App command` to assign Settings, Bluetooth status, Previous page, or Next page.
 - In key editing, choose `Media key` to pick the exact media function from a dropdown.
+- In key editing, choose `Control key` to create trim sliders, trim knobs, infinite wheels, or joypads for repeated directional input.
 - Choose whether a key shows only an icon, an icon with keyword text, or keyword text only.
 
 ## Page Controls
@@ -66,9 +70,10 @@ If Windows keeps an old HID descriptor cached after an update, remove the paired
 - Row height is stored by row position, while row drag changes row order.
 - Button drag editing swaps buttons between slots instead of changing row sizes.
 - New console pages start with a 3x3 placeholder layout.
+- Console buttons adapt their visual layout for wide, square, and tall key shapes.
 
 ## Notes
 
 - Text input through Bluetooth HID depends on the current Windows keyboard layout and IME state.
 - Reliable exact text input, clipboard paste, direct app launching, and Windows icon extraction are planned as future Windows Companion features.
-- Diagnostics are available from Settings.
+- Diagnostics are available from debug builds only.
