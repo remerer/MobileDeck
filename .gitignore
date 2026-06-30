@@ -15,3 +15,12 @@
 .externalNativeBuild
 .cxx
 local.properties
+/design/*
+!/design/
+!/design/MOBILEDECK_DESIGN_TOKENS.md
+AGENTS.md
+IMPLEMENTATION_TASKS.md
+MULTI_AGENT_WORKFLOW.md
+.agents/
+docs/multi_agent_state.yaml
+docs/agent_reports/

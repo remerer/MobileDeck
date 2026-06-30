@@ -109,6 +109,26 @@ class HidKeyboardManager(
         0x75, 0x10,
         0x95, 0x01,
         0x81, 0x00,
+        0xC0,
+        0x05, 0x01,
+        0x09, 0x05,
+        0xA1, 0x01,
+        0x85, JOYSTICK_REPORT_ID,
+        0x09, 0x30,
+        0x09, 0x31,
+        0x15, 0x81,
+        0x25, 0x7F,
+        0x75, 0x08,
+        0x95, 0x02,
+        0x81, 0x02,
+        0x05, 0x09,
+        0x19, 0x01,
+        0x29, 0x08,
+        0x15, 0x00,
+        0x25, 0x01,
+        0x75, 0x01,
+        0x95, 0x08,
+        0x81, 0x02,
         0xC0
     ).map { it.toByte() }.toByteArray()
 
@@ -317,8 +337,35 @@ class HidKeyboardManager(
     fun sendHotkey(payload: String): Boolean {
         val device = host ?: return false
         val hid = hidDevice ?: return false
-        val report = hotkeyReport(payload) ?: return false
-        return sendReportTap(hid, device, KEYBOARD_REPORT_ID, report, KEYBOARD_REPORT_SIZE)
+        val reports = hotkeyReports(payload)
+        if (reports.isEmpty()) return false
+        var sentAny = false
+        reports.forEach { report ->
+            sentAny = sendReportTap(hid, device, KEYBOARD_REPORT_ID, report, KEYBOARD_REPORT_SIZE) || sentAny
+        }
+        return sentAny
+    }
+
+    @SuppressLint("MissingPermission")
+    fun sendHotkeyState(payloads: Collection<String>): Boolean {
+        val device = host ?: return false
+        val hid = hidDevice ?: return false
+        val report = combinedHotkeyReport(payloads) ?: return false
+        return sendReportState(hid, device, KEYBOARD_REPORT_ID, report)
+    }
+
+    @SuppressLint("MissingPermission")
+    fun releaseKeyboardKeys(): Boolean {
+        val device = host ?: return false
+        val hid = hidDevice ?: return false
+        return sendReportState(hid, device, KEYBOARD_REPORT_ID, ByteArray(KEYBOARD_REPORT_SIZE))
+    }
+
+    @SuppressLint("MissingPermission")
+    fun sendJoystickState(x: Double, y: Double, buttons: Int = 0): Boolean {
+        val device = host ?: return false
+        val hid = hidDevice ?: return false
+        return sendReportState(hid, device, JOYSTICK_REPORT_ID, joystickReport(x, y, buttons))
     }
 
     @SuppressLint("MissingPermission")
@@ -417,6 +464,20 @@ class HidKeyboardManager(
         return pressed && released
     }
 
+    private fun sendReportState(
+        hid: BluetoothHidDevice,
+        device: BluetoothDevice,
+        reportId: Int,
+        report: ByteArray
+    ): Boolean {
+        val sent = hid.sendReport(device, reportId, report)
+        Log.d(
+            TAG,
+            "sendReportState host=${device.safeName()} id=$reportId sent=$sent data=${report.toHex()}"
+        )
+        return sent
+    }
+
     private fun ByteArray.toHex(): String {
         return joinToString(" ") { byte -> "%02X".format(byte) }
     }
@@ -428,10 +489,12 @@ class HidKeyboardManager(
     companion object {
         const val KEYBOARD_REPORT_ID = 1
         const val MEDIA_REPORT_ID = 2
+        const val JOYSTICK_REPORT_ID = 3
         private const val TAG = "MobileDeckHid"
         private const val DEVICE_NAME = "MobileDeck Keyboard"
         private const val KEYBOARD_REPORT_SIZE = 8
         private const val MEDIA_REPORT_SIZE = 2
+        private const val JOYSTICK_REPORT_SIZE = 3
         private const val DEFAULT_KEY_HOLD_MS = 30L
         private const val RUN_COMMAND_KEY_HOLD_MS = 6L
         private const val RUN_COMMAND_DIALOG_DELAY_MS = 120L
@@ -454,23 +517,119 @@ class HidKeyboardManager(
         )
 
         fun hotkeyReport(payload: String): ByteArray? {
+            return hotkeyReports(payload).firstOrNull()
+        }
+
+        fun hotkeyReports(payload: String): List<ByteArray> {
+            val reports = mutableListOf<ByteArray>()
             var modifier = 0
             val keys = mutableListOf<Int>()
-            payload.split("+")
-                .map { it.trim().uppercase(Locale.US) }
-                .filter { it.isNotEmpty() }
-                .forEach { token ->
-                    when (token) {
-                        "CTRL", "CONTROL" -> modifier = modifier or MOD_LEFT_CTRL
-                        "SHIFT" -> modifier = modifier or MOD_LEFT_SHIFT
-                        "ALT", "OPTION" -> modifier = modifier or MOD_LEFT_ALT
-                        "WIN", "WINDOWS", "CMD", "META", "GUI" -> modifier = modifier or MOD_LEFT_GUI
-                        else -> hidKeyCode(token)?.let { keys += it }
+
+            fun flushCombo() {
+                if (modifier != 0 || keys.isNotEmpty()) {
+                    reports += keyboardReport(modifier, keys)
+                }
+                modifier = 0
+                keys.clear()
+            }
+
+            fun appendText(text: String) {
+                flushCombo()
+                text.forEach { char ->
+                    charReport(char)?.let { reports += it }
+                }
+            }
+
+            parseHotkeyInput(payload).forEach { token ->
+                when (token) {
+                    HotkeyInputToken.Plus -> Unit
+                    HotkeyInputToken.Comma -> flushCombo()
+                    is HotkeyInputToken.Text -> appendText(token.value)
+                    is HotkeyInputToken.Key -> {
+                        when (val normalized = token.value.trim().uppercase(Locale.US)) {
+                            "CTRL", "CONTROL" -> modifier = modifier or MOD_LEFT_CTRL
+                            "SHIFT" -> modifier = modifier or MOD_LEFT_SHIFT
+                            "ALT", "OPTION" -> modifier = modifier or MOD_LEFT_ALT
+                            "WIN", "WINDOWS", "CMD", "META", "GUI" -> modifier = modifier or MOD_LEFT_GUI
+                            else -> {
+                                val keyCode = hidKeyCode(normalized)
+                                if (keyCode != null) {
+                                    keys += keyCode
+                                } else {
+                                    appendText(token.value)
+                                }
+                            }
+                        }
                     }
                 }
+            }
+            flushCombo()
+            return reports
+        }
 
-            if (modifier == 0 && keys.isEmpty()) return null
+        fun combinedHotkeyReport(payloads: Collection<String>): ByteArray? {
+            var modifier = 0
+            val keys = mutableListOf<Int>()
+            payloads.forEach { payload ->
+                val report = hotkeyReports(payload).firstOrNull() ?: return null
+                modifier = modifier or (report[0].toInt() and 0xFF)
+                for (index in 2 until KEYBOARD_REPORT_SIZE) {
+                    val key = report[index].toInt() and 0xFF
+                    if (key != 0 && key !in keys) keys += key
+                }
+            }
             return keyboardReport(modifier, keys)
+        }
+
+        private sealed interface HotkeyInputToken {
+            object Plus : HotkeyInputToken
+            object Comma : HotkeyInputToken
+            data class Key(val value: String) : HotkeyInputToken
+            data class Text(val value: String) : HotkeyInputToken
+        }
+
+        private fun parseHotkeyInput(payload: String): List<HotkeyInputToken> {
+            val result = mutableListOf<HotkeyInputToken>()
+            val token = StringBuilder()
+            var quoted = false
+            var tokenQuoted = false
+
+            fun flushToken() {
+                val raw = token.toString()
+                val value = if (tokenQuoted) raw else raw.trim()
+                if (value.isNotBlank()) {
+                    result += if (tokenQuoted) HotkeyInputToken.Text(value) else HotkeyInputToken.Key(value)
+                }
+                token.clear()
+                tokenQuoted = false
+            }
+
+            var index = 0
+            while (index < payload.length) {
+                val char = payload[index]
+                when {
+                    char == '"' && quoted && payload.getOrNull(index + 1) == '"' -> {
+                        token.append('"')
+                        index += 1
+                    }
+                    char == '"' -> {
+                        if (!quoted && token.isBlank()) tokenQuoted = true
+                        quoted = !quoted
+                    }
+                    !quoted && char == '+' -> {
+                        flushToken()
+                        result += HotkeyInputToken.Plus
+                    }
+                    !quoted && char == ',' -> {
+                        flushToken()
+                        result += HotkeyInputToken.Comma
+                    }
+                    else -> token.append(char)
+                }
+                index += 1
+            }
+            flushToken()
+            return result
         }
 
         fun charReport(char: Char): ByteArray? {
@@ -550,6 +709,17 @@ class HidKeyboardManager(
                 (usage and 0xFF).toByte(),
                 ((usage shr 8) and 0xFF).toByte()
             )
+        }
+
+        fun joystickReport(x: Double, y: Double, buttons: Int = 0): ByteArray {
+            fun axis(value: Double): Byte {
+                return (value.coerceIn(-1.0, 1.0) * 127.0).toInt().toByte()
+            }
+            return ByteArray(JOYSTICK_REPORT_SIZE).also { report ->
+                report[0] = axis(x)
+                report[1] = axis(y)
+                report[2] = (buttons and 0xFF).toByte()
+            }
         }
 
         private fun keyboardReport(modifier: Int, keys: List<Int>): ByteArray {

@@ -6,6 +6,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import org.json.JSONArray
 import org.json.JSONObject
+import java.util.UUID
 
 fun Context.isNightMode(): Boolean {
     return (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
@@ -131,12 +132,14 @@ fun loadDeckPages(context: Context): List<DeckPageConfig> {
         val pages = List(array.length()) { index ->
             val item = array.getJSONObject(index)
             val buttons = item.optJSONArray("buttons") ?: JSONArray()
+            val classicButtons = item.optJSONArray("classicButtons") ?: buttons
+            val consoleButtons = item.optJSONArray("consoleButtons") ?: buttons
             DeckPageConfig(
                 id = item.getInt("id"),
                 name = item.optString("name", "Page ${index + 1}"),
-                buttons = List(buttons.length()) { buttonIndex ->
-                    decodeDeckButton(buttons.getJSONObject(buttonIndex), buttonIndex)
-                }
+                buttons = decodeDeckButtons(buttons),
+                classicButtons = decodeDeckButtons(classicButtons),
+                consoleButtons = decodeDeckButtons(consoleButtons)
             )
         }
         if (pages.isEmpty()) {
@@ -160,15 +163,13 @@ fun defaultDeckPages(
 fun saveDeckPages(context: Context, pages: List<DeckPageConfig>) {
     val array = JSONArray()
     pages.forEach { page ->
-        val buttons = JSONArray()
-        page.buttons.forEach { button ->
-            buttons.put(encodeDeckButton(button))
-        }
         array.put(
             JSONObject()
                 .put("id", page.id)
                 .put("name", page.name)
-                .put("buttons", buttons)
+                .put("buttons", encodeDeckButtons(page.buttons))
+                .put("classicButtons", encodeDeckButtons(page.classicButtons))
+                .put("consoleButtons", encodeDeckButtons(page.consoleButtons))
         )
     }
     context.deckPrefs().edit().putString(PREF_PAGES, array.toString()).apply()
@@ -288,6 +289,7 @@ fun saveConsolePanelOptions(context: Context, options: ConsolePanelOptions) {
 }
 
 fun encodeDeckButton(button: DeckButton): JSONObject {
+    val companionControl = button.companionControl.trim()
     return JSONObject()
         .put("id", button.id)
         .put("title", button.title)
@@ -303,10 +305,31 @@ fun encodeDeckButton(button: DeckButton): JSONObject {
         .put("spanRows", button.spanRows)
         .put("appWidgetId", button.appWidgetId)
         .put("appWidgetTouchable", button.appWidgetTouchable)
-        .put("controlStyle", button.controlStyle.name)
+        .put("controlStyle", encodedControlStyleName(button))
+        .also { root ->
+            if (companionControl.isNotBlank()) {
+                root.put("companionControl", JSONObject(companionControl))
+            }
+        }
+}
+
+fun encodeDeckButtons(buttons: List<DeckButton>): JSONArray {
+    val array = JSONArray()
+    buttons.forEach { button ->
+        array.put(encodeDeckButton(button))
+    }
+    return array
+}
+
+fun decodeDeckButtons(buttons: JSONArray): List<DeckButton> {
+    return List(buttons.length()) { buttonIndex ->
+        decodeDeckButton(buttons.getJSONObject(buttonIndex), buttonIndex)
+    }
 }
 
 fun decodeDeckButton(item: JSONObject, fallbackPosition: Int): DeckButton {
+    val controlStyleRaw = item.optString("controlStyle", DeckControlStyle.Button.name)
+    val companionControl = item.optJSONObject("companionControl")
     return DeckButton(
         id = item.getInt("id"),
         title = item.getString("title"),
@@ -326,10 +349,35 @@ fun decodeDeckButton(item: JSONObject, fallbackPosition: Int): DeckButton {
         spanRows = item.optInt("spanRows", 1).coerceIn(1, MAX_BUTTON_SPAN_ROWS),
         appWidgetId = item.optInt("appWidgetId", INVALID_APP_WIDGET_ID),
         appWidgetTouchable = item.optBoolean("appWidgetTouchable", true),
-        controlStyle = runCatching {
-            DeckControlStyle.valueOf(item.optString("controlStyle"))
-        }.getOrDefault(DeckControlStyle.Button)
+        controlStyle = decodedControlStyle(controlStyleRaw, companionControl),
+        controlStyleRaw = controlStyleRaw.ifBlank { DeckControlStyle.Button.name },
+        companionControl = companionControl?.toString().orEmpty()
     )
+}
+
+private fun encodedControlStyleName(button: DeckButton): String {
+    val raw = button.controlStyleRaw.trim()
+    val parsedRaw = runCatching { DeckControlStyle.valueOf(raw) }.getOrNull()
+    return if (raw.isNotBlank() && (parsedRaw == null || parsedRaw == button.controlStyle)) {
+        raw
+    } else {
+        button.controlStyle.name
+    }
+}
+
+private fun decodedControlStyle(raw: String, companionControl: JSONObject?): DeckControlStyle {
+    runCatching { DeckControlStyle.valueOf(raw) }.getOrNull()?.let { return it }
+    return when {
+        raw == "CompanionSlider" -> DeckControlStyle.TrimSlider
+        raw == "CompanionToggle" -> DeckControlStyle.CompanionToggle
+        companionControl?.optString("kind") == "Slider" -> DeckControlStyle.TrimSlider
+        companionControl?.optString("kind") == "Knob" -> DeckControlStyle.TrimKnob
+        companionControl?.optString("kind") == "Wheel" -> DeckControlStyle.InfiniteWheel
+        companionControl?.optString("kind") == "DPad" -> DeckControlStyle.JoyPad
+        companionControl?.optString("kind") == "AnalogStick" -> DeckControlStyle.AnalogStick
+        companionControl?.optString("kind") == "Toggle" -> DeckControlStyle.CompanionToggle
+        else -> DeckControlStyle.Button
+    }
 }
 
 fun normalizeDeckButtons(buttons: List<DeckButton>, darkTheme: Boolean = true): List<DeckButton> {
@@ -355,7 +403,7 @@ fun ensureSettingsButton(pages: List<DeckPageConfig>, darkTheme: Boolean = true)
 }
 
 fun hasSettingsButton(pages: List<DeckPageConfig>): Boolean {
-    return pages.any { page -> page.buttons.any { buttonAppAction(it) == DeckActionType.Settings } }
+    return pages.any { page -> page.classicButtons.any { buttonAppAction(it) == DeckActionType.Settings } }
 }
 
 fun restoreSettingsButton(
@@ -366,16 +414,20 @@ fun restoreSettingsButton(
 ): List<DeckPageConfig> {
     if (hasSettingsButton(pages)) return pages
     val firstPageId = pages.firstOrNull()?.id
-    val allButtons = pages.flatMap { it.buttons }
+    val allButtons = pages.flatMap { it.classicButtons }
 
     pages.forEach { page ->
         val showTitle = page.id == firstPageId
         val capacity = pageButtonCapacity(page.id, pages, columns, rows)
-        val position = nextOpenPosition(page.buttons, columns, rows, showTitle)
+        val position = nextOpenPosition(page.classicButtons, columns, rows, showTitle)
         if (position < capacity) {
             val settingsButton = settingsDeckButton(allButtons, position, darkTheme)
             return pages.map { pageConfig ->
-                if (pageConfig.id == page.id) pageConfig.copy(buttons = pageConfig.buttons + settingsButton) else pageConfig
+                if (pageConfig.id == page.id) {
+                    pageConfig.withButtonsForMode(DeckUiMode.Classic, pageConfig.classicButtons + settingsButton)
+                } else {
+                    pageConfig
+                }
             }
         }
     }
@@ -387,12 +439,12 @@ fun restoreSettingsButton(
             buttons = listOf(settingsDeckButton(emptyList(), 0, darkTheme))
         )
     )
-    val replacementIndex = lastPage.buttons.indices.maxWithOrNull(
-        compareBy<Int> { lastPage.buttons[it].position }.thenBy { it }
+    val replacementIndex = lastPage.classicButtons.indices.maxWithOrNull(
+        compareBy<Int> { lastPage.classicButtons[it].position }.thenBy { it }
     )
-    val replacementPosition = replacementIndex?.let { lastPage.buttons[it].position } ?: 0
+    val replacementPosition = replacementIndex?.let { lastPage.classicButtons[it].position } ?: 0
     val settingsButton = settingsDeckButton(allButtons, replacementPosition, darkTheme)
-    val replacementButtons = lastPage.buttons.toMutableList().apply {
+    val replacementButtons = lastPage.classicButtons.toMutableList().apply {
         if (replacementIndex != null) {
             this[replacementIndex] = settingsButton
         } else {
@@ -400,7 +452,7 @@ fun restoreSettingsButton(
         }
     }
     return pages.map { page ->
-        if (page.id == lastPage.id) page.copy(buttons = replacementButtons) else page
+        if (page.id == lastPage.id) page.withButtonsForMode(DeckUiMode.Classic, replacementButtons) else page
     }
 }
 
@@ -428,7 +480,10 @@ fun payloadRequired(actionType: DeckActionType): Boolean {
         DeckActionType.NextPage -> false
         DeckActionType.Hotkey,
         DeckActionType.Text,
-        DeckActionType.RunCommand -> true
+        DeckActionType.RunCommand,
+        DeckActionType.CompanionCommand,
+        DeckActionType.CompanionControl,
+        DeckActionType.CompanionStatus -> true
         DeckActionType.MediaKey,
         DeckActionType.Utility,
         DeckActionType.AppCommand -> false
@@ -457,6 +512,9 @@ fun buttonAppAction(actionType: DeckActionType, payload: String): DeckActionType
         DeckActionType.PreviousPage,
         DeckActionType.NextPage -> actionType
         DeckActionType.AppCommand -> appCommandAction(payload)
+        DeckActionType.CompanionCommand,
+        DeckActionType.CompanionControl,
+        DeckActionType.CompanionStatus -> null
         else -> null
     }
 }
@@ -599,12 +657,73 @@ fun saveConsoleFontSizeOption(context: Context, option: DeckFontSizeOption) {
     context.deckPrefs().edit().putString(PREF_CONSOLE_FONT_SIZE, option.name).apply()
 }
 
+fun loadGuideCards(context: Context): Boolean {
+    return context.deckPrefs().getBoolean(PREF_GUIDE_CARDS, true)
+}
+
+fun saveGuideCards(context: Context, enabled: Boolean) {
+    context.deckPrefs().edit().putBoolean(PREF_GUIDE_CARDS, enabled).apply()
+}
+
 private fun loadFontSizeOption(context: Context, key: String): DeckFontSizeOption {
     return runCatching {
         DeckFontSizeOption.valueOf(
             context.deckPrefs().getString(key, null) ?: DeckFontSizeOption.System.name
         )
     }.getOrDefault(DeckFontSizeOption.System)
+}
+
+fun loadCompanionSettings(context: Context): CompanionSettings {
+    val prefs = context.deckPrefs()
+    return CompanionSettings(
+        enabled = prefs.getBoolean(PREF_COMPANION_ENABLED, false),
+        endpoint = prefs.getString(PREF_COMPANION_ENDPOINT, null).orEmpty(),
+        pairingToken = prefs.getString(PREF_COMPANION_PAIRING_TOKEN, null).orEmpty()
+    )
+}
+
+fun saveCompanionSettings(context: Context, settings: CompanionSettings) {
+    context.deckPrefs().edit()
+        .putBoolean(PREF_COMPANION_ENABLED, settings.enabled)
+        .putString(PREF_COMPANION_ENDPOINT, settings.endpoint.trim())
+        .putString(PREF_COMPANION_PAIRING_TOKEN, settings.pairingToken.trim())
+        .apply()
+}
+
+fun loadClassicCompanionConnectionExpanded(context: Context): Boolean {
+    return context.deckPrefs().getBoolean(PREF_CLASSIC_COMPANION_CONNECTION_EXPANDED, true)
+}
+
+fun saveClassicCompanionConnectionExpanded(context: Context, expanded: Boolean) {
+    context.deckPrefs().edit().putBoolean(PREF_CLASSIC_COMPANION_CONNECTION_EXPANDED, expanded).apply()
+}
+
+fun loadCompanionSyncViewToPc(context: Context): Boolean {
+    return context.deckPrefs().getBoolean(PREF_COMPANION_SYNC_VIEW_TO_PC, true)
+}
+
+fun saveCompanionSyncViewToPc(context: Context, enabled: Boolean) {
+    context.deckPrefs().edit().putBoolean(PREF_COMPANION_SYNC_VIEW_TO_PC, enabled).apply()
+}
+
+fun loadCompanionFollowPcView(context: Context): Boolean {
+    return context.deckPrefs().getBoolean(PREF_COMPANION_FOLLOW_PC_VIEW, true)
+}
+
+fun saveCompanionFollowPcView(context: Context, enabled: Boolean) {
+    context.deckPrefs().edit().putBoolean(PREF_COMPANION_FOLLOW_PC_VIEW, enabled).apply()
+}
+
+fun mobileDeckDeviceId(context: Context): String {
+    val prefs = context.deckPrefs()
+    val existing = prefs.getString(PREF_COMPANION_DEVICE_ID, null)
+        ?.trim()
+        ?.takeIf { it.isNotBlank() }
+    if (existing != null) return existing
+
+    val generated = "android-${UUID.randomUUID()}"
+    prefs.edit().putString(PREF_COMPANION_DEVICE_ID, generated).apply()
+    return generated
 }
 
 fun shouldShowClassicTutorial(context: Context): Boolean {
@@ -636,6 +755,14 @@ const val PREF_CLASSIC_DECK_BACKGROUND_IMAGE_URI = "classic_deck_background_imag
 const val PREF_DECK_UI_MODE = "deck_ui_mode"
 const val PREF_CLASSIC_FONT_SIZE = "classic_font_size"
 const val PREF_CONSOLE_FONT_SIZE = "console_font_size"
+const val PREF_GUIDE_CARDS = "console_detail_guides"
+const val PREF_COMPANION_ENABLED = "companion_enabled"
+const val PREF_COMPANION_ENDPOINT = "companion_endpoint"
+const val PREF_COMPANION_PAIRING_TOKEN = "companion_pairing_token"
+const val PREF_COMPANION_DEVICE_ID = "companion_device_id"
+const val PREF_CLASSIC_COMPANION_CONNECTION_EXPANDED = "classic_companion_connection_expanded"
+const val PREF_COMPANION_SYNC_VIEW_TO_PC = "companion_sync_view_to_pc"
+const val PREF_COMPANION_FOLLOW_PC_VIEW = "companion_follow_pc_view"
 const val PREF_CLASSIC_TUTORIAL_SEEN = "classic_tutorial_seen"
 const val PREF_CONSOLE_LAYOUT = "console_layout"
 const val PREF_CONSOLE_LAYOUTS = "console_layouts"

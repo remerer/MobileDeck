@@ -15,6 +15,9 @@ enum class DeckActionType(@StringRes val labelRes: Int) {
     Hotkey(R.string.action_hotkey),
     Text(R.string.action_text),
     RunCommand(R.string.action_run_command),
+    CompanionCommand(R.string.action_companion_command),
+    CompanionControl(R.string.action_companion_control),
+    CompanionStatus(R.string.action_companion_status),
     Utility(R.string.action_utility),
     AppCommand(R.string.action_app_command)
 }
@@ -38,7 +41,9 @@ enum class DeckControlStyle(@StringRes val labelRes: Int) {
     TrimSlider(R.string.control_style_trim_slider),
     TrimKnob(R.string.control_style_trim_knob),
     InfiniteWheel(R.string.control_style_infinite_wheel),
-    JoyPad(R.string.control_style_joypad)
+    JoyPad(R.string.control_style_joypad),
+    AnalogStick(R.string.control_style_analog_stick),
+    CompanionToggle(R.string.control_style_companion_toggle)
 }
 
 enum class PageSwipeAxis(@StringRes val labelRes: Int, @StringRes val shortLabelRes: Int) {
@@ -107,8 +112,46 @@ data class DeckButton(
     val spanRows: Int = 1,
     val appWidgetId: Int = INVALID_APP_WIDGET_ID,
     val appWidgetTouchable: Boolean = true,
-    val controlStyle: DeckControlStyle = DeckControlStyle.Button
+    val controlStyle: DeckControlStyle = DeckControlStyle.Button,
+    val controlStyleRaw: String = controlStyle.name,
+    val companionControl: String = ""
 )
+
+data class DeckButtonDisplayCapabilities(
+    val supportsIconImage: Boolean,
+    val supportsText: Boolean,
+    val dedicatedControlSurfaceOnly: Boolean
+)
+
+fun deckButtonDisplayCapabilities(
+    controlStyle: DeckControlStyle,
+    actionType: DeckActionType
+): DeckButtonDisplayCapabilities {
+    val dedicatedControlSurfaceOnly = controlStyle != DeckControlStyle.Button
+    if (dedicatedControlSurfaceOnly) {
+        return DeckButtonDisplayCapabilities(
+            supportsIconImage = false,
+            supportsText = false,
+            dedicatedControlSurfaceOnly = true
+        )
+    }
+    return when (actionType) {
+        DeckActionType.CompanionControl -> DeckButtonDisplayCapabilities(
+            supportsIconImage = false,
+            supportsText = true,
+            dedicatedControlSurfaceOnly = false
+        )
+        else -> DeckButtonDisplayCapabilities(
+            supportsIconImage = true,
+            supportsText = true,
+            dedicatedControlSurfaceOnly = false
+        )
+    }
+}
+
+fun DeckButton.displayCapabilities(): DeckButtonDisplayCapabilities {
+    return deckButtonDisplayCapabilities(controlStyle, actionType)
+}
 
 data class UtilityChoice(
     val payload: String,
@@ -118,8 +161,30 @@ data class UtilityChoice(
 data class DeckPageConfig(
     val id: Int,
     val name: String,
-    val buttons: List<DeckButton>
-)
+    val buttons: List<DeckButton>,
+    val classicButtons: List<DeckButton> = buttons,
+    val consoleButtons: List<DeckButton> = buttons
+) {
+    fun buttonsForMode(mode: DeckUiMode): List<DeckButton> {
+        return when (mode) {
+            DeckUiMode.Classic -> classicButtons
+            DeckUiMode.Console -> consoleButtons
+        }
+    }
+
+    fun withButtonsForMode(mode: DeckUiMode, updatedButtons: List<DeckButton>): DeckPageConfig {
+        return when (mode) {
+            DeckUiMode.Classic -> copy(
+                buttons = updatedButtons,
+                classicButtons = updatedButtons
+            )
+            DeckUiMode.Console -> copy(
+                buttons = updatedButtons,
+                consoleButtons = updatedButtons
+            )
+        }
+    }
+}
 
 data class DragSwapCandidate(
     val draggedButtonId: Int,
@@ -140,6 +205,29 @@ data class ConsolePanelOptions(
     val showClock: Boolean = true,
     val showDate: Boolean = true
 )
+
+data class CompanionSettings(
+    val enabled: Boolean = false,
+    val endpoint: String = "",
+    val pairingToken: String = ""
+) {
+    fun isConfigured(): Boolean = enabled && endpoint.isNotBlank() && pairingToken.isNotBlank()
+}
+
+data class CompanionConnectionStatus(
+    val connected: Boolean = false,
+    val message: String = "",
+    val appName: String = "",
+    val version: String = "",
+    val capabilities: Set<String> = emptySet()
+)
+
+enum class CompanionControlMode {
+    HidOnly,
+    CompanionConnected,
+    CompanionActive,
+    Disconnected
+}
 
 data class ActivityLog(
     val buttonTitle: String,

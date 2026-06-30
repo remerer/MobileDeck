@@ -1,7 +1,10 @@
 package com.remerer.mobiledeck
 
+import android.app.Activity
 import android.content.Context
+import android.content.ContextWrapper
 import android.graphics.Bitmap
+import android.graphics.Rect
 import android.net.Uri
 import android.util.Base64
 import androidx.compose.ui.graphics.toArgb
@@ -15,8 +18,16 @@ import java.util.Date
 import java.util.Locale
 
 private const val BUNDLE_FORMAT = "mobiledeck.bundle"
-private const val BUNDLE_VERSION = 1
+private const val BUNDLE_VERSION = 2
 private const val ASSET_URI_PREFIX = "asset:"
+
+private data class DeckBundleScreen(
+    val widthPx: Int,
+    val heightPx: Int
+) {
+    val aspectRatio: Double
+        get() = widthPx.toDouble() / heightPx.coerceAtLeast(1).toDouble()
+}
 
 data class DeckBundleSnapshot(
     val pages: List<DeckPageConfig>,
@@ -79,19 +90,28 @@ fun Context.createDeckBundleJson(snapshot: DeckBundleSnapshot): String {
 
     val pagesArray = JSONArray()
     snapshot.pages.forEach { page ->
-        val buttons = JSONArray()
-        page.buttons.forEach { button ->
-            val portable = button.copy(
-                iconImageUri = assetRefFor(button.iconImageUri),
-                appWidgetId = INVALID_APP_WIDGET_ID
-            )
-            buttons.put(encodeDeckButton(portable))
+        fun portableButtons(buttons: List<DeckButton>): JSONArray {
+            val array = JSONArray()
+            buttons.forEach { button ->
+                val portable = button.copy(
+                    iconImageUri = assetRefFor(button.iconImageUri),
+                    appWidgetId = INVALID_APP_WIDGET_ID
+                )
+                array.put(
+                    encodeDeckButton(portable)
+                        .put("pcAvailability", pcAvailabilityForButton(button))
+                )
+            }
+            return array
         }
+        val buttons = portableButtons(page.buttonsForMode(snapshot.deckUiMode))
         pagesArray.put(
             JSONObject()
                 .put("id", page.id)
                 .put("name", page.name)
                 .put("buttons", buttons)
+                .put("classicButtons", portableButtons(page.classicButtons))
+                .put("consoleButtons", portableButtons(page.consoleButtons))
         )
     }
 
@@ -107,11 +127,23 @@ fun Context.createDeckBundleJson(snapshot: DeckBundleSnapshot): String {
         consoleLayoutsRoot.put(pageId.toString(), encodeConsoleLayout(layout))
     }
 
+    val deviceId = mobileDeckDeviceId(this)
+    val deviceName = mobileDeckDeviceName()
+    val screen = currentDeckBundleScreen()
     val root = JSONObject()
         .put("format", BUNDLE_FORMAT)
         .put("version", BUNDLE_VERSION)
+        .put("deviceId", deviceId)
+        .put("deviceName", deviceName)
+        .put(
+            "metadata",
+            JSONObject()
+                .put("deviceId", deviceId)
+                .put("deviceName", deviceName)
+                .put("screen", encodeBundleScreen(screen))
+        )
         .put("exportedAt", SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssZ", Locale.US).format(Date()))
-        .put("settings", encodeBundleSettings(snapshot, portableBackground))
+        .put("settings", encodeBundleSettings(snapshot, portableBackground, screen))
         .put("pages", pagesArray)
         .put("consoleLayouts", consoleLayoutsRoot)
         .put("assets", assets)
@@ -132,18 +164,25 @@ fun Context.importDeckBundleJson(raw: String): ImportedDeckBundle {
     val pages = List(pagesArray.length()) { pageIndex ->
         val pageObject = pagesArray.getJSONObject(pageIndex)
         val buttonsArray = pageObject.optJSONArray("buttons") ?: JSONArray()
-        val buttons = List(buttonsArray.length()) { buttonIndex ->
-            val buttonObject = buttonsArray.getJSONObject(buttonIndex)
-            val imported = decodeDeckButton(buttonObject, buttonIndex)
-            imported.copy(
-                iconImageUri = resolveAssetRef(imported.iconImageUri),
-                appWidgetId = INVALID_APP_WIDGET_ID
-            )
+        fun decodePortableButtons(array: JSONArray): List<DeckButton> {
+            return List(array.length()) { buttonIndex ->
+                val buttonObject = array.getJSONObject(buttonIndex)
+                val imported = decodeDeckButton(buttonObject, buttonIndex)
+                imported.copy(
+                    iconImageUri = resolveAssetRef(imported.iconImageUri),
+                    appWidgetId = INVALID_APP_WIDGET_ID
+                )
+            }
         }
+        val buttons = decodePortableButtons(buttonsArray)
+        val classicButtons = decodePortableButtons(pageObject.optJSONArray("classicButtons") ?: buttonsArray)
+        val consoleButtons = decodePortableButtons(pageObject.optJSONArray("consoleButtons") ?: buttonsArray)
         DeckPageConfig(
             id = pageObject.getInt("id"),
             name = pageObject.optString("name", "Page ${pageIndex + 1}"),
-            buttons = buttons
+            buttons = buttons,
+            classicButtons = classicButtons,
+            consoleButtons = consoleButtons
         )
     }
 
@@ -186,11 +225,18 @@ fun Context.importDeckBundleJson(raw: String): ImportedDeckBundle {
     )
 }
 
-private fun encodeBundleSettings(snapshot: DeckBundleSnapshot, background: ClassicDeckBackground): JSONObject {
+private fun encodeBundleSettings(
+    snapshot: DeckBundleSnapshot,
+    background: ClassicDeckBackground,
+    screen: DeckBundleScreen
+): JSONObject {
     return JSONObject()
         .put("columns", snapshot.columns)
         .put("rows", snapshot.rows)
         .put("spacing", snapshot.spacing)
+        .put("screenWidth", screen.widthPx)
+        .put("screenHeight", screen.heightPx)
+        .put("deviceAspectRatio", screen.aspectRatio)
         .put("pageSwipeAxis", snapshot.pageSwipeAxis.name)
         .put("pageSwipeMode", snapshot.pageSwipeMode.name)
         .put("pageSwipeAnimation", snapshot.pageSwipeAnimation)
@@ -202,6 +248,48 @@ private fun encodeBundleSettings(snapshot: DeckBundleSnapshot, background: Class
         .put("classicFontSize", snapshot.classicFontSize.name)
         .put("consoleFontSize", snapshot.consoleFontSize.name)
         .put("consolePanelOptions", encodeBundleConsolePanelOptions(snapshot.consolePanelOptions))
+}
+
+private fun Context.currentDeckBundleScreen(): DeckBundleScreen {
+    val activityScreen = findActivity()?.currentVisibleScreen()
+    val fallbackMetrics = resources.displayMetrics
+    val width = activityScreen?.widthPx ?: fallbackMetrics.widthPixels
+    val height = activityScreen?.heightPx ?: fallbackMetrics.heightPixels
+    return normalizedLandscapeScreen(width, height)
+}
+
+private tailrec fun Context.findActivity(): Activity? {
+    return when (this) {
+        is Activity -> this
+        is ContextWrapper -> baseContext.findActivity()
+        else -> null
+    }
+}
+
+private fun Activity.currentVisibleScreen(): DeckBundleScreen? {
+    val rect = Rect()
+    window?.decorView?.getWindowVisibleDisplayFrame(rect)
+    return if (rect.width() > 0 && rect.height() > 0) {
+        DeckBundleScreen(rect.width(), rect.height())
+    } else {
+        null
+    }
+}
+
+private fun normalizedLandscapeScreen(widthPx: Int, heightPx: Int): DeckBundleScreen {
+    val safeWidth = widthPx.coerceAtLeast(1)
+    val safeHeight = heightPx.coerceAtLeast(1)
+    return DeckBundleScreen(
+        widthPx = maxOf(safeWidth, safeHeight),
+        heightPx = minOf(safeWidth, safeHeight)
+    )
+}
+
+private fun encodeBundleScreen(screen: DeckBundleScreen): JSONObject {
+    return JSONObject()
+        .put("widthPx", screen.widthPx)
+        .put("heightPx", screen.heightPx)
+        .put("aspectRatio", screen.aspectRatio)
 }
 
 private fun encodeBundleClassicBackground(background: ClassicDeckBackground): JSONObject {
@@ -226,6 +314,22 @@ private fun encodeBundleConsolePanelOptions(options: ConsolePanelOptions): JSONO
         .put("showMessage", options.showMessage)
         .put("showClock", options.showClock)
         .put("showDate", options.showDate)
+}
+
+private fun pcAvailabilityForButton(button: DeckButton): JSONObject {
+    val reason = when {
+        button.appWidgetId != INVALID_APP_WIDGET_ID -> "android_widget"
+        button.actionType == DeckActionType.Utility -> "android_utility"
+        buttonAppAction(button) == DeckActionType.Settings -> "android_settings"
+        buttonAppAction(button) == DeckActionType.BluetoothStatus -> "android_bluetooth"
+        buttonAppAction(button) == DeckActionType.PreviousPage -> "android_page_navigation"
+        buttonAppAction(button) == DeckActionType.NextPage -> "android_page_navigation"
+        button.actionType == DeckActionType.AppCommand -> "android_app_command"
+        else -> null
+    }
+    return JSONObject()
+        .put("available", reason == null)
+        .put("reason", reason ?: "")
 }
 
 private fun decodeBundleConsolePanelOptions(item: JSONObject?): ConsolePanelOptions {
@@ -261,7 +365,14 @@ private fun Context.readBundleAssetBytes(uriString: String): ByteArray? {
 private fun Context.bundleAssetMimeType(uriString: String): String {
     if (uriString.startsWith(APP_ICON_URI_PREFIX)) return "image/png"
     return runCatching { contentResolver.getType(Uri.parse(uriString)) }.getOrNull()
-        ?: if (uriString.substringAfterLast('.', "").equals("gif", ignoreCase = true)) "image/gif" else "image/png"
+        ?: when (uriString.substringAfterLast('.', "").lowercase(Locale.US)) {
+            "gif" -> "image/gif"
+            "jpg", "jpeg" -> "image/jpeg"
+            "webp" -> "image/webp"
+            "mp4" -> "video/mp4"
+            "webm" -> "video/webm"
+            else -> "image/png"
+        }
 }
 
 private fun bundleAssetSourceType(uriString: String): String {
@@ -298,6 +409,9 @@ private fun Context.importBundleAssets(assets: JSONArray): Map<String, String> {
             val extension = when {
                 mimeType.equals("image/gif", ignoreCase = true) -> "gif"
                 mimeType.equals("image/jpeg", ignoreCase = true) -> "jpg"
+                mimeType.equals("image/webp", ignoreCase = true) -> "webp"
+                mimeType.equals("video/mp4", ignoreCase = true) -> "mp4"
+                mimeType.equals("video/webm", ignoreCase = true) -> "webm"
                 else -> "png"
             }
             val bytes = Base64.decode(item.getString("data"), Base64.DEFAULT)

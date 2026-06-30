@@ -46,6 +46,10 @@ fun nextDeckButtonId(buttons: List<DeckButton>): Int {
     return (buttons.maxOfOrNull { it.id } ?: 0) + 1
 }
 
+fun nextDeckButtonIdForPages(pages: List<DeckPageConfig>): Int {
+    return (pages.flatMap { it.classicButtons + it.consoleButtons }.maxOfOrNull { it.id } ?: 0) + 1
+}
+
 fun nextDeckPageId(pages: List<DeckPageConfig>): Int {
     return (pages.maxOfOrNull { it.id } ?: 0) + 1
 }
@@ -141,20 +145,34 @@ fun pageButtonCapacity(pageId: Int, pages: List<DeckPageConfig>, columns: Int, r
 fun updateDeckPage(
     pages: List<DeckPageConfig>,
     pageId: Int,
+    mode: DeckUiMode,
     update: (DeckPageConfig) -> List<DeckButton>
 ): List<DeckPageConfig> {
     return pages.map { page ->
-        if (page.id == pageId) page.copy(buttons = update(page)) else page
+        if (page.id == pageId) page.withButtonsForMode(mode, update(page)) else page
+    }
+}
+
+fun updateDeckPage(
+    pages: List<DeckPageConfig>,
+    pageId: Int,
+    update: (DeckPageConfig) -> List<DeckButton>
+): List<DeckPageConfig> = updateDeckPage(pages, pageId, DeckUiMode.Classic, update)
+
+fun updateDeckButton(
+    pages: List<DeckPageConfig>,
+    button: DeckButton,
+    mode: DeckUiMode
+): List<DeckPageConfig> {
+    return pages.map { page ->
+        val updated = page.buttonsForMode(mode).map { if (it.id == button.id) button else it }
+        page.withButtonsForMode(mode, updated)
     }
 }
 
 fun updateDeckButton(
     pages: List<DeckPageConfig>,
     button: DeckButton
-): List<DeckPageConfig> {
-    return pages.map { page ->
-        page.copy(buttons = page.buttons.map { if (it.id == button.id) button else it })
-    }
-}
+): List<DeckPageConfig> = updateDeckButton(pages, button, DeckUiMode.Classic)
 
 
