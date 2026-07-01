@@ -92,15 +92,22 @@ fun defaultSecondPageButtons(darkTheme: Boolean = true): List<DeckButton> {
         DeckButton(19, "Paste", "Ctrl+V", ICON_KEYBOARD, "", DeckDisplayMode.IconAndText, DeckActionType.Hotkey, "CTRL+V", colors[2], position = 3),
         DeckButton(20, "Select All", "Ctrl+A", ICON_KEYBOARD, "", DeckDisplayMode.IconAndText, DeckActionType.Hotkey, "CTRL+A", colors[1], position = 4),
         DeckButton(21, "Screenshot", "Win+Shift+S", ICON_KEYBOARD, "", DeckDisplayMode.IconAndText, DeckActionType.Hotkey, "WIN+SHIFT+S", colors[0], position = 5),
-        DeckButton(22, "Notepad", "Run", ICON_APPS, "", DeckDisplayMode.IconAndText, DeckActionType.RunCommand, "notepad", colors[3], position = 6),
-        DeckButton(23, "Calculator", "Run", ICON_APPS, "", DeckDisplayMode.IconAndText, DeckActionType.RunCommand, "calc", colors[5], position = 7),
-        DeckButton(24, "Paint", "Run", ICON_APPS, "", DeckDisplayMode.IconAndText, DeckActionType.RunCommand, "mspaint", colors[1], position = 8),
-        DeckButton(25, "Terminal", "Run", ICON_CODE, "", DeckDisplayMode.IconAndText, DeckActionType.RunCommand, "cmd", colors[0], position = 9),
-        DeckButton(26, "Lock", "Win+L", ICON_KEYBOARD, "", DeckDisplayMode.IconAndText, DeckActionType.Hotkey, "WIN+L", colors[4], position = 10),
-        DeckButton(27, "Task Manager", "Ctrl+Shift+Esc", ICON_KEYBOARD, "", DeckDisplayMode.IconAndText, DeckActionType.Hotkey, "CTRL+SHIFT+ESC", colors[5], position = 11),
-        DeckButton(28, "Hello", "Text", ICON_TEXT, "", DeckDisplayMode.IconAndText, DeckActionType.Text, "Hello from MobileDeck", colors[2], position = 12, spanColumns = 2),
-        DeckButton(29, "Control", "Panel", ICON_APPS, "", DeckDisplayMode.IconAndText, DeckActionType.RunCommand, "control", colors[3], position = 14),
-        DeckButton(30, "Refresh", "F5", ICON_KEYBOARD, "", DeckDisplayMode.IconAndText, DeckActionType.Hotkey, "F5", colors[0], position = 15)
+        DeckButton(26, "Lock", "Win+L", ICON_KEYBOARD, "", DeckDisplayMode.IconAndText, DeckActionType.Hotkey, "WIN+L", colors[4], position = 6),
+        DeckButton(27, "Task Manager", "Ctrl+Shift+Esc", ICON_KEYBOARD, "", DeckDisplayMode.IconAndText, DeckActionType.Hotkey, "CTRL+SHIFT+ESC", colors[5], position = 7)
+    )
+}
+
+fun defaultThirdPageButtons(darkTheme: Boolean = true): List<DeckButton> {
+    val colors = defaultDeckColors(darkTheme)
+
+    return listOf(
+        DeckButton(22, "Notepad", "Run", ICON_APPS, "", DeckDisplayMode.IconAndText, DeckActionType.RunCommand, "notepad", colors[3], position = 0),
+        DeckButton(23, "Calculator", "Run", ICON_APPS, "", DeckDisplayMode.IconAndText, DeckActionType.RunCommand, "calc", colors[5], position = 1),
+        DeckButton(24, "Paint", "Run", ICON_APPS, "", DeckDisplayMode.IconAndText, DeckActionType.RunCommand, "mspaint", colors[1], position = 2),
+        DeckButton(25, "Terminal", "Run", ICON_CODE, "", DeckDisplayMode.IconAndText, DeckActionType.RunCommand, "cmd", colors[0], position = 3),
+        DeckButton(28, "Hello", "Text", ICON_TEXT, "", DeckDisplayMode.IconAndText, DeckActionType.Text, "Hello from MobileDeck", colors[2], position = 4, spanColumns = 2),
+        DeckButton(29, "Control", "Panel", ICON_APPS, "", DeckDisplayMode.IconAndText, DeckActionType.RunCommand, "control", colors[3], position = 6),
+        DeckButton(30, "Refresh", "F5", ICON_KEYBOARD, "", DeckDisplayMode.IconAndText, DeckActionType.Hotkey, "F5", colors[0], position = 7)
     )
 }
 
@@ -156,7 +163,8 @@ fun defaultDeckPages(
 ): List<DeckPageConfig> {
     return listOf(
         DeckPageConfig(1, "Page 1", firstPageButtons ?: defaultButtons(darkTheme)),
-        DeckPageConfig(2, "Page 2", defaultSecondPageButtons(darkTheme))
+        DeckPageConfig(2, "Page 2", defaultSecondPageButtons(darkTheme)),
+        DeckPageConfig(3, "Page 3", defaultThirdPageButtons(darkTheme))
     )
 }
 

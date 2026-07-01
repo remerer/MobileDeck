@@ -15,6 +15,9 @@
 .externalNativeBuild
 .cxx
 local.properties
+keystore.properties
+*.jks
+*.keystore
 /design/*
 !/design/
 !/design/MOBILEDECK_DESIGN_TOKENS.md

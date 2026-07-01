@@ -1,5 +1,6 @@
 package com.remerer.mobiledeck
 
+import android.annotation.SuppressLint
 import android.app.Activity
 import android.appwidget.AppWidgetHost
 import android.appwidget.AppWidgetManager
@@ -31,6 +32,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.annotation.RequiresApi
 import androidx.annotation.StringRes
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
@@ -7713,6 +7715,7 @@ private fun consoleIconShaderSource(tone: ConsoleIconStyleTone): String {
     }
 }
 
+@RequiresApi(Build.VERSION_CODES.TIRAMISU)
 private class RuntimeShaderIconGlossBrush(shaderSource: String) : ShaderBrush() {
     private val shader = RuntimeShader(shaderSource)
 
@@ -11550,7 +11553,7 @@ private fun ConsoleDeckSurface(
                     modifier = Modifier
                         .matchParentSize()
                 ) {
-                    BoxWithConstraints(modifier = Modifier.matchParentSize()) {
+                    Box(modifier = Modifier.matchParentSize()) {
                         val slideGapPx = with(density) {
                             maxOf(consoleSpacing, PAGE_TRANSITION_GAP).toPx().roundToInt()
                         }
@@ -17701,6 +17704,7 @@ private fun DiagnosticsPanel(
     }
 }
 
+@SuppressLint("LocalContextGetResourceValueCall")
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun EditButtonDialog(

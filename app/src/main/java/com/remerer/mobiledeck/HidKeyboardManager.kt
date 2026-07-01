@@ -133,7 +133,12 @@ class HidKeyboardManager(
     ).map { it.toByte() }.toByteArray()
 
     private val callback by lazy {
-        object : BluetoothHidDevice.Callback() {
+        createCallback()
+    }
+
+    @SuppressLint("MissingPermission", "NewApi")
+    private fun createCallback(): BluetoothHidDevice.Callback {
+        return object : BluetoothHidDevice.Callback() {
             override fun onAppStatusChanged(pluggedDevice: BluetoothDevice?, registered: Boolean) {
                 Log.d(TAG, "onAppStatusChanged registered=$registered plugged=${pluggedDevice?.safeName()}")
                 if (registered) {
@@ -175,7 +180,7 @@ class HidKeyboardManager(
         }
     }
 
-    @SuppressLint("MissingPermission")
+    @SuppressLint("MissingPermission", "NewApi")
     fun start() {
         val adapter = adapter
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
@@ -243,7 +248,7 @@ class HidKeyboardManager(
         )
     }
 
-    @SuppressLint("MissingPermission")
+    @SuppressLint("MissingPermission", "NewApi")
     fun stop() {
         hidDevice?.unregisterApp()
         hidDevice = null
@@ -280,9 +285,13 @@ class HidKeyboardManager(
         return connect(address)
     }
 
-    @SuppressLint("MissingPermission")
+    @SuppressLint("MissingPermission", "NewApi")
     fun connect(address: String): Boolean {
         val hid = hidDevice ?: return connectOrRegister(address)
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
+            publish(HidConnectionState.Unsupported, "Bluetooth keyboard mode requires Android 9 or newer")
+            return false
+        }
         if (!hasRequiredPermissions()) {
             publish(HidConnectionState.PermissionMissing, "Bluetooth permission approval is required")
             return false
@@ -446,6 +455,7 @@ class HidKeyboardManager(
         previousAdapterName = null
     }
 
+    @SuppressLint("MissingPermission", "NewApi")
     private fun sendReportTap(
         hid: BluetoothHidDevice,
         device: BluetoothDevice,
@@ -454,6 +464,7 @@ class HidKeyboardManager(
         releaseSize: Int,
         holdMillis: Long = DEFAULT_KEY_HOLD_MS
     ): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P || !hasRequiredPermissions()) return false
         val pressed = hid.sendReport(device, reportId, report)
         Thread.sleep(holdMillis)
         val released = hid.sendReport(device, reportId, ByteArray(releaseSize))
@@ -464,12 +475,14 @@ class HidKeyboardManager(
         return pressed && released
     }
 
+    @SuppressLint("MissingPermission", "NewApi")
     private fun sendReportState(
         hid: BluetoothHidDevice,
         device: BluetoothDevice,
         reportId: Int,
         report: ByteArray
     ): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P || !hasRequiredPermissions()) return false
         val sent = hid.sendReport(device, reportId, report)
         Log.d(
             TAG,
@@ -482,6 +495,7 @@ class HidKeyboardManager(
         return joinToString(" ") { byte -> "%02X".format(byte) }
     }
 
+    @SuppressLint("MissingPermission")
     private fun BluetoothDevice.safeName(): String {
         return if (hasRequiredPermissions()) name ?: address else "paired host"
     }

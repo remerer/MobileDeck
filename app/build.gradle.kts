@@ -1,8 +1,29 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
 }
+
+val keystoreProperties = Properties().apply {
+    val file = rootProject.file("keystore.properties")
+    if (file.exists()) {
+        file.inputStream().use(::load)
+    }
+}
+
+fun signingValue(propertyName: String, envName: String): String {
+    return keystoreProperties.getProperty(propertyName)
+        ?: System.getenv(envName)
+        ?: ""
+}
+
+val releaseStoreFile = signingValue("storeFile", "MOBILEDECK_RELEASE_STORE_FILE")
+val hasReleaseSigning = releaseStoreFile.isNotBlank() &&
+    signingValue("storePassword", "MOBILEDECK_RELEASE_STORE_PASSWORD").isNotBlank() &&
+    signingValue("keyAlias", "MOBILEDECK_RELEASE_KEY_ALIAS").isNotBlank() &&
+    signingValue("keyPassword", "MOBILEDECK_RELEASE_KEY_PASSWORD").isNotBlank()
 
 android {
     namespace = "com.remerer.mobiledeck"
@@ -18,10 +39,25 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    signingConfigs {
+        create("release") {
+            if (hasReleaseSigning) {
+                storeFile = rootProject.file(releaseStoreFile)
+                storePassword = signingValue("storePassword", "MOBILEDECK_RELEASE_STORE_PASSWORD")
+                keyAlias = signingValue("keyAlias", "MOBILEDECK_RELEASE_KEY_ALIAS")
+                keyPassword = signingValue("keyPassword", "MOBILEDECK_RELEASE_KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = if (hasReleaseSigning) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
+            }
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
