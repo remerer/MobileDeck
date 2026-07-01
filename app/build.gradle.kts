@@ -24,6 +24,7 @@ val hasReleaseSigning = releaseStoreFile.isNotBlank() &&
     signingValue("storePassword", "MOBILEDECK_RELEASE_STORE_PASSWORD").isNotBlank() &&
     signingValue("keyAlias", "MOBILEDECK_RELEASE_KEY_ALIAS").isNotBlank() &&
     signingValue("keyPassword", "MOBILEDECK_RELEASE_KEY_PASSWORD").isNotBlank()
+val releaseStorePath = if (releaseStoreFile.isNotBlank()) rootProject.file(releaseStoreFile) else null
 
 android {
     namespace = "com.remerer.mobiledeck"
@@ -97,4 +98,41 @@ dependencies {
     androidTestImplementation(libs.androidx.ui.test.junit4)
     debugImplementation(libs.androidx.ui.tooling)
     debugImplementation(libs.androidx.ui.test.manifest)
+}
+
+val verifyReleaseUploadSigning = tasks.register("verifyReleaseUploadSigning") {
+    group = "verification"
+    description = "Verifies that Play upload signing is configured before building a release bundle."
+
+    doLast {
+        if (!hasReleaseSigning) {
+            throw GradleException(
+                """
+                Play upload signing is not configured.
+                Create keystore.properties from keystore.properties.example or set these environment variables:
+                MOBILEDECK_RELEASE_STORE_FILE, MOBILEDECK_RELEASE_STORE_PASSWORD,
+                MOBILEDECK_RELEASE_KEY_ALIAS, MOBILEDECK_RELEASE_KEY_PASSWORD.
+                """.trimIndent()
+            )
+        }
+        if (releaseStorePath?.isFile != true) {
+            throw GradleException("Release keystore file was not found: $releaseStoreFile")
+        }
+    }
+}
+
+tasks.matching { it.name == "bundleRelease" }.configureEach {
+    dependsOn(verifyReleaseUploadSigning)
+}
+
+tasks.register("printReleaseSigningStatus") {
+    group = "help"
+    description = "Prints non-secret release signing configuration status."
+
+    doLast {
+        println("release signing configured: $hasReleaseSigning")
+        println("release store file: ${releaseStoreFile.ifBlank { "<missing>" }}")
+        println("release store file exists: ${releaseStorePath?.isFile == true}")
+        println("release key alias: ${signingValue("keyAlias", "MOBILEDECK_RELEASE_KEY_ALIAS").ifBlank { "<missing>" }}")
+    }
 }
