@@ -75,5 +75,6 @@ If Windows keeps an old HID descriptor cached after an update, remove the paired
 ## Notes
 
 - Text input through Bluetooth HID depends on the current Windows keyboard layout and IME state.
+- Official optional PC Companion app: [MobileDeckCompanion](https://github.com/remerer/MobileDeckCompanion).
 - Reliable exact text input, clipboard paste, direct app launching, and Windows icon extraction are planned as future Windows Companion features.
 - Diagnostics are available from debug builds only.
