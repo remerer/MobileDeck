@@ -25,9 +25,9 @@ MobileDeck은 Android 휴대폰을 Windows PC용 Bluetooth HID 매크로 덱처�
 
 ## 설치
 
-GitHub Release에서 APK를 다운로드한 뒤 Android 기기에 설치합니다.
+공식 [Google Play 등록 페이지](https://play.google.com/store/apps/details?id=com.remerer.mobiledeck)에서 MobileDeck을 설치하거나 업데이트하세요.
 
-Android 설정에 따라 브라우저나 파일 관리자에서 APK 설치 권한을 허용해야 할 수 있습니다.
+[GitHub Releases](https://github.com/remerer/MobileDeck/releases)는 릴리스 노트와 Android 이외의 선택적 자산을 제공합니다.
 
 ## Windows와 페어링
 

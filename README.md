@@ -25,9 +25,9 @@ MobileDeck turns an Android phone into a Bluetooth HID macro deck for a Windows 
 
 ## Install
 
-Download the APK from the GitHub release and install it on the Android device.
+Install or update MobileDeck from the official [Google Play listing](https://play.google.com/store/apps/details?id=com.remerer.mobiledeck).
 
-Android may require allowing installation from the browser or file manager used to open the APK.
+Use [GitHub Releases](https://github.com/remerer/MobileDeck/releases) for release notes and optional non-Android assets.
 
 ## Pair With Windows
 
