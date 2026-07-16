@@ -36,11 +36,10 @@ At `sync_contract`, verify that Android imports, persists, edits, renders, and e
 3. Confirm PC-only functions remain disabled or clearly Companion-dependent on Android and Android-only functions continue to retain their existing mobile execution.
 4. Confirm no schema migration or bundle version increment is required.
 
-### PC verification evidence
+### Task 0 verification evidence
 
-- `npm test -- --run`: 17 tests passed.
-- `npm run build`: TypeScript and Vite production build passed.
-- `npm run tauri:build`: Tauri release compile passed with `--no-bundle`.
-- Browser UI QA with local mocked Tauri status verified contextual function lists, fixed-presentation hiding, Display read-only behavior, compatible Control alternatives, custom-only source editing, and metadata survival through purpose round trips.
+- PC `npm test -- --run`: passed, 1 file and 19 tests.
+- PC `npm run build`: passed, `tsc && vite build`, 44 modules transformed.
+- Android `.\gradlew.bat :app:testDebugUnitTest --tests com.remerer.mobiledeck.CompanionButtonContractTest`: passed.
+- Android `.\gradlew.bat :app:compileDebugAndroidTestKotlin`: passed.
 - Native PC runtime, Android device import/export, and cross-app execution remain for later Integration QA.
-
