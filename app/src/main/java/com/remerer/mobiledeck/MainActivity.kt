@@ -1648,11 +1648,7 @@ private fun MobileDeckApp(
             DeckActionType.Text -> hidManager.sendText(payloadOverride)
             DeckActionType.RunCommand -> hidManager.runWindowsCommand(payloadOverride)
             DeckActionType.CompanionCommand -> false
-            DeckActionType.CompanionControl -> if (button.isTrimControl()) {
-                hidManager.sendMediaKey(payloadOverride)
-            } else {
-                false
-            }
+            DeckActionType.CompanionControl -> false
             DeckActionType.CompanionStatus -> false
             DeckActionType.Utility -> runUtilityAction(context, payloadOverride)
             DeckActionType.AppCommand -> when (appCommandAction(payloadOverride)) {
@@ -1678,7 +1674,6 @@ private fun MobileDeckApp(
     }
 
     fun buttonUsesCompanionFirstRoute(button: DeckButton): Boolean {
-        if (!BuildConfig.DEBUG) return false
         return when (button.actionType) {
             DeckActionType.Hotkey,
             DeckActionType.MediaKey,
@@ -1692,54 +1687,65 @@ private fun MobileDeckApp(
 
     suspend fun sendDeckButtonToCompanion(button: DeckButton, payloadOverride: String): CompanionApiResult? {
         if (!BuildConfig.DEBUG) return null
-        return if (button.usesCompanionControlRoute()) {
-            withContext(Dispatchers.IO) {
-                runCatching {
-                    val control = companionControlData(button)
-                    val source = control.source.ifBlank { button.payload }
-                    val value = companionControlRequestValue(button, payloadOverride)
-                    companionClient.controlUpdate(companionSettings, source, value)
-                }.getOrElse { error ->
-                    CompanionApiResult(false, error.message ?: "Companion transport failed")
+        val control = if (button.actionType == DeckActionType.CompanionControl) {
+            companionControlData(button)
+        } else {
+            null
+        }
+        val decision = button.executionDecision(
+            companionAvailable = true,
+            payloadOverride = payloadOverride,
+            companionControlSource = control?.source?.ifBlank { button.payload } ?: button.payload,
+            companionControlValue = control?.let { companionControlRequestValue(button, payloadOverride) }
+        )
+        return withContext(Dispatchers.IO) {
+            runCatching {
+                when (decision.route) {
+                    DeckButtonExecutionRoute.CompanionOpen -> companionClient.open(companionSettings, payloadOverride)
+                    DeckButtonExecutionRoute.CompanionProgramCommand -> companionClient.programCommand(
+                        companionSettings,
+                        payloadOverride
+                    )
+                    DeckButtonExecutionRoute.CompanionControlUpdate -> companionClient.controlUpdate(
+                        companionSettings,
+                        decision.source,
+                        decision.value ?: return@runCatching CompanionApiResult(false, "Companion control value is missing")
+                    )
+                    DeckButtonExecutionRoute.AndroidOrHid -> when (button.actionType) {
+                        DeckActionType.Hotkey,
+                        DeckActionType.MediaKey -> companionClient.inputCommand(
+                            companionSettings,
+                            button.actionType.name,
+                            payloadOverride
+                        )
+                        DeckActionType.Text -> companionClient.text(companionSettings, payloadOverride)
+                        DeckActionType.RunCommand -> companionClient.open(companionSettings, payloadOverride)
+                        else -> return@runCatching CompanionApiResult(false, "Unsupported Companion route")
+                    }
+                    DeckButtonExecutionRoute.ReadOnly,
+                    DeckButtonExecutionRoute.Unavailable -> return@runCatching CompanionApiResult(
+                        false,
+                        "Companion route is unavailable"
+                    )
                 }
+            }.getOrElse { error ->
+                CompanionApiResult(false, error.message ?: "Companion transport failed")
             }
-        } else when (button.actionType) {
-            DeckActionType.Hotkey,
-            DeckActionType.MediaKey -> withContext(Dispatchers.IO) {
-                runCatching {
-                    companionClient.inputCommand(companionSettings, button.actionType.name, payloadOverride)
-                }.getOrElse { error ->
-                    CompanionApiResult(false, error.message ?: "Companion transport failed")
-                }
-            }
-            DeckActionType.Text -> withContext(Dispatchers.IO) {
-                runCatching {
-                    companionClient.text(companionSettings, payloadOverride)
-                }.getOrElse { error ->
-                    CompanionApiResult(false, error.message ?: "Companion transport failed")
-                }
-            }
-            DeckActionType.RunCommand -> withContext(Dispatchers.IO) {
-                runCatching {
-                    companionClient.open(companionSettings, payloadOverride)
-                }.getOrElse { error ->
-                    CompanionApiResult(false, error.message ?: "Companion transport failed")
-                }
-            }
-            DeckActionType.CompanionCommand -> withContext(Dispatchers.IO) {
-                runCatching {
-                    companionClient.programCommand(companionSettings, payloadOverride)
-                }.getOrElse { error ->
-                    CompanionApiResult(false, error.message ?: "Companion transport failed")
-                }
-            }
-            DeckActionType.CompanionControl -> null
-            else -> null
         }
     }
 
     suspend fun performDeckButtonActionAsync(button: DeckButton, payloadOverride: String = button.payload): Boolean {
-        if (BuildConfig.DEBUG && companionStatus.connected && companionSettings.isConfigured() && buttonUsesCompanionFirstRoute(button)) {
+        val companionAvailable = BuildConfig.DEBUG && companionStatus.connected && companionSettings.isConfigured()
+        when (button.executionDecision(companionAvailable, payloadOverride).route) {
+            DeckButtonExecutionRoute.Unavailable -> {
+                companionStatus = CompanionConnectionStatus(message = "Companion is not connected")
+                return false
+            }
+            DeckButtonExecutionRoute.ReadOnly -> return false
+            else -> Unit
+        }
+
+        if (companionAvailable && buttonUsesCompanionFirstRoute(button)) {
             val companionResult = sendDeckButtonToCompanion(button, payloadOverride)
             if (companionResult != null) {
                 applyCompanionStatus(companionResult)
@@ -1747,12 +1753,7 @@ private fun MobileDeckApp(
             }
         }
 
-        if (BuildConfig.DEBUG && !companionStatus.connected && button.isCompanionOnly()) {
-            companionStatus = CompanionConnectionStatus(message = "Companion is not connected")
-            return false
-        }
-
-        if (BuildConfig.DEBUG && companionStatus.connected && button.usesCompanionControlRoute()) return false
+        if (button.platformAvailability() == DeckButtonPlatformAvailability.CompanionRequired) return false
         return performDeckButtonAction(button, payloadOverride)
     }
 
@@ -1908,7 +1909,7 @@ private fun MobileDeckApp(
 
     val appColors = deckThemeColors(deckUiMode, darkTheme)
     val bluetoothConnected = hidStatus.state == HidConnectionState.Connected
-    val companionConnected = companionStatus.connected
+    val companionConnected = BuildConfig.DEBUG && companionStatus.connected && companionSettings.isConfigured()
     val companionControlMode = when {
         companionConnected -> CompanionControlMode.CompanionActive
         bluetoothConnected -> CompanionControlMode.HidOnly
@@ -15811,7 +15812,7 @@ private fun DeckKey(
     val isConsole = visualMode == DeckUiMode.Console
     val themeColors = LocalDeckThemeColors.current
     val darkTheme = isSystemInDarkTheme()
-    val companionUnavailable = BuildConfig.DEBUG && button.isCompanionOnly() && !companionConnected && !previewMode
+    val companionUnavailable = button.isCompanionOnly() && !companionConnected && !previewMode
     val keyEnabled = enabled && !companionUnavailable
     val containerColor = when {
         !keyEnabled -> MaterialTheme.colorScheme.surfaceVariant
@@ -16916,9 +16917,7 @@ private fun DeckButton.isTrimControl(): Boolean {
 }
 
 private fun DeckButton.isCompanionOnly(): Boolean {
-    return actionType == DeckActionType.CompanionCommand ||
-        actionType == DeckActionType.CompanionStatus ||
-        usesCompanionControlRoute()
+    return platformAvailability() == DeckButtonPlatformAvailability.CompanionRequired
 }
 
 private fun DeckButton.hasCompanionControl(): Boolean {

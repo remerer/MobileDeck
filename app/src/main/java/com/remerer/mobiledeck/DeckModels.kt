@@ -117,6 +117,86 @@ data class DeckButton(
     val companionControl: String = ""
 )
 
+enum class DeckButtonPlatformAvailability {
+    Shared,
+    AndroidOnly,
+    CompanionRequired
+}
+
+enum class DeckButtonExecutionRoute {
+    AndroidOrHid,
+    CompanionOpen,
+    CompanionProgramCommand,
+    CompanionControlUpdate,
+    ReadOnly,
+    Unavailable
+}
+
+data class DeckButtonExecutionDecision(
+    val route: DeckButtonExecutionRoute,
+    val source: String = "",
+    val value: Any? = null
+)
+
+fun DeckButton.platformAvailability(): DeckButtonPlatformAvailability {
+    return when (actionType) {
+        DeckActionType.Settings,
+        DeckActionType.BluetoothStatus,
+        DeckActionType.PreviousPage,
+        DeckActionType.NextPage,
+        DeckActionType.Utility,
+        DeckActionType.AppCommand -> DeckButtonPlatformAvailability.AndroidOnly
+
+        DeckActionType.CompanionCommand,
+        DeckActionType.CompanionStatus -> DeckButtonPlatformAvailability.CompanionRequired
+
+        DeckActionType.CompanionControl -> when (controlStyle) {
+            DeckControlStyle.JoyPad,
+            DeckControlStyle.AnalogStick -> DeckButtonPlatformAvailability.Shared
+            else -> DeckButtonPlatformAvailability.CompanionRequired
+        }
+
+        DeckActionType.MediaKey,
+        DeckActionType.Hotkey,
+        DeckActionType.Text,
+        DeckActionType.RunCommand -> DeckButtonPlatformAvailability.Shared
+    }
+}
+
+fun DeckButton.executionDecision(
+    companionAvailable: Boolean,
+    payloadOverride: String = payload,
+    companionControlSource: String = payload,
+    companionControlValue: Any? = null
+): DeckButtonExecutionDecision {
+    if (platformAvailability() != DeckButtonPlatformAvailability.CompanionRequired) {
+        return DeckButtonExecutionDecision(DeckButtonExecutionRoute.AndroidOrHid)
+    }
+    if (!companionAvailable) {
+        return DeckButtonExecutionDecision(DeckButtonExecutionRoute.Unavailable)
+    }
+    return when (actionType) {
+        DeckActionType.CompanionStatus -> DeckButtonExecutionDecision(DeckButtonExecutionRoute.ReadOnly)
+        DeckActionType.CompanionCommand -> DeckButtonExecutionDecision(
+            route = if (payloadOverride.trim().startsWithHttpScheme()) {
+                DeckButtonExecutionRoute.CompanionOpen
+            } else {
+                DeckButtonExecutionRoute.CompanionProgramCommand
+            }
+        )
+        DeckActionType.CompanionControl -> DeckButtonExecutionDecision(
+            route = DeckButtonExecutionRoute.CompanionControlUpdate,
+            source = companionControlSource,
+            value = companionControlValue
+        )
+        else -> DeckButtonExecutionDecision(DeckButtonExecutionRoute.Unavailable)
+    }
+}
+
+private fun String.startsWithHttpScheme(): Boolean {
+    return startsWith("http://", ignoreCase = true) || startsWith("https://", ignoreCase = true)
+}
+
 data class DeckButtonDisplayCapabilities(
     val supportsIconImage: Boolean,
     val supportsText: Boolean,
