@@ -6,6 +6,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -79,6 +80,38 @@ class CodexJobContractTest {
         assertNull(snapshot.errorCode)
         assertEquals("Queued", snapshot.message)
         assertFalse(CodexJobSnapshot::class.java.declaredFields.any { it.name == "summary" })
+    }
+
+    @Test
+    fun queuedCancellationProjectionRequiresQueuedMessage() {
+        assertNotNull(
+            CodexJobSnapshot.parse(
+                snapshotJson(cancelRequested = true, message = "Queued")
+            )
+        )
+        assertNull(
+            CodexJobSnapshot.parse(
+                snapshotJson(cancelRequested = true, message = "Cancellation requested")
+            )
+        )
+    }
+
+    @Test
+    fun runningCancellationProjectionRequiresCancellationRequestedMessage() {
+        assertNotNull(
+            CodexJobSnapshot.parse(
+                snapshotJson(
+                    status = "running",
+                    cancelRequested = true,
+                    message = "Cancellation requested"
+                )
+            )
+        )
+        assertNull(
+            CodexJobSnapshot.parse(
+                snapshotJson(status = "running", cancelRequested = true, message = "Running")
+            )
+        )
     }
 
     @Test
@@ -185,10 +218,39 @@ class CodexJobContractTest {
 
         assertFalse(completed.isTerminalDisplayExpired(14_999L))
         assertTrue(completed.isTerminalDisplayExpired(15_000L))
+        assertFalse(cancelled.isTerminalDisplayExpired(14_999L))
         assertTrue(cancelled.isTerminalDisplayExpired(15_000L))
         assertFalse(failed.isTerminalDisplayExpired(Long.MAX_VALUE))
         assertEquals("exec_failed", failed.safeFailureCode)
         assertNull(completed.safeFailureCode)
+    }
+
+    @Test
+    fun terminalDisplayExpiryHandlesRollbackAndLongExtremes() {
+        val completedAtMin = CodexButtonTaskState(
+            snapshot = parseSnapshot(status = "completed", message = "Completed"),
+            terminalObservedAtMillis = Long.MIN_VALUE
+        )
+        val cancelledNearMax = CodexButtonTaskState(
+            snapshot = parseSnapshot(status = "cancelled", message = "Cancelled"),
+            terminalObservedAtMillis = Long.MAX_VALUE - CODEX_TERMINAL_DISPLAY_MILLIS
+        )
+        val cancelledTooNearMax = CodexButtonTaskState(
+            snapshot = parseSnapshot(status = "cancelled", message = "Cancelled"),
+            terminalObservedAtMillis = Long.MAX_VALUE - CODEX_TERMINAL_DISPLAY_MILLIS + 1L
+        )
+        val completedAfterRollback = CodexButtonTaskState(
+            snapshot = parseSnapshot(status = "completed", message = "Completed"),
+            terminalObservedAtMillis = 10_000L
+        )
+
+        assertFalse(completedAtMin.isTerminalDisplayExpired(Long.MIN_VALUE + 4_999L))
+        assertTrue(completedAtMin.isTerminalDisplayExpired(Long.MIN_VALUE + 5_000L))
+        assertTrue(completedAtMin.isTerminalDisplayExpired(Long.MAX_VALUE))
+        assertTrue(cancelledNearMax.isTerminalDisplayExpired(Long.MAX_VALUE))
+        assertFalse(cancelledTooNearMax.isTerminalDisplayExpired(Long.MAX_VALUE))
+        assertFalse(completedAfterRollback.isTerminalDisplayExpired(9_999L))
+        assertFalse(cancelledNearMax.isTerminalDisplayExpired(Long.MIN_VALUE))
     }
 
     @Test
@@ -200,6 +262,27 @@ class CodexJobContractTest {
             listOf(1_000L, 2_000L, 4_000L, 4_000L, 4_000L),
             (0..4).map(CodexButtonTaskState::reconnectDelayMillis)
         )
+    }
+
+    @Test
+    fun reconnectAttemptBoundariesRepeatFourSecondsAndRejectNegatives() {
+        assertEquals(4_000L, CodexButtonTaskState.reconnectDelayMillis(Int.MAX_VALUE))
+        assertEquals(
+            Int.MAX_VALUE,
+            CodexButtonTaskState(
+                snapshot = parseSnapshot(),
+                reconnectAttempt = Int.MAX_VALUE
+            ).reconnectAttempt
+        )
+        assertThrows(IllegalArgumentException::class.java) {
+            CodexButtonTaskState.reconnectDelayMillis(-1)
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            CodexButtonTaskState.reconnectDelayMillis(Int.MIN_VALUE)
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            CodexButtonTaskState(snapshot = parseSnapshot(), reconnectAttempt = -1)
+        }
     }
 
     @Test
@@ -296,30 +379,39 @@ class CodexJobContractTest {
 
     @Test
     fun typedApiProjectionRejectsUnsafeDataAndSeparatesTransportAuth() {
+        val expectedIdentity = CodexJobExpectedIdentity.Submit(
+            bindingId = BINDING_ID,
+            presetId = PRESET_ID
+        )
         val accepted = CodexJobApiResult.fromCompanionProjection(
             ok = true,
             errorCode = null,
-            dataJson = snapshotJson()
+            dataJson = snapshotJson(),
+            expectedIdentity = expectedIdentity
         )
         val unsafe = CodexJobApiResult.fromCompanionProjection(
             ok = true,
             errorCode = null,
-            dataJson = snapshotJson().replace("\"summary\":null", "\"summary\":\"raw\"")
+            dataJson = snapshotJson().replace("\"summary\":null", "\"summary\":\"raw\""),
+            expectedIdentity = expectedIdentity
         )
         val failed = CodexJobApiResult.fromCompanionProjection(
             ok = false,
             errorCode = "exec_failed",
-            dataJson = "{}"
+            dataJson = "{}",
+            expectedIdentity = expectedIdentity
         )
         val unauthorized = CodexJobApiResult.fromCompanionProjection(
             ok = false,
             errorCode = "unauthorized",
-            dataJson = "{}"
+            dataJson = "{}",
+            expectedIdentity = expectedIdentity
         )
         val unknownError = CodexJobApiResult.fromCompanionProjection(
             ok = false,
             errorCode = "raw_unknown_error",
-            dataJson = "{}"
+            dataJson = "{}",
+            expectedIdentity = expectedIdentity
         )
 
         assertEquals(JOB_ID, accepted.snapshot?.jobId)
@@ -331,6 +423,118 @@ class CodexJobContractTest {
         assertTrue(unauthorized.reconnectRequired)
         assertEquals("internal_error", unknownError.failureCode)
         assertFalse(unknownError.reconnectRequired)
+    }
+
+    @Test
+    fun typedSubmitProjectionRejectsBindingAndPresetMismatches() {
+        val expectedIdentity = CodexJobExpectedIdentity.Submit(
+            bindingId = BINDING_ID,
+            presetId = PRESET_ID
+        )
+        val mismatches = listOf(
+            snapshotJson().replace(BINDING_ID, "binding-other"),
+            snapshotJson().replace(PRESET_ID, "preset-other")
+        )
+
+        mismatches.forEach { dataJson ->
+            val result = CodexJobApiResult.fromCompanionProjection(
+                ok = true,
+                errorCode = null,
+                dataJson = dataJson,
+                expectedIdentity = expectedIdentity
+            )
+
+            assertNull(result.snapshot)
+            assertEquals("internal_error", result.failureCode)
+            assertFalse(result.reconnectRequired)
+        }
+    }
+
+    @Test
+    fun typedStatusProjectionRejectsJobAndBindingMismatches() {
+        val expectedIdentity = CodexJobExpectedIdentity.Status(
+            jobId = JOB_ID,
+            bindingId = BINDING_ID
+        )
+        val accepted = CodexJobApiResult.fromCompanionProjection(
+            ok = true,
+            errorCode = null,
+            dataJson = snapshotJson(),
+            expectedIdentity = expectedIdentity
+        )
+        val mismatches = listOf(
+            snapshotJson().replace(JOB_ID, "job-other"),
+            snapshotJson().replace(BINDING_ID, "binding-other")
+        )
+
+        assertEquals(JOB_ID, accepted.snapshot?.jobId)
+        mismatches.forEach { dataJson ->
+            val result = CodexJobApiResult.fromCompanionProjection(
+                ok = true,
+                errorCode = null,
+                dataJson = dataJson,
+                expectedIdentity = expectedIdentity
+            )
+
+            assertNull(result.snapshot)
+            assertEquals("internal_error", result.failureCode)
+            assertFalse(result.reconnectRequired)
+        }
+    }
+
+    @Test
+    fun clientSubmitProjectionUsesTheStrictBindingIdentity() {
+        val binding = requireNotNull(CodexButtonBindingPayload.parse(BINDING_PAYLOAD))
+        val accepted = projectCodexSubmitResponse(
+            ok = true,
+            errorCode = null,
+            dataJson = snapshotJson(),
+            binding = binding
+        )
+
+        assertEquals(BINDING_ID, accepted.snapshot?.bindingId)
+        listOf(
+            snapshotJson().replace(BINDING_ID, "binding-other"),
+            snapshotJson().replace(PRESET_ID, "preset-other")
+        ).forEach { dataJson ->
+            val result = projectCodexSubmitResponse(
+                ok = true,
+                errorCode = null,
+                dataJson = dataJson,
+                binding = binding
+            )
+
+            assertNull(result.snapshot)
+            assertEquals("internal_error", result.failureCode)
+        }
+    }
+
+    @Test
+    fun clientStatusProjectionUsesTheRequestedJobAndBindingIdentity() {
+        val accepted = projectCodexStatusResponse(
+            ok = true,
+            errorCode = null,
+            dataJson = snapshotJson(),
+            jobId = JOB_ID,
+            bindingId = BINDING_ID
+        )
+
+        assertEquals(JOB_ID, accepted.snapshot?.jobId)
+        listOf(
+            snapshotJson().replace(JOB_ID, "job-other"),
+            snapshotJson().replace(BINDING_ID, "binding-other")
+        ).forEach { dataJson ->
+            val result = projectCodexStatusResponse(
+                ok = true,
+                errorCode = null,
+                dataJson = dataJson,
+                jobId = JOB_ID,
+                bindingId = BINDING_ID
+            )
+
+            assertNull(result.snapshot)
+            assertEquals("internal_error", result.failureCode)
+        }
     }
 
     @Test
@@ -377,11 +581,21 @@ class CodexJobContractTest {
         finishedAt: String = "null",
         elapsedMs: Long = 0L,
         errorCode: String = "null",
-        message: String = "Queued"
+        message: String = "Queued",
+        cancelRequested: Boolean = false
     ): CodexJobSnapshot {
         return requireNotNull(
             CodexJobSnapshot.parse(
-                snapshotJson(status, duplicate, startedAt, finishedAt, elapsedMs, errorCode, message)
+                snapshotJson(
+                    status,
+                    duplicate,
+                    startedAt,
+                    finishedAt,
+                    elapsedMs,
+                    errorCode,
+                    message,
+                    cancelRequested
+                )
             )
         )
     }
@@ -393,9 +607,10 @@ class CodexJobContractTest {
         finishedAt: String = "null",
         elapsedMs: Long = 0L,
         errorCode: String = "null",
-        message: String = "Queued"
+        message: String = "Queued",
+        cancelRequested: Boolean = false
     ): String {
-        return """{"contractVersion":1,"jobId":"$JOB_ID","bindingId":"$BINDING_ID","presetId":"$PRESET_ID","status":"$status","duplicate":$duplicate,"acceptedAt":"2026-07-17T12:00:00Z","updatedAt":"2026-07-17T12:00:00Z","startedAt":$startedAt,"finishedAt":$finishedAt,"elapsedMs":$elapsedMs,"cancelRequested":false,"errorCode":$errorCode,"message":"$message","summary":null}"""
+        return """{"contractVersion":1,"jobId":"$JOB_ID","bindingId":"$BINDING_ID","presetId":"$PRESET_ID","status":"$status","duplicate":$duplicate,"acceptedAt":"2026-07-17T12:00:00Z","updatedAt":"2026-07-17T12:00:00Z","startedAt":$startedAt,"finishedAt":$finishedAt,"elapsedMs":$elapsedMs,"cancelRequested":$cancelRequested,"errorCode":$errorCode,"message":"$message","summary":null}"""
     }
 
     private fun findAppSource(fileName: String): File {

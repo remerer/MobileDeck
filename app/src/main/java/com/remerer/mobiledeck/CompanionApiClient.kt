@@ -93,9 +93,13 @@ class CompanionApiClient(context: Context) {
         binding: CodexButtonBindingPayload
     ): CodexJobApiResult {
         if (!settings.isConfigured()) return CodexJobApiResult(reconnectRequired = true)
-        return sendCodexJobRequest(settings) { metadata ->
-            buildCodexSubmitRequestJson(metadata, binding)
-        }
+        return sendCodexJobRequest(
+            settings = settings,
+            payloadFactory = { metadata -> buildCodexSubmitRequestJson(metadata, binding) },
+            responseProjector = { ok, errorCode, dataJson ->
+                projectCodexSubmitResponse(ok, errorCode, dataJson, binding)
+            }
+        )
     }
 
     suspend fun codexJobStatus(
@@ -107,9 +111,13 @@ class CompanionApiClient(context: Context) {
         if (!CompanionReleaseRoutePolicy.allowsCodexStatus(settings, jobId, bindingId)) {
             return CodexJobApiResult(failureCode = "invalid_request")
         }
-        return sendCodexJobRequest(settings) { metadata ->
-            buildCodexStatusRequestJson(metadata, jobId, bindingId)
-        }
+        return sendCodexJobRequest(
+            settings = settings,
+            payloadFactory = { metadata -> buildCodexStatusRequestJson(metadata, jobId, bindingId) },
+            responseProjector = { ok, errorCode, dataJson ->
+                projectCodexStatusResponse(ok, errorCode, dataJson, jobId, bindingId)
+            }
+        )
     }
 
     suspend fun controlUpdate(settings: CompanionSettings, source: String, value: Any): CompanionApiResult {
@@ -182,18 +190,15 @@ class CompanionApiClient(context: Context) {
 
     private suspend fun sendCodexJobRequest(
         settings: CompanionSettings,
-        payloadFactory: (CompanionRequestMetadata) -> String
+        payloadFactory: (CompanionRequestMetadata) -> String,
+        responseProjector: (Boolean, String?, String) -> CodexJobApiResult
     ): CodexJobApiResult {
         val result = runCatching {
             send(settings, "program.command", payloadFactory)
         }.getOrElse {
             return CodexJobApiResult(reconnectRequired = true)
         }
-        return CodexJobApiResult.fromCompanionProjection(
-            ok = result.ok,
-            errorCode = result.errorCode,
-            dataJson = result.data.toString()
-        )
+        return responseProjector(result.ok, result.errorCode, result.data.toString())
     }
 
     private suspend fun send(
@@ -287,6 +292,38 @@ class CompanionApiClient(context: Context) {
         client.dispatcher.executorService.shutdown()
         client.connectionPool.evictAll()
     }
+}
+
+internal fun projectCodexSubmitResponse(
+    ok: Boolean,
+    errorCode: String?,
+    dataJson: String,
+    binding: CodexButtonBindingPayload
+): CodexJobApiResult {
+    return CodexJobApiResult.fromCompanionProjection(
+        ok = ok,
+        errorCode = errorCode,
+        dataJson = dataJson,
+        expectedIdentity = CodexJobExpectedIdentity.Submit(
+            bindingId = binding.bindingId,
+            presetId = binding.presetId
+        )
+    )
+}
+
+internal fun projectCodexStatusResponse(
+    ok: Boolean,
+    errorCode: String?,
+    dataJson: String,
+    jobId: String,
+    bindingId: String
+): CodexJobApiResult {
+    return CodexJobApiResult.fromCompanionProjection(
+        ok = ok,
+        errorCode = errorCode,
+        dataJson = dataJson,
+        expectedIdentity = CodexJobExpectedIdentity.Status(jobId = jobId, bindingId = bindingId)
+    )
 }
 
 internal fun buildCodexSubmitRequestJson(

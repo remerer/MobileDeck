@@ -177,7 +177,9 @@ data class CodexButtonTaskState(
             return false
         }
         val observedAt = terminalObservedAtMillis ?: return false
-        return nowMillis >= observedAt && nowMillis - observedAt >= CODEX_TERMINAL_DISPLAY_MILLIS
+        if (nowMillis < observedAt) return false
+        if (observedAt > Long.MAX_VALUE - CODEX_TERMINAL_DISPLAY_MILLIS) return false
+        return nowMillis >= observedAt + CODEX_TERMINAL_DISPLAY_MILLIS
     }
 
     companion object {
@@ -241,13 +243,15 @@ data class CodexJobApiResult(
     val reconnectRequired: Boolean = false
 ) {
     companion object {
-        fun fromCompanionProjection(
+        internal fun fromCompanionProjection(
             ok: Boolean,
             errorCode: String?,
-            dataJson: String
+            dataJson: String,
+            expectedIdentity: CodexJobExpectedIdentity
         ): CodexJobApiResult {
             if (ok) {
                 val snapshot = CodexJobSnapshot.parse(dataJson)
+                    ?.takeIf(expectedIdentity::matches)
                 return if (snapshot != null) {
                     CodexJobApiResult(snapshot = snapshot)
                 } else {
@@ -263,6 +267,38 @@ data class CodexJobApiResult(
                 }
                 else -> CodexJobApiResult(failureCode = "internal_error")
             }
+        }
+    }
+}
+
+internal sealed interface CodexJobExpectedIdentity {
+    fun matches(snapshot: CodexJobSnapshot): Boolean
+
+    data class Submit(
+        val bindingId: String,
+        val presetId: String
+    ) : CodexJobExpectedIdentity {
+        init {
+            require(isValidCodexIdentifier(bindingId))
+            require(isValidCodexIdentifier(presetId))
+        }
+
+        override fun matches(snapshot: CodexJobSnapshot): Boolean {
+            return snapshot.bindingId == bindingId && snapshot.presetId == presetId
+        }
+    }
+
+    data class Status(
+        val jobId: String,
+        val bindingId: String
+    ) : CodexJobExpectedIdentity {
+        init {
+            require(isValidCodexIdentifier(jobId))
+            require(isValidCodexIdentifier(bindingId))
+        }
+
+        override fun matches(snapshot: CodexJobSnapshot): Boolean {
+            return snapshot.jobId == jobId && snapshot.bindingId == bindingId
         }
     }
 }
@@ -293,7 +329,7 @@ private fun isValidSnapshotMessage(
     cancelRequested: Boolean,
     message: String
 ): Boolean {
-    val expected = if (cancelRequested && status.isActive) {
+    val expected = if (cancelRequested && status == CodexJobStatus.Running) {
         "Cancellation requested"
     } else {
         when (status) {
