@@ -6,13 +6,18 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Text
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertHeightIsEqualTo
 import androidx.compose.ui.test.assertWidthIsEqualTo
@@ -27,6 +32,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Density
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import android.content.res.Configuration
@@ -110,60 +116,23 @@ class CodexButtonStatusInstrumentedTest {
     }
 
     @Test
-    fun longestAllowlistedCodeFitsClassicAndConsoleWithoutEllipsisOrClipping() {
-        val context = InstrumentationRegistry.getInstrumentation().targetContext
-        val code = "execution_mode_insufficient"
-        val label = context.getString(R.string.codex_status_failed_code, code)
-        val failed = codexButtonVisualStatus(null, code, false, true, true)
+    fun longestAllowlistedCodeFitsEnglishAtDefaultFontScale() {
+        assertLongestStatusFits(Locale.ENGLISH, fontScale = 1f)
+    }
 
-        composeRule.setContent {
-            Row {
-                listOf("classic" to 96.dp, "console" to 58.dp).forEach { (name, size) ->
-                    Box(
-                        modifier = Modifier
-                            .size(size)
-                            .testTag("$name-button")
-                    ) {
-                        DeckButtonPrimaryPresentation(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .testTag("$name-presentation"),
-                            status = failed,
-                            isConsole = name == "console"
-                        ) {
-                            Text("regular title", Modifier.testTag("$name-regular"))
-                        }
-                    }
-                }
-            }
-        }
+    @Test
+    fun longestAllowlistedCodeFitsEnglishAtAccessibilityFontScale() {
+        assertLongestStatusFits(Locale.ENGLISH, fontScale = 2.5f)
+    }
 
-        composeRule.onNodeWithTag("classic-button")
-            .assertWidthIsEqualTo(96.dp)
-            .assertHeightIsEqualTo(96.dp)
-        composeRule.onNodeWithTag("console-button")
-            .assertWidthIsEqualTo(58.dp)
-            .assertHeightIsEqualTo(58.dp)
-        composeRule.onNodeWithTag("classic-presentation")
-            .assertWidthIsEqualTo(96.dp)
-            .assertHeightIsEqualTo(96.dp)
-        composeRule.onNodeWithTag("console-presentation")
-            .assertWidthIsEqualTo(58.dp)
-            .assertHeightIsEqualTo(58.dp)
-        composeRule.onNodeWithTag("classic-regular").assertDoesNotExist()
-        composeRule.onNodeWithTag("console-regular").assertDoesNotExist()
-        composeRule.onAllNodesWithContentDescription(label).assertCountEquals(2)
-        composeRule.onAllNodes(
-            SemanticsMatcher.expectValue(CodexStatusTextFitsKey, true)
-        ).assertCountEquals(2)
-        assertNodeInside("classic-button", label, nodeIndex = 0)
-        assertNodeInside("console-button", label, nodeIndex = 1)
-        listOf(CodexStatusContainerTag, CodexStatusIconTag, CodexStatusTextTag).forEach { childTag ->
-            assertTaggedNodeInside("classic-button", childTag, nodeIndex = 0)
-            assertTaggedNodeInside("console-button", childTag, nodeIndex = 1)
-        }
-        assertTaggedNodesDoNotOverlap(CodexStatusIconTag, CodexStatusTextTag, nodeIndex = 0)
-        assertTaggedNodesDoNotOverlap(CodexStatusIconTag, CodexStatusTextTag, nodeIndex = 1)
+    @Test
+    fun longestAllowlistedCodeFitsKoreanAtDefaultFontScale() {
+        assertLongestStatusFits(Locale.KOREAN, fontScale = 1f)
+    }
+
+    @Test
+    fun longestAllowlistedCodeFitsKoreanAtAccessibilityFontScale() {
+        assertLongestStatusFits(Locale.KOREAN, fontScale = 2.5f)
     }
 
     @Test
@@ -207,6 +176,9 @@ class CodexButtonStatusInstrumentedTest {
         composeRule.onNodeWithTag(CompanionEnabledSettingTag).assertExists()
         composeRule.onNodeWithTag(CompanionEndpointSettingTag).assertExists()
         composeRule.onNodeWithTag(CompanionPairingTokenSettingTag).assertExists()
+        composeRule.onNodeWithTag(CompanionPairingTokenSettingTag).assert(
+            SemanticsMatcher.keyIsDefined(SemanticsProperties.Password)
+        )
         composeRule.onNodeWithTag(CompanionConnectionStatusTag).assertExists()
         composeRule.onNodeWithText(context.getString(R.string.companion_scan_qr)).assertDoesNotExist()
         composeRule.onNodeWithText(context.getString(R.string.companion_test_connection)).assertDoesNotExist()
@@ -214,6 +186,7 @@ class CodexButtonStatusInstrumentedTest {
         composeRule.onNodeWithText(context.getString(R.string.companion_apply_deck)).assertDoesNotExist()
         composeRule.onNodeWithTag(CompanionEndpointSettingTag).performTextInput(SETTINGS.endpoint)
         composeRule.onNodeWithTag(CompanionPairingTokenSettingTag).performTextInput(SETTINGS.pairingToken)
+        composeRule.onAllNodes(hasText(SETTINGS.pairingToken)).assertCountEquals(0)
         composeRule.onNode(isToggleable()).performClick()
         composeRule.runOnIdle {
             assertEquals(SETTINGS, configured)
@@ -267,8 +240,8 @@ class CodexButtonStatusInstrumentedTest {
             }
         )
 
-        assertTrue(coordinator.submitOnce(OWNER, SETTINGS, BINDING))
-        assertFalse(coordinator.submitOnce(OWNER, SETTINGS, BINDING))
+        assertTrue(coordinator.submitOnce(OWNER, SETTINGS))
+        assertFalse(coordinator.submitOnce(OWNER, SETTINGS))
         yield()
         assertEquals(1, submitCalls)
         assertEquals(true, submitting[OWNER])
@@ -277,7 +250,7 @@ class CodexButtonStatusInstrumentedTest {
         yield()
         assertEquals(true, taskStates[OWNER]?.snapshot?.duplicate)
         assertEquals(CodexJobStatus.Queued, taskStates[OWNER]?.snapshot?.status)
-        assertFalse(coordinator.submitOnce(OWNER, SETTINGS, BINDING))
+        assertFalse(coordinator.submitOnce(OWNER, SETTINGS))
         coordinator.clear()
     }
 
@@ -298,7 +271,7 @@ class CodexButtonStatusInstrumentedTest {
             }
         )
 
-        assertTrue(coordinator.submitOnce(OWNER, SETTINGS, BINDING))
+        assertTrue(coordinator.submitOnce(OWNER, SETTINGS))
         yield()
         assertEquals(CODEX_JOB_POLL_INTERVAL_MILLIS, delays.next().also { it.resume() }.millis)
 
@@ -340,9 +313,9 @@ class CodexButtonStatusInstrumentedTest {
         )
 
         terminal.send(snapshot(CodexJobStatus.Cancelled))
-        assertTrue(coordinator.submitOnce(OWNER, SETTINGS, BINDING))
+        assertTrue(coordinator.submitOnce(OWNER, SETTINGS))
         yield()
-        assertFalse(coordinator.submitOnce(OWNER, SETTINGS, BINDING))
+        assertFalse(coordinator.submitOnce(OWNER, SETTINGS))
         val cancelledExpiry = delays.next()
         assertEquals(CODEX_TERMINAL_DISPLAY_MILLIS, cancelledExpiry.millis)
         nowMillis += CODEX_TERMINAL_DISPLAY_MILLIS
@@ -351,7 +324,7 @@ class CodexButtonStatusInstrumentedTest {
         assertNull(taskStates[OWNER])
 
         terminal.send(snapshot(CodexJobStatus.Completed))
-        assertTrue(coordinator.submitOnce(OWNER, SETTINGS, BINDING))
+        assertTrue(coordinator.submitOnce(OWNER, SETTINGS))
         yield()
         val completedExpiry = delays.next()
         assertEquals(CODEX_TERMINAL_DISPLAY_MILLIS, completedExpiry.millis)
@@ -380,15 +353,15 @@ class CodexButtonStatusInstrumentedTest {
             }
         )
 
-        assertTrue(coordinator.submitOnce(OWNER, SETTINGS, BINDING))
+        assertTrue(coordinator.submitOnce(OWNER, SETTINGS))
         yield()
         assertEquals("execution_disabled", failureCodes[OWNER])
-        assertTrue(coordinator.submitOnce(OWNER, SETTINGS, BINDING))
+        assertTrue(coordinator.submitOnce(OWNER, SETTINGS))
         yield()
         assertNull(failureCodes[OWNER])
         assertEquals(2, submitCalls)
 
-        coordinator.retainBindings(emptyMap())
+        coordinator.reconcileOwners(emptyList())
         assertTrue(taskStates.isEmpty())
         assertTrue(failureCodes.isEmpty())
         assertTrue(submitting.isEmpty())
@@ -440,6 +413,74 @@ class CodexButtonStatusInstrumentedTest {
         assertFalse(persistedFields.any { it.contains("job", ignoreCase = true) })
         assertFalse(persistedFields.any { it.contains("status", ignoreCase = true) })
         assertFalse(persistedFields.any { it.contains("reconnect", ignoreCase = true) })
+    }
+
+    private fun assertLongestStatusFits(locale: Locale, fontScale: Float) {
+        val base = InstrumentationRegistry.getInstrumentation().targetContext
+        val localizedContext = base.createConfigurationContext(
+            localizedResources(base.resources.configuration, locale)
+        )
+        val code = "execution_mode_insufficient"
+        val label = localizedContext.getString(R.string.codex_status_failed_code, code)
+        val failed = codexButtonVisualStatus(null, code, false, true, true)
+        val density = Density(base.resources.displayMetrics.density, fontScale)
+
+        composeRule.setContent {
+            CompositionLocalProvider(
+                LocalContext provides localizedContext,
+                LocalDensity provides density
+            ) {
+                Row {
+                    listOf("classic" to 96.dp, "console" to 58.dp).forEach { (name, size) ->
+                        Box(
+                            modifier = Modifier
+                                .size(size)
+                                .testTag("$name-button")
+                        ) {
+                            DeckButtonPrimaryPresentation(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .testTag("$name-presentation"),
+                                status = failed,
+                                isConsole = name == "console"
+                            ) {
+                                Text("regular title", Modifier.testTag("$name-regular"))
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        composeRule.onNodeWithTag("classic-button")
+            .assertWidthIsEqualTo(96.dp)
+            .assertHeightIsEqualTo(96.dp)
+        composeRule.onNodeWithTag("console-button")
+            .assertWidthIsEqualTo(58.dp)
+            .assertHeightIsEqualTo(58.dp)
+        composeRule.onNodeWithTag("classic-presentation")
+            .assertWidthIsEqualTo(96.dp)
+            .assertHeightIsEqualTo(96.dp)
+        composeRule.onNodeWithTag("console-presentation")
+            .assertWidthIsEqualTo(58.dp)
+            .assertHeightIsEqualTo(58.dp)
+        composeRule.onNodeWithTag("classic-regular").assertDoesNotExist()
+        composeRule.onNodeWithTag("console-regular").assertDoesNotExist()
+        composeRule.onAllNodesWithContentDescription(label).assertCountEquals(2)
+        composeRule.onAllNodes(
+            SemanticsMatcher.expectValue(CodexStatusTextFitsKey, true)
+        ).assertCountEquals(2)
+        composeRule.onAllNodes(
+            SemanticsMatcher.expectValue(CodexStatusExactLabelKey, label)
+        ).assertCountEquals(2)
+        assertNodeInside("classic-button", label, nodeIndex = 0)
+        assertNodeInside("console-button", label, nodeIndex = 1)
+        listOf(CodexStatusContainerTag, CodexStatusIconTag, CodexStatusTextTag).forEach { childTag ->
+            assertTaggedNodeInside("classic-button", childTag, nodeIndex = 0)
+            assertTaggedNodeInside("console-button", childTag, nodeIndex = 1)
+        }
+        assertTaggedNodesDoNotOverlap(CodexStatusIconTag, CodexStatusTextTag, nodeIndex = 0)
+        assertTaggedNodesDoNotOverlap(CodexStatusIconTag, CodexStatusTextTag, nodeIndex = 1)
     }
 
     private fun assertNodeInside(parentTag: String, contentDescription: String, nodeIndex: Int) {
@@ -496,16 +537,32 @@ class CodexButtonStatusInstrumentedTest {
             CompletableDeferred<CodexJobApiResult>().await()
         }
     ): CodexButtonTaskCoordinator {
-        return CodexButtonTaskCoordinator(
+        val registry = CodexButtonOwnerRegistry()
+        val coordinator = CodexButtonTaskCoordinator(
             scope = scope,
             taskStates = taskStates,
             commandFailureCodes = failureCodes,
             submittingButtons = submitting,
+            ownerRegistry = registry,
             submitJob = submit,
             pollJob = status,
             delayMillis = delayMillis,
             nowMillis = nowMillis
         )
+        val ownerButton = button(bindingPayload(BINDING))
+        coordinator.reconcileOwners(
+            listOf(
+                DeckPageConfig(
+                    id = OWNER.pageId,
+                    name = "Page",
+                    buttons = listOf(ownerButton),
+                    classicButtons = listOf(ownerButton),
+                    consoleButtons = emptyList()
+                )
+            )
+        )
+        check(coordinator.ownerFor(OWNER.pageId, OWNER.presentation, ownerButton) == OWNER)
+        return coordinator
     }
 
     private fun taskState(

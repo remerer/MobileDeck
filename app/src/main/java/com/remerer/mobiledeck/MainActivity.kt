@@ -68,6 +68,7 @@ import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -224,11 +225,14 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalInspectionMode
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.SemanticsPropertyKey
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.tooling.preview.Preview
@@ -238,6 +242,7 @@ import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
@@ -271,6 +276,7 @@ internal class CodexButtonTaskCoordinator(
     private val taskStates: MutableMap<CodexButtonOwnerKey, CodexButtonTaskState>,
     private val commandFailureCodes: MutableMap<CodexButtonOwnerKey, String>,
     private val submittingButtons: MutableMap<CodexButtonOwnerKey, Boolean>,
+    private val ownerRegistry: CodexButtonOwnerRegistry,
     private val submitJob: suspend (CompanionSettings, CodexButtonBindingPayload) -> CodexJobApiResult,
     private val pollJob: suspend (CompanionSettings, String, String) -> CodexJobApiResult,
     private val delayMillis: suspend (Long) -> Unit = { delay(it) },
@@ -281,13 +287,28 @@ internal class CodexButtonTaskCoordinator(
 ) {
     private val requestJobs = mutableMapOf<CodexButtonOwnerKey, Job>()
     private val expiryJobs = mutableMapOf<CodexButtonOwnerKey, Job>()
-    private val bindings = mutableMapOf<CodexButtonOwnerKey, CodexButtonBindingPayload>()
+
+    fun reconcileOwners(pages: List<DeckPageConfig>) {
+        val currentBindings = ownerRegistry.reconcile(pages)
+        retainCurrentOwners(currentBindings.keys)
+    }
+
+    fun resetOwners(pages: List<DeckPageConfig>) {
+        clear()
+        reconcileOwners(pages)
+    }
+
+    fun ownerFor(
+        pageId: Int,
+        presentation: DeckUiMode,
+        button: DeckButton
+    ): CodexButtonOwnerKey? = ownerRegistry.ownerFor(pageId, presentation, button)
 
     fun submitOnce(
         owner: CodexButtonOwnerKey,
-        settings: CompanionSettings,
-        binding: CodexButtonBindingPayload
+        settings: CompanionSettings
     ): Boolean {
+        val binding = ownerRegistry.bindingFor(owner) ?: return false
         if (!CompanionReleaseRoutePolicy.allowsCodexSubmit(settings, codexBindingPayloadJson(binding))) {
             return false
         }
@@ -303,7 +324,6 @@ internal class CodexButtonTaskCoordinator(
         expiryJobs.remove(owner)?.cancel()
         taskStates.remove(owner)
         commandFailureCodes.remove(owner)
-        bindings[owner] = binding
         submittingButtons[owner] = true
 
         val requestJob = scope.launch(start = CoroutineStart.LAZY) {
@@ -320,16 +340,23 @@ internal class CodexButtonTaskCoordinator(
         return true
     }
 
-    fun retainBindings(validBindings: Map<CodexButtonOwnerKey, CodexButtonBindingPayload>) {
-        val staleOwners = bindings.keys.filter { owner -> bindings[owner] != validBindings[owner] }
+    private fun retainCurrentOwners(validOwners: Set<CodexButtonOwnerKey>) {
+        val trackedOwners = buildSet {
+            addAll(requestJobs.keys)
+            addAll(expiryJobs.keys)
+            addAll(taskStates.keys)
+            addAll(commandFailureCodes.keys)
+            addAll(submittingButtons.keys)
+        }
+        val staleOwners = trackedOwners.filterNot(validOwners::contains)
         staleOwners.forEach(::removeButton)
     }
 
     fun clear() {
+        ownerRegistry.invalidateAll()
         (requestJobs.values + expiryJobs.values).forEach(Job::cancel)
         requestJobs.clear()
         expiryJobs.clear()
-        bindings.clear()
         taskStates.clear()
         commandFailureCodes.clear()
         submittingButtons.clear()
@@ -341,9 +368,9 @@ internal class CodexButtonTaskCoordinator(
         binding: CodexButtonBindingPayload
     ) {
         var reconnectAttempt = 0
-        while (bindings[owner] == binding) {
+        while (isCurrent(owner, binding)) {
             val result = submitJob(settings, binding)
-            if (bindings[owner] != binding) return
+            if (!isCurrent(owner, binding)) return
             val snapshot = result.snapshot
             when {
                 snapshot != null -> {
@@ -373,16 +400,17 @@ internal class CodexButtonTaskCoordinator(
         acceptedSnapshot: CodexJobSnapshot
     ) {
         var current = acceptedSnapshot
+        if (!isCurrent(owner, binding)) return
         storeSnapshot(owner, current)
         if (current.status.isTerminal) return
 
-        while (bindings[owner] == binding && current.status.isActive) {
+        while (isCurrent(owner, binding) && current.status.isActive) {
             delayMillis(CODEX_JOB_POLL_INTERVAL_MILLIS)
-            if (bindings[owner] != binding) return
+            if (!isCurrent(owner, binding)) return
             var result = pollJob(settings, current.jobId, binding.bindingId)
-            if (bindings[owner] != binding) return
+            if (!isCurrent(owner, binding)) return
             var reconnectAttempt = 0
-            while (result.reconnectRequired && bindings[owner] == binding) {
+            while (result.reconnectRequired && isCurrent(owner, binding)) {
                 taskStates[owner] = CodexButtonTaskState(
                     snapshot = current,
                     reconnecting = true,
@@ -390,10 +418,10 @@ internal class CodexButtonTaskCoordinator(
                 )
                 onConnectionChanged(false)
                 delayMillis(CodexButtonTaskState.reconnectDelayMillis(reconnectAttempt))
-                if (bindings[owner] != binding) return
+                if (!isCurrent(owner, binding)) return
                 reconnectAttempt += 1
                 result = pollJob(settings, current.jobId, binding.bindingId)
-                if (bindings[owner] != binding) return
+                if (!isCurrent(owner, binding)) return
             }
 
             val next = result.snapshot
@@ -435,7 +463,6 @@ internal class CodexButtonTaskCoordinator(
             delayMillis(CODEX_TERMINAL_DISPLAY_MILLIS)
             if (taskStates[owner] === observedState && observedState.isTerminalDisplayExpired(nowMillis())) {
                 taskStates.remove(owner)
-                bindings.remove(owner)
             }
         }
         expiryJobs[owner] = expiryJob
@@ -456,11 +483,15 @@ internal class CodexButtonTaskCoordinator(
     private fun removeButton(owner: CodexButtonOwnerKey) {
         requestJobs.remove(owner)?.cancel()
         expiryJobs.remove(owner)?.cancel()
-        bindings.remove(owner)
         taskStates.remove(owner)
         commandFailureCodes.remove(owner)
         submittingButtons.remove(owner)
     }
+
+    private fun isCurrent(
+        owner: CodexButtonOwnerKey,
+        binding: CodexButtonBindingPayload
+    ): Boolean = ownerRegistry.bindingFor(owner) == binding
 }
 
 internal enum class CodexButtonVisualPhase {
@@ -522,9 +553,62 @@ internal fun codexButtonVisualStatus(
 }
 
 internal val CodexStatusTextFitsKey = SemanticsPropertyKey<Boolean>("CodexStatusTextFits")
+internal val CodexStatusExactLabelKey = SemanticsPropertyKey<String>("CodexStatusExactLabel")
 internal const val CodexStatusContainerTag = "codex-status-container"
 internal const val CodexStatusIconTag = "codex-status-icon"
 internal const val CodexStatusTextTag = "codex-status-text"
+
+internal data class CodexStatusLayoutSpec(
+    val iconSize: Dp,
+    val padding: Dp,
+    val spacing: Dp,
+    val fontSize: TextUnit,
+    val lineHeight: TextUnit,
+    val maxLines: Int
+)
+
+internal fun codexStatusLayoutSpec(
+    isConsole: Boolean,
+    fontScale: Float
+): CodexStatusLayoutSpec {
+    val safeFontScale = fontScale.takeIf { it.isFinite() && it > 0f } ?: 1f
+    val accessibilityCompact = safeFontScale > 1.3f
+    val minimumRenderedFontDp = if (isConsole) 7f else 9f
+    val maximumRenderedFontDp = if (isConsole) 8f else 11f
+    val minimumRenderedLineDp = if (isConsole) 8f else 10f
+    val maximumRenderedLineDp = if (isConsole) 8.5f else 12f
+
+    fun boundedSp(minimumRenderedDp: Float, maximumRenderedDp: Float): TextUnit {
+        // Preserve a legible rendered floor, then cap growth so five lines remain inside fixed cells.
+        val renderedDp = (minimumRenderedDp * safeFontScale)
+            .coerceIn(minimumRenderedDp, maximumRenderedDp)
+        return (renderedDp / safeFontScale).sp
+    }
+
+    return CodexStatusLayoutSpec(
+        iconSize = when {
+            isConsole && accessibilityCompact -> 8.dp
+            isConsole -> 10.dp
+            accessibilityCompact -> 12.dp
+            else -> 14.dp
+        },
+        padding = when {
+            isConsole && accessibilityCompact -> 1.dp
+            isConsole -> 3.dp
+            accessibilityCompact -> 3.dp
+            else -> 5.dp
+        },
+        spacing = when {
+            isConsole && accessibilityCompact -> 0.dp
+            isConsole -> 1.dp
+            accessibilityCompact -> 2.dp
+            else -> 3.dp
+        },
+        fontSize = boundedSp(minimumRenderedFontDp, maximumRenderedFontDp),
+        lineHeight = boundedSp(minimumRenderedLineDp, maximumRenderedLineDp),
+        maxLines = 5
+    )
+}
 
 @Composable
 internal fun DeckButtonPrimaryPresentation(
@@ -573,7 +657,7 @@ private fun CodexButtonStatusContent(
     isConsole: Boolean,
     modifier: Modifier = Modifier
 ) {
-    LocalConfiguration.current
+    val layout = codexStatusLayoutSpec(isConsole, LocalDensity.current.fontScale)
     val label = codexButtonStatusLabel(LocalContext.current.resources, status)
     val tint = when (status.phase) {
         CodexButtonVisualPhase.Completed -> Color(0xFF4CD48A)
@@ -589,15 +673,15 @@ private fun CodexButtonStatusContent(
             .background(Color.Black.copy(alpha = 0.52f))
             .testTag(CodexStatusContainerTag)
             .semantics { contentDescription = label }
-            .padding(if (isConsole) 3.dp else 5.dp),
+            .padding(layout.padding),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(
-            if (isConsole) 1.dp else 3.dp,
+            layout.spacing,
             Alignment.CenterVertically
         )
     ) {
         val iconModifier = Modifier
-            .size(if (isConsole) 10.dp else 14.dp)
+            .size(layout.iconSize)
             .testTag(CodexStatusIconTag)
         when (status.phase) {
             CodexButtonVisualPhase.Queued,
@@ -646,14 +730,17 @@ private fun CodexButtonStatusContent(
         Text(
             modifier = Modifier
                 .fillMaxWidth()
-                .testTag(CodexStatusTextTag)
-                .semantics { this[CodexStatusTextFitsKey] = textFits },
+                .clearAndSetSemantics {
+                    this[CodexStatusTextFitsKey] = textFits
+                    this[CodexStatusExactLabelKey] = label
+                }
+                .testTag(CodexStatusTextTag),
             text = label.withCodexWrapOpportunities(),
             color = tint,
-            fontSize = if (isConsole) 7.sp else 9.sp,
-            lineHeight = if (isConsole) 8.sp else 10.sp,
+            fontSize = layout.fontSize,
+            lineHeight = layout.lineHeight,
             textAlign = TextAlign.Center,
-            maxLines = 5,
+            maxLines = layout.maxLines,
             softWrap = true,
             overflow = TextOverflow.Visible,
             onTextLayout = { layout -> textFits = !layout.hasVisualOverflow }
@@ -941,7 +1028,6 @@ private fun MobileDeckApp(
     val activeConsoleButtons = activeDeckPage.buttonsForMode(DeckUiMode.Console)
     val allDeckButtons = deckPages.flatMap { it.classicButtons + it.consoleButtons }
     val codexOwnerRegistry = remember { CodexButtonOwnerRegistry() }
-    val activeCodexBindings = remember(deckPages) { codexOwnerRegistry.reconcile(deckPages) }
     val codexTaskStates = remember { mutableStateMapOf<CodexButtonOwnerKey, CodexButtonTaskState>() }
     val codexCommandFailures = remember { mutableStateMapOf<CodexButtonOwnerKey, String>() }
     val codexSubmittingButtons = remember { mutableStateMapOf<CodexButtonOwnerKey, Boolean>() }
@@ -951,6 +1037,7 @@ private fun MobileDeckApp(
             taskStates = codexTaskStates,
             commandFailureCodes = codexCommandFailures,
             submittingButtons = codexSubmittingButtons,
+            ownerRegistry = codexOwnerRegistry,
             submitJob = { settings, binding ->
                 withContext(Dispatchers.IO) {
                     runCatching { companionClient.submitCodexJob(settings, binding) }
@@ -995,8 +1082,8 @@ private fun MobileDeckApp(
             }
         )
     }
-    LaunchedEffect(activeCodexBindings) {
-        codexTaskCoordinator.retainBindings(activeCodexBindings)
+    remember(deckPages, codexTaskCoordinator) {
+        codexTaskCoordinator.reconcileOwners(deckPages)
     }
 
     fun addConsoleLayoutDiagnostic(message: String) {
@@ -1229,7 +1316,7 @@ private fun MobileDeckApp(
 
     fun updateCompanionSettings(settings: CompanionSettings) {
         val updated = companionSettingsAccess.configurationUpdate(companionSettings, settings)
-        codexTaskCoordinator.clear()
+        codexTaskCoordinator.resetOwners(deckPages)
         companionSettings = updated
         saveCompanionSettings(context, updated)
         if (!updated.isConfigured()) {
@@ -1389,10 +1476,10 @@ private fun MobileDeckApp(
     }
 
     fun applyImportedDeckBundle(imported: ImportedDeckBundle) {
-        codexTaskCoordinator.clear()
         val importedPages = ensureSettingsButton(imported.pages, darkTheme).ifEmpty {
             defaultDeckPages(darkTheme = darkTheme)
         }
+        codexTaskCoordinator.resetOwners(importedPages)
         val nextActivePageId = importedPages.first().id
         val importedSidebarFraction = (imported.consoleLayouts[nextActivePageId] ?: imported.consoleLayouts.values.firstOrNull())
             ?.sidebarFraction
@@ -2285,7 +2372,7 @@ private fun MobileDeckApp(
                     logCodexRouteRejection(button, "codex route disabled")
                     return
                 }
-                val owner = codexOwnerRegistry.ownerFor(
+                val owner = codexTaskCoordinator.ownerFor(
                     pageId = activeDeckPage.id,
                     presentation = activeButtonMode,
                     button = button
@@ -2294,7 +2381,7 @@ private fun MobileDeckApp(
                     logCodexRouteRejection(button, "stale binding")
                     return
                 }
-                codexTaskCoordinator.submitOnce(owner, companionSettings, releaseBinding)
+                codexTaskCoordinator.submitOnce(owner, companionSettings)
                 return
             }
             if (!BuildConfig.DEBUG) {
@@ -10391,6 +10478,8 @@ internal fun CompanionReleaseConfigurationContent(
                 onSettingsChange(settings.copy(pairingToken = pairingToken))
             },
             singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+            visualTransformation = PasswordVisualTransformation(),
             label = { Text(stringResource(R.string.companion_pairing_token)) }
         )
     }

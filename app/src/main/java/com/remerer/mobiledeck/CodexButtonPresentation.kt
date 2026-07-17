@@ -9,7 +9,32 @@ internal data class CodexButtonOwnerKey(
     val generation: Long
 )
 
-internal class CodexButtonOwnerRegistry {
+internal fun interface CodexOwnerGenerationFactory {
+    fun nextGeneration(): Long?
+}
+
+internal class BoundedCodexOwnerGenerationFactory(
+    initialGeneration: Long = 1L
+) : CodexOwnerGenerationFactory {
+    private var nextGeneration = initialGeneration.coerceAtLeast(1L)
+    private var exhausted = false
+
+    override fun nextGeneration(): Long? {
+        if (exhausted) return null
+        val generation = nextGeneration
+        if (generation == Long.MAX_VALUE) {
+            exhausted = true
+        } else {
+            nextGeneration = generation + 1L
+        }
+        return generation
+    }
+}
+
+internal class CodexButtonOwnerRegistry(
+    private val generationFactory: CodexOwnerGenerationFactory =
+        BoundedCodexOwnerGenerationFactory()
+) {
     private data class Slot(
         val pageId: Int,
         val presentation: DeckUiMode,
@@ -24,12 +49,12 @@ internal class CodexButtonOwnerRegistry {
 
     private val trackedBySlot = mutableMapOf<Slot, TrackedButton>()
     private val buttonsByOwner = mutableMapOf<CodexButtonOwnerKey, DeckButton>()
-    private var nextGeneration = 1L
+    private val bindingsByOwner = mutableMapOf<CodexButtonOwnerKey, CodexButtonBindingPayload>()
 
     fun reconcile(pages: List<DeckPageConfig>): Map<CodexButtonOwnerKey, CodexButtonBindingPayload> {
         val nextTracked = mutableMapOf<Slot, TrackedButton>()
         val nextButtonsByOwner = mutableMapOf<CodexButtonOwnerKey, DeckButton>()
-        val bindingsByOwner = linkedMapOf<CodexButtonOwnerKey, CodexButtonBindingPayload>()
+        val nextBindingsByOwner = linkedMapOf<CodexButtonOwnerKey, CodexButtonBindingPayload>()
 
         pages.forEach { page ->
             reconcilePresentation(
@@ -38,7 +63,7 @@ internal class CodexButtonOwnerRegistry {
                 buttons = page.classicButtons,
                 nextTracked = nextTracked,
                 nextButtonsByOwner = nextButtonsByOwner,
-                bindingsByOwner = bindingsByOwner
+                bindingsByOwner = nextBindingsByOwner
             )
             reconcilePresentation(
                 pageId = page.id,
@@ -46,7 +71,7 @@ internal class CodexButtonOwnerRegistry {
                 buttons = page.consoleButtons,
                 nextTracked = nextTracked,
                 nextButtonsByOwner = nextButtonsByOwner,
-                bindingsByOwner = bindingsByOwner
+                bindingsByOwner = nextBindingsByOwner
             )
         }
 
@@ -54,7 +79,9 @@ internal class CodexButtonOwnerRegistry {
         trackedBySlot.putAll(nextTracked)
         buttonsByOwner.clear()
         buttonsByOwner.putAll(nextButtonsByOwner)
-        return bindingsByOwner
+        bindingsByOwner.clear()
+        bindingsByOwner.putAll(nextBindingsByOwner)
+        return nextBindingsByOwner
     }
 
     fun ownerFor(
@@ -67,6 +94,18 @@ internal class CodexButtonOwnerRegistry {
     }
 
     fun titleFor(owner: CodexButtonOwnerKey): String? = buttonsByOwner[owner]?.title
+
+    fun bindingFor(owner: CodexButtonOwnerKey): CodexButtonBindingPayload? {
+        return bindingsByOwner[owner]?.takeIf { binding ->
+            owner.presetId == binding.presetId && owner.bindingId == binding.bindingId
+        }
+    }
+
+    fun invalidateAll() {
+        trackedBySlot.clear()
+        buttonsByOwner.clear()
+        bindingsByOwner.clear()
+    }
 
     private fun reconcilePresentation(
         pageId: Int,
@@ -84,13 +123,14 @@ internal class CodexButtonOwnerRegistry {
             val owner = if (previous?.button === button && previous.binding == binding) {
                 previous.owner
             } else {
+                val generation = generationFactory.nextGeneration() ?: return@forEach
                 CodexButtonOwnerKey(
                     pageId = pageId,
                     presentation = presentation,
                     buttonId = button.id,
                     presetId = binding.presetId,
                     bindingId = binding.bindingId,
-                    generation = nextGeneration++
+                    generation = generation
                 )
             }
             val tracked = TrackedButton(button, binding, owner)
