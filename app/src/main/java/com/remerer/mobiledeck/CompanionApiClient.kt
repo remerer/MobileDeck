@@ -25,6 +25,13 @@ data class CompanionApiResult(
     val errorCode: String? = null
 )
 
+internal data class CompanionRequestMetadata(
+    val requestId: String,
+    val pairingToken: String,
+    val deviceId: String,
+    val deviceName: String
+)
+
 class CompanionApiClient(context: Context) {
     private val appContext = context.applicationContext
     private val deviceId by lazy { mobileDeckDeviceId(appContext) }
@@ -81,6 +88,30 @@ class CompanionApiClient(context: Context) {
         )
     }
 
+    suspend fun submitCodexJob(
+        settings: CompanionSettings,
+        binding: CodexButtonBindingPayload
+    ): CodexJobApiResult {
+        if (!settings.isConfigured()) return CodexJobApiResult(reconnectRequired = true)
+        return sendCodexJobRequest(settings) { metadata ->
+            buildCodexSubmitRequestJson(metadata, binding)
+        }
+    }
+
+    suspend fun codexJobStatus(
+        settings: CompanionSettings,
+        jobId: String,
+        bindingId: String
+    ): CodexJobApiResult {
+        if (!settings.isConfigured()) return CodexJobApiResult(reconnectRequired = true)
+        if (!CompanionReleaseRoutePolicy.allowsCodexStatus(settings, jobId, bindingId)) {
+            return CodexJobApiResult(failureCode = "invalid_request")
+        }
+        return sendCodexJobRequest(settings) { metadata ->
+            buildCodexStatusRequestJson(metadata, jobId, bindingId)
+        }
+    }
+
     suspend fun controlUpdate(settings: CompanionSettings, source: String, value: Any): CompanionApiResult {
         return send(
             settings,
@@ -134,7 +165,42 @@ class CompanionApiClient(context: Context) {
         )
     }
 
-    private suspend fun send(settings: CompanionSettings, frame: JSONObject): CompanionApiResult {
+    private suspend fun send(
+        settings: CompanionSettings,
+        frame: JSONObject
+    ): CompanionApiResult {
+        val requestType = frame.optString("type", "unknown")
+        return send(settings, requestType) { metadata ->
+            frame
+                .put("requestId", metadata.requestId)
+                .put("pairingToken", metadata.pairingToken)
+                .put("deviceId", metadata.deviceId)
+                .put("deviceName", metadata.deviceName)
+                .toString()
+        }
+    }
+
+    private suspend fun sendCodexJobRequest(
+        settings: CompanionSettings,
+        payloadFactory: (CompanionRequestMetadata) -> String
+    ): CodexJobApiResult {
+        val result = runCatching {
+            send(settings, "program.command", payloadFactory)
+        }.getOrElse {
+            return CodexJobApiResult(reconnectRequired = true)
+        }
+        return CodexJobApiResult.fromCompanionProjection(
+            ok = result.ok,
+            errorCode = result.errorCode,
+            dataJson = result.data.toString()
+        )
+    }
+
+    private suspend fun send(
+        settings: CompanionSettings,
+        requestType: String,
+        payloadFactory: (CompanionRequestMetadata) -> String
+    ): CompanionApiResult {
         if (!settings.isConfigured()) {
             return CompanionApiResult(false, "Companion endpoint or pairing token is empty", errorCode = "not_configured")
         }
@@ -142,14 +208,14 @@ class CompanionApiClient(context: Context) {
         companionEndpointValidationMessage(endpoint)?.let { message ->
             return CompanionApiResult(false, message, errorCode = "invalid_endpoint")
         }
-        val requestId = "android-${UUID.randomUUID()}"
-        val requestType = frame.optString("type", "unknown")
-        val payload = frame
-            .put("requestId", requestId)
-            .put("pairingToken", settings.pairingToken.trim())
-            .put("deviceId", deviceId)
-            .put("deviceName", deviceName)
-            .toString()
+        val metadata = CompanionRequestMetadata(
+            requestId = "android-${UUID.randomUUID()}",
+            pairingToken = settings.pairingToken.trim(),
+            deviceId = deviceId,
+            deviceName = deviceName
+        )
+        val requestId = metadata.requestId
+        val payload = payloadFactory(metadata)
         debugLog(
             "send type=$requestType requestId=$requestId endpoint=$endpoint tokenLength=${settings.pairingToken.trim().length}"
         )
@@ -221,6 +287,71 @@ class CompanionApiClient(context: Context) {
         client.dispatcher.executorService.shutdown()
         client.connectionPool.evictAll()
     }
+}
+
+internal fun buildCodexSubmitRequestJson(
+    metadata: CompanionRequestMetadata,
+    binding: CodexButtonBindingPayload
+): String {
+    val args = "{" +
+        "\"contractVersion\":$CODEX_CONTRACT_VERSION," +
+        "\"presetId\":${binding.presetId.toJsonString()}," +
+        "\"bindingId\":${binding.bindingId.toJsonString()}" +
+        "}"
+    return buildCodexProgramCommandRequestJson(metadata, "exec.submit", args)
+}
+
+internal fun buildCodexStatusRequestJson(
+    metadata: CompanionRequestMetadata,
+    jobId: String,
+    bindingId: String
+): String {
+    require(isValidCodexIdentifier(jobId))
+    require(isValidCodexIdentifier(bindingId))
+    val args = "{" +
+        "\"contractVersion\":$CODEX_CONTRACT_VERSION," +
+        "\"jobId\":${jobId.toJsonString()}," +
+        "\"bindingId\":${bindingId.toJsonString()}" +
+        "}"
+    return buildCodexProgramCommandRequestJson(metadata, "exec.status", args)
+}
+
+private fun buildCodexProgramCommandRequestJson(
+    metadata: CompanionRequestMetadata,
+    command: String,
+    argsJson: String
+): String {
+    return "{" +
+        "\"type\":\"program.command\"," +
+        "\"requestId\":${metadata.requestId.toJsonString()}," +
+        "\"pairingToken\":${metadata.pairingToken.toJsonString()}," +
+        "\"deviceId\":${metadata.deviceId.toJsonString()}," +
+        "\"deviceName\":${metadata.deviceName.toJsonString()}," +
+        "\"programId\":\"codex\"," +
+        "\"command\":${command.toJsonString()}," +
+        "\"args\":$argsJson" +
+        "}"
+}
+
+private fun String.toJsonString(): String {
+    val result = StringBuilder(length + 2).append('"')
+    forEach { character ->
+        when (character) {
+            '"' -> result.append("\\\"")
+            '\\' -> result.append("\\\\")
+            '\b' -> result.append("\\b")
+            '\u000C' -> result.append("\\f")
+            '\n' -> result.append("\\n")
+            '\r' -> result.append("\\r")
+            '\t' -> result.append("\\t")
+            else -> if (character.code < 0x20) {
+                result.append("\\u").append(character.code.toString(16).padStart(4, '0'))
+            } else {
+                result.append(character)
+            }
+        }
+    }
+    return result.append('"').toString()
 }
 
 private fun debugLog(message: String) {
@@ -338,4 +469,4 @@ fun mobileDeckDeviceName(): String {
     }
 }
 
-private const val COMPANION_REQUEST_TIMEOUT_MILLIS = 2200L
+internal const val COMPANION_REQUEST_TIMEOUT_MILLIS = 2200L

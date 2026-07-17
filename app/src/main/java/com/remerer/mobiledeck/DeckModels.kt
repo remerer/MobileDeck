@@ -135,7 +135,8 @@ enum class DeckButtonExecutionRoute {
 data class DeckButtonExecutionDecision(
     val route: DeckButtonExecutionRoute,
     val source: String = "",
-    val value: Any? = null
+    val value: Any? = null,
+    val codexBinding: CodexButtonBindingPayload? = null
 )
 
 fun DeckButton.platformAvailability(): DeckButtonPlatformAvailability {
@@ -167,13 +168,27 @@ fun DeckButton.executionDecision(
     companionAvailable: Boolean,
     payloadOverride: String = payload,
     companionControlSource: String = payload,
-    companionControlValue: Any? = null
+    companionControlValue: Any? = null,
+    debugBuild: Boolean = true,
+    companionSettings: CompanionSettings? = null
 ): DeckButtonExecutionDecision {
     if (platformAvailability() != DeckButtonPlatformAvailability.CompanionRequired) {
         return DeckButtonExecutionDecision(DeckButtonExecutionRoute.AndroidOrHid)
     }
     if (!companionAvailable) {
         return DeckButtonExecutionDecision(DeckButtonExecutionRoute.Unavailable)
+    }
+    if (!debugBuild) {
+        if (actionType != DeckActionType.CompanionCommand) {
+            return DeckButtonExecutionDecision(DeckButtonExecutionRoute.Unavailable)
+        }
+        val binding = companionSettings?.let { settings ->
+            CompanionReleaseRoutePolicy.bindingForSubmit(settings, payloadOverride)
+        } ?: return DeckButtonExecutionDecision(DeckButtonExecutionRoute.Unavailable)
+        return DeckButtonExecutionDecision(
+            route = DeckButtonExecutionRoute.CompanionProgramCommand,
+            codexBinding = binding
+        )
     }
     return when (actionType) {
         DeckActionType.CompanionStatus -> DeckButtonExecutionDecision(DeckButtonExecutionRoute.ReadOnly)
@@ -182,7 +197,8 @@ fun DeckButton.executionDecision(
                 DeckButtonExecutionRoute.CompanionOpen
             } else {
                 DeckButtonExecutionRoute.CompanionProgramCommand
-            }
+            },
+            codexBinding = CodexButtonBindingPayload.parse(payloadOverride)
         )
         DeckActionType.CompanionControl -> DeckButtonExecutionDecision(
             route = DeckButtonExecutionRoute.CompanionControlUpdate,
