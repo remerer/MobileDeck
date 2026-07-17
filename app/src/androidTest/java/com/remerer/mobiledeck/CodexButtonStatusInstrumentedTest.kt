@@ -121,6 +121,21 @@ class CodexButtonStatusInstrumentedTest {
     }
 
     @Test
+    fun longestAllowlistedCodeFitsEnglishImmediatelyBelowCompactThreshold() {
+        assertLongestStatusFits(Locale.ENGLISH, fontScale = Math.nextDown(1.3f))
+    }
+
+    @Test
+    fun longestAllowlistedCodeFitsEnglishAtCompactThreshold() {
+        assertLongestStatusFits(Locale.ENGLISH, fontScale = 1.3f)
+    }
+
+    @Test
+    fun longestAllowlistedCodeFitsEnglishImmediatelyAboveCompactThreshold() {
+        assertLongestStatusFits(Locale.ENGLISH, fontScale = Math.nextUp(1.3f))
+    }
+
+    @Test
     fun longestAllowlistedCodeFitsEnglishAtAccessibilityFontScale() {
         assertLongestStatusFits(Locale.ENGLISH, fontScale = 2.5f)
     }
@@ -131,8 +146,46 @@ class CodexButtonStatusInstrumentedTest {
     }
 
     @Test
+    fun longestAllowlistedCodeFitsKoreanImmediatelyBelowCompactThreshold() {
+        assertLongestStatusFits(Locale.KOREAN, fontScale = Math.nextDown(1.3f))
+    }
+
+    @Test
+    fun longestAllowlistedCodeFitsKoreanAtCompactThreshold() {
+        assertLongestStatusFits(Locale.KOREAN, fontScale = 1.3f)
+    }
+
+    @Test
+    fun longestAllowlistedCodeFitsKoreanImmediatelyAboveCompactThreshold() {
+        assertLongestStatusFits(Locale.KOREAN, fontScale = Math.nextUp(1.3f))
+    }
+
+    @Test
     fun longestAllowlistedCodeFitsKoreanAtAccessibilityFontScale() {
         assertLongestStatusFits(Locale.KOREAN, fontScale = 2.5f)
+    }
+
+    @Test
+    fun everyPairingTokenSettingsPresentationIsPasswordOnly() {
+        composeRule.setContent {
+            Column {
+                CompanionPairingTokenSurface.entries.forEach { surface ->
+                    SecureCompanionPairingTokenField(
+                        surface = surface,
+                        settings = SETTINGS,
+                        onSettingsChange = {}
+                    )
+                }
+            }
+        }
+
+        CompanionPairingTokenSurface.entries.forEach { surface ->
+            composeRule.onNodeWithTag(surface.testTag).assert(
+                SemanticsMatcher.keyIsDefined(SemanticsProperties.Password)
+            )
+        }
+        composeRule.onAllNodes(hasText(SETTINGS.pairingToken)).assertCountEquals(0)
+        composeRule.onAllNodesWithContentDescription(SETTINGS.pairingToken).assertCountEquals(0)
     }
 
     @Test
@@ -163,6 +216,7 @@ class CodexButtonStatusInstrumentedTest {
             var settings by remember { mutableStateOf(CompanionSettings()) }
             CompanionReleaseConfigurationContent(
                 modifier = Modifier.fillMaxSize(),
+                pairingTokenSurface = CompanionPairingTokenSurface.ConsoleDetailsRelease,
                 settings = settings,
                 status = CompanionConnectionStatus(connected = true, message = "Connected"),
                 onSettingsChange = { updated ->
@@ -175,8 +229,8 @@ class CodexButtonStatusInstrumentedTest {
         composeRule.onNodeWithTag(CompanionReleaseSettingsTag).assertExists()
         composeRule.onNodeWithTag(CompanionEnabledSettingTag).assertExists()
         composeRule.onNodeWithTag(CompanionEndpointSettingTag).assertExists()
-        composeRule.onNodeWithTag(CompanionPairingTokenSettingTag).assertExists()
-        composeRule.onNodeWithTag(CompanionPairingTokenSettingTag).assert(
+        composeRule.onNodeWithTag(CompanionPairingTokenSurface.ConsoleDetailsRelease.testTag).assertExists()
+        composeRule.onNodeWithTag(CompanionPairingTokenSurface.ConsoleDetailsRelease.testTag).assert(
             SemanticsMatcher.keyIsDefined(SemanticsProperties.Password)
         )
         composeRule.onNodeWithTag(CompanionConnectionStatusTag).assertExists()
@@ -185,7 +239,8 @@ class CodexButtonStatusInstrumentedTest {
         composeRule.onNodeWithText(context.getString(R.string.companion_send_deck)).assertDoesNotExist()
         composeRule.onNodeWithText(context.getString(R.string.companion_apply_deck)).assertDoesNotExist()
         composeRule.onNodeWithTag(CompanionEndpointSettingTag).performTextInput(SETTINGS.endpoint)
-        composeRule.onNodeWithTag(CompanionPairingTokenSettingTag).performTextInput(SETTINGS.pairingToken)
+        composeRule.onNodeWithTag(CompanionPairingTokenSurface.ConsoleDetailsRelease.testTag)
+            .performTextInput(SETTINGS.pairingToken)
         composeRule.onAllNodes(hasText(SETTINGS.pairingToken)).assertCountEquals(0)
         composeRule.onNode(isToggleable()).performClick()
         composeRule.runOnIdle {
@@ -473,6 +528,16 @@ class CodexButtonStatusInstrumentedTest {
         composeRule.onAllNodes(
             SemanticsMatcher.expectValue(CodexStatusExactLabelKey, label)
         ).assertCountEquals(2)
+        composeRule.onAllNodesWithTag(CodexStatusTextTag)[0].assert(
+            SemanticsMatcher("classic rendered font retains 9dp floor") { node ->
+                node.config[CodexStatusRenderedFontDpKey] >= 9f
+            }
+        )
+        composeRule.onAllNodesWithTag(CodexStatusTextTag)[1].assert(
+            SemanticsMatcher("console rendered font retains 7dp floor") { node ->
+                node.config[CodexStatusRenderedFontDpKey] >= 7f
+            }
+        )
         assertNodeInside("classic-button", label, nodeIndex = 0)
         assertNodeInside("console-button", label, nodeIndex = 1)
         listOf(CodexStatusContainerTag, CodexStatusIconTag, CodexStatusTextTag).forEach { childTag ->

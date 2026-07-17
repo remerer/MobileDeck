@@ -13,6 +13,7 @@ import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.io.File
 
 class CodexButtonPresentationTest {
     @Test
@@ -59,6 +60,68 @@ class CodexButtonPresentationTest {
         assertEquals(2.dp, largeClassic.spacing)
         assertEquals(11f, largeClassic.fontSize.value * 2.5f, 0.001f)
         assertEquals(12f, largeClassic.lineHeight.value * 2.5f, 0.001f)
+    }
+
+    @Test
+    fun statusLayoutEntersCompactTierAtExactRiskBoundary() {
+        val immediatelyBelow = codexStatusLayoutSpec(
+            isConsole = true,
+            fontScale = Math.nextDown(1.3f)
+        )
+        val atBoundary = codexStatusLayoutSpec(isConsole = true, fontScale = 1.3f)
+        val immediatelyAbove = codexStatusLayoutSpec(
+            isConsole = true,
+            fontScale = Math.nextUp(1.3f)
+        )
+
+        assertEquals(10.dp, immediatelyBelow.iconSize)
+        assertEquals(3.dp, immediatelyBelow.padding)
+        assertEquals(1.dp, immediatelyBelow.spacing)
+        listOf(atBoundary, immediatelyAbove).forEach { layout ->
+            assertEquals(8.dp, layout.iconSize)
+            assertEquals(1.dp, layout.padding)
+            assertEquals(0.dp, layout.spacing)
+        }
+    }
+
+    @Test
+    fun everyPairingTokenSettingsPresentationUsesTheSharedSecureField() {
+        val source = mainActivitySource()
+        val rawTokenValueBindings = Regex("""value\s*=\s*\w+\.pairingToken""")
+            .findAll(source)
+            .count()
+
+        assertEquals(
+            "Only the shared secure field may bind the raw pairing-token value",
+            1,
+            rawTokenValueBindings
+        )
+        listOf(
+            "ClassicSidebarDebug",
+            "ClassicCardDebug",
+            "ClassicSidebarRelease",
+            "ConsoleDetailsRelease"
+        ).forEach { surface ->
+            assertEquals(
+                "$surface must be declared once and wired once",
+                2,
+                Regex("""\b$surface\b""").findAll(source).count()
+            )
+        }
+        assertEquals(
+            1,
+            Regex("""contentType\(ContentType\.Password\)""").findAll(source).count()
+        )
+        assertEquals(
+            1,
+            Regex("""keyboardType\s*=\s*KeyboardType\.Password""").findAll(source).count()
+        )
+        assertEquals(
+            1,
+            Regex("""visualTransformation\s*=\s*PasswordVisualTransformation\(\)""")
+                .findAll(source)
+                .count()
+        )
     }
 
     @Test
@@ -481,6 +544,14 @@ class CodexButtonPresentationTest {
 
     private fun bindingJson(binding: CodexButtonBindingPayload): String {
         return """{"programId":"codex","command":"exec.submit","args":{"contractVersion":1,"presetId":"${binding.presetId}","bindingId":"${binding.bindingId}"}}"""
+    }
+
+    private fun mainActivitySource(): String {
+        val relativePath = "src/main/java/com/remerer/mobiledeck/MainActivity.kt"
+        val source = sequenceOf(File(relativePath), File("app/$relativePath"))
+            .firstOrNull(File::isFile)
+        return requireNotNull(source) { "MainActivity.kt was not found from ${File(".").absolutePath}" }
+            .readText()
     }
 
     companion object {

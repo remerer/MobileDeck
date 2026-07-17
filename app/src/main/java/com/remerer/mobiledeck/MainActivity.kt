@@ -182,6 +182,8 @@ import androidx.compose.runtime.withFrameMillis
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.autofill.ContentType
+import androidx.compose.ui.autofill.contentType
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawWithCache
@@ -554,6 +556,7 @@ internal fun codexButtonVisualStatus(
 
 internal val CodexStatusTextFitsKey = SemanticsPropertyKey<Boolean>("CodexStatusTextFits")
 internal val CodexStatusExactLabelKey = SemanticsPropertyKey<String>("CodexStatusExactLabel")
+internal val CodexStatusRenderedFontDpKey = SemanticsPropertyKey<Float>("CodexStatusRenderedFontDp")
 internal const val CodexStatusContainerTag = "codex-status-container"
 internal const val CodexStatusIconTag = "codex-status-icon"
 internal const val CodexStatusTextTag = "codex-status-text"
@@ -572,7 +575,7 @@ internal fun codexStatusLayoutSpec(
     fontScale: Float
 ): CodexStatusLayoutSpec {
     val safeFontScale = fontScale.takeIf { it.isFinite() && it > 0f } ?: 1f
-    val accessibilityCompact = safeFontScale > 1.3f
+    val accessibilityCompact = safeFontScale >= 1.3f
     val minimumRenderedFontDp = if (isConsole) 7f else 9f
     val maximumRenderedFontDp = if (isConsole) 8f else 11f
     val minimumRenderedLineDp = if (isConsole) 8f else 10f
@@ -657,7 +660,9 @@ private fun CodexButtonStatusContent(
     isConsole: Boolean,
     modifier: Modifier = Modifier
 ) {
-    val layout = codexStatusLayoutSpec(isConsole, LocalDensity.current.fontScale)
+    val density = LocalDensity.current
+    val layout = codexStatusLayoutSpec(isConsole, density.fontScale)
+    val renderedFontDp = layout.fontSize.value * density.fontScale
     val label = codexButtonStatusLabel(LocalContext.current.resources, status)
     val tint = when (status.phase) {
         CodexButtonVisualPhase.Completed -> Color(0xFF4CD48A)
@@ -733,6 +738,7 @@ private fun CodexButtonStatusContent(
                 .clearAndSetSemantics {
                     this[CodexStatusTextFitsKey] = textFits
                     this[CodexStatusExactLabelKey] = label
+                    this[CodexStatusRenderedFontDpKey] = renderedFontDp
                 }
                 .testTag(CodexStatusTextTag),
             text = label.withCodexWrapOpportunities(),
@@ -3790,12 +3796,11 @@ private fun ClassicPcConnectionSidebarBox(
                                     label = { Text(stringResource(R.string.companion_endpoint)) },
                                     placeholder = { Text("ws://192.168.0.2:17652") }
                                 )
-                                OutlinedTextField(
+                                SecureCompanionPairingTokenField(
                                     modifier = Modifier.fillMaxWidth(),
-                                    value = settings.pairingToken,
-                                    onValueChange = { onSettingsChange(settings.copy(pairingToken = it)) },
-                                    singleLine = true,
-                                    label = { Text(stringResource(R.string.companion_pairing_token)) }
+                                    surface = CompanionPairingTokenSurface.ClassicSidebarDebug,
+                                    settings = settings,
+                                    onSettingsChange = onSettingsChange
                                 )
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
@@ -3844,6 +3849,7 @@ private fun ClassicPcConnectionSidebarBox(
                         AnimatedVisibility(visible = companionExpanded) {
                             CompanionReleaseConfigurationContent(
                                 modifier = Modifier.padding(8.dp),
+                                pairingTokenSurface = CompanionPairingTokenSurface.ClassicSidebarRelease,
                                 settings = settings,
                                 status = companionStatus,
                                 onSettingsChange = onSettingsChange
@@ -5034,6 +5040,7 @@ private fun ConsoleSettingsContent(
                         } else {
                             CompanionReleaseConfigurationContent(
                                 modifier = Modifier.fillMaxWidth(),
+                                pairingTokenSurface = CompanionPairingTokenSurface.ConsoleDetailsRelease,
                                 settings = companionSettings,
                                 status = companionStatus,
                                 onSettingsChange = onCompanionSettingsChange
@@ -10346,12 +10353,11 @@ private fun ClassicCompanionSettingsCard(
                         label = { Text(stringResource(R.string.companion_endpoint)) },
                         placeholder = { Text("ws://192.168.0.2:17652") }
                     )
-                    OutlinedTextField(
+                    SecureCompanionPairingTokenField(
                         modifier = Modifier.weight(1f),
-                        value = settings.pairingToken,
-                        onValueChange = { onSettingsChange(settings.copy(pairingToken = it)) },
-                        singleLine = true,
-                        label = { Text(stringResource(R.string.companion_pairing_token)) }
+                        surface = CompanionPairingTokenSurface.ClassicCardDebug,
+                        settings = settings,
+                        onSettingsChange = onSettingsChange
                     )
                 }
                 Row(
@@ -10404,11 +10410,41 @@ internal const val CompanionEndpointSettingTag = "companion-endpoint-setting"
 internal const val CompanionPairingTokenSettingTag = "companion-pairing-token-setting"
 internal const val CompanionConnectionStatusTag = "companion-connection-status"
 
+internal enum class CompanionPairingTokenSurface(val testTag: String) {
+    ClassicSidebarDebug("$CompanionPairingTokenSettingTag-classic-sidebar-debug"),
+    ClassicCardDebug("$CompanionPairingTokenSettingTag-classic-card-debug"),
+    ClassicSidebarRelease("$CompanionPairingTokenSettingTag-classic-sidebar-release"),
+    ConsoleDetailsRelease("$CompanionPairingTokenSettingTag-console-details-release")
+}
+
+@Composable
+internal fun SecureCompanionPairingTokenField(
+    surface: CompanionPairingTokenSurface,
+    settings: CompanionSettings,
+    onSettingsChange: (CompanionSettings) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    OutlinedTextField(
+        modifier = modifier
+            .contentType(ContentType.Password)
+            .testTag(surface.testTag),
+        value = settings.pairingToken,
+        onValueChange = { pairingToken ->
+            onSettingsChange(settings.copy(pairingToken = pairingToken))
+        },
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+        visualTransformation = PasswordVisualTransformation(),
+        label = { Text(stringResource(R.string.companion_pairing_token)) }
+    )
+}
+
 @Composable
 internal fun CompanionReleaseConfigurationContent(
     settings: CompanionSettings,
     status: CompanionConnectionStatus,
     onSettingsChange: (CompanionSettings) -> Unit,
+    pairingTokenSurface: CompanionPairingTokenSurface,
     modifier: Modifier = Modifier
 ) {
     val colors = LocalDeckThemeColors.current
@@ -10469,18 +10505,11 @@ internal fun CompanionReleaseConfigurationContent(
             label = { Text(stringResource(R.string.companion_endpoint)) },
             placeholder = { Text("ws://192.168.0.2:17652") }
         )
-        OutlinedTextField(
-            modifier = Modifier
-                .fillMaxWidth()
-                .testTag(CompanionPairingTokenSettingTag),
-            value = settings.pairingToken,
-            onValueChange = { pairingToken ->
-                onSettingsChange(settings.copy(pairingToken = pairingToken))
-            },
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-            visualTransformation = PasswordVisualTransformation(),
-            label = { Text(stringResource(R.string.companion_pairing_token)) }
+        SecureCompanionPairingTokenField(
+            modifier = Modifier.fillMaxWidth(),
+            surface = pairingTokenSurface,
+            settings = settings,
+            onSettingsChange = onSettingsChange
         )
     }
 }
