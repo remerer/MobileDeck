@@ -15,6 +15,7 @@ import android.bluetooth.BluetoothAdapter
 import android.content.Context
 import android.content.Intent
 import android.content.res.Configuration
+import android.content.res.Resources
 import android.content.pm.PackageManager
 import android.content.pm.ResolveInfo
 import android.graphics.BitmapFactory
@@ -225,8 +226,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.SemanticsPropertyKey
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
@@ -265,61 +268,61 @@ import kotlin.math.sin
 
 internal class CodexButtonTaskCoordinator(
     private val scope: CoroutineScope,
-    private val taskStates: MutableMap<Int, CodexButtonTaskState>,
-    private val commandFailureCodes: MutableMap<Int, String>,
-    private val submittingButtons: MutableMap<Int, Boolean>,
+    private val taskStates: MutableMap<CodexButtonOwnerKey, CodexButtonTaskState>,
+    private val commandFailureCodes: MutableMap<CodexButtonOwnerKey, String>,
+    private val submittingButtons: MutableMap<CodexButtonOwnerKey, Boolean>,
     private val submitJob: suspend (CompanionSettings, CodexButtonBindingPayload) -> CodexJobApiResult,
     private val pollJob: suspend (CompanionSettings, String, String) -> CodexJobApiResult,
     private val delayMillis: suspend (Long) -> Unit = { delay(it) },
     private val nowMillis: () -> Long = SystemClock::elapsedRealtime,
-    private val onAccepted: (Int, CodexJobSnapshot) -> Unit = { _, _ -> },
-    private val onFailure: (Int, String) -> Unit = { _, _ -> },
+    private val onAccepted: (CodexButtonOwnerKey, CodexJobSnapshot) -> Unit = { _, _ -> },
+    private val onFailure: (CodexButtonOwnerKey, String) -> Unit = { _, _ -> },
     private val onConnectionChanged: (Boolean) -> Unit = {}
 ) {
-    private val requestJobs = mutableMapOf<Int, Job>()
-    private val expiryJobs = mutableMapOf<Int, Job>()
-    private val bindings = mutableMapOf<Int, CodexButtonBindingPayload>()
+    private val requestJobs = mutableMapOf<CodexButtonOwnerKey, Job>()
+    private val expiryJobs = mutableMapOf<CodexButtonOwnerKey, Job>()
+    private val bindings = mutableMapOf<CodexButtonOwnerKey, CodexButtonBindingPayload>()
 
     fun submitOnce(
-        buttonId: Int,
+        owner: CodexButtonOwnerKey,
         settings: CompanionSettings,
         binding: CodexButtonBindingPayload
     ): Boolean {
         if (!CompanionReleaseRoutePolicy.allowsCodexSubmit(settings, codexBindingPayloadJson(binding))) {
             return false
         }
-        val existing = taskStates[buttonId]
+        val existing = taskStates[owner]
         if (existing?.suppressesDuplicateSubmit == true || existing?.reconnecting == true) return false
         if (existing?.snapshot?.status == CodexJobStatus.Cancelled &&
             !existing.isTerminalDisplayExpired(nowMillis())
         ) {
             return false
         }
-        if (requestJobs[buttonId]?.isActive == true || submittingButtons[buttonId] == true) return false
+        if (requestJobs[owner]?.isActive == true || submittingButtons[owner] == true) return false
 
-        expiryJobs.remove(buttonId)?.cancel()
-        taskStates.remove(buttonId)
-        commandFailureCodes.remove(buttonId)
-        bindings[buttonId] = binding
-        submittingButtons[buttonId] = true
+        expiryJobs.remove(owner)?.cancel()
+        taskStates.remove(owner)
+        commandFailureCodes.remove(owner)
+        bindings[owner] = binding
+        submittingButtons[owner] = true
 
         val requestJob = scope.launch(start = CoroutineStart.LAZY) {
-            submitUntilAccepted(buttonId, settings, binding)
+            submitUntilAccepted(owner, settings, binding)
         }
-        requestJobs[buttonId] = requestJob
+        requestJobs[owner] = requestJob
         requestJob.invokeOnCompletion {
-            if (requestJobs[buttonId] === requestJob) {
-                requestJobs.remove(buttonId)
-                submittingButtons.remove(buttonId)
+            if (requestJobs[owner] === requestJob) {
+                requestJobs.remove(owner)
+                submittingButtons.remove(owner)
             }
         }
         requestJob.start()
         return true
     }
 
-    fun retainBindings(validBindings: Map<Int, CodexButtonBindingPayload>) {
-        val staleIds = bindings.keys.filter { buttonId -> bindings[buttonId] != validBindings[buttonId] }
-        staleIds.forEach(::removeButton)
+    fun retainBindings(validBindings: Map<CodexButtonOwnerKey, CodexButtonBindingPayload>) {
+        val staleOwners = bindings.keys.filter { owner -> bindings[owner] != validBindings[owner] }
+        staleOwners.forEach(::removeButton)
     }
 
     fun clear() {
@@ -333,20 +336,21 @@ internal class CodexButtonTaskCoordinator(
     }
 
     private suspend fun submitUntilAccepted(
-        buttonId: Int,
+        owner: CodexButtonOwnerKey,
         settings: CompanionSettings,
         binding: CodexButtonBindingPayload
     ) {
         var reconnectAttempt = 0
-        while (bindings[buttonId] == binding) {
+        while (bindings[owner] == binding) {
             val result = submitJob(settings, binding)
+            if (bindings[owner] != binding) return
             val snapshot = result.snapshot
             when {
                 snapshot != null -> {
                     onConnectionChanged(true)
-                    submittingButtons.remove(buttonId)
-                    onAccepted(buttonId, snapshot)
-                    observeSnapshot(buttonId, settings, binding, snapshot)
+                    submittingButtons.remove(owner)
+                    onAccepted(owner, snapshot)
+                    observeSnapshot(owner, settings, binding, snapshot)
                     return
                 }
                 result.reconnectRequired -> {
@@ -355,7 +359,7 @@ internal class CodexButtonTaskCoordinator(
                     reconnectAttempt += 1
                 }
                 else -> {
-                    storeCommandFailure(buttonId, result.failureCode)
+                    storeCommandFailure(owner, result.failureCode)
                     return
                 }
             }
@@ -363,29 +367,33 @@ internal class CodexButtonTaskCoordinator(
     }
 
     private suspend fun observeSnapshot(
-        buttonId: Int,
+        owner: CodexButtonOwnerKey,
         settings: CompanionSettings,
         binding: CodexButtonBindingPayload,
         acceptedSnapshot: CodexJobSnapshot
     ) {
         var current = acceptedSnapshot
-        storeSnapshot(buttonId, current)
+        storeSnapshot(owner, current)
         if (current.status.isTerminal) return
 
-        while (bindings[buttonId] == binding && current.status.isActive) {
+        while (bindings[owner] == binding && current.status.isActive) {
             delayMillis(CODEX_JOB_POLL_INTERVAL_MILLIS)
+            if (bindings[owner] != binding) return
             var result = pollJob(settings, current.jobId, binding.bindingId)
+            if (bindings[owner] != binding) return
             var reconnectAttempt = 0
-            while (result.reconnectRequired && bindings[buttonId] == binding) {
-                taskStates[buttonId] = CodexButtonTaskState(
+            while (result.reconnectRequired && bindings[owner] == binding) {
+                taskStates[owner] = CodexButtonTaskState(
                     snapshot = current,
                     reconnecting = true,
                     reconnectAttempt = reconnectAttempt
                 )
                 onConnectionChanged(false)
                 delayMillis(CodexButtonTaskState.reconnectDelayMillis(reconnectAttempt))
+                if (bindings[owner] != binding) return
                 reconnectAttempt += 1
                 result = pollJob(settings, current.jobId, binding.bindingId)
+                if (bindings[owner] != binding) return
             }
 
             val next = result.snapshot
@@ -393,19 +401,19 @@ internal class CodexButtonTaskCoordinator(
                 next != null -> {
                     onConnectionChanged(true)
                     current = next
-                    storeSnapshot(buttonId, current)
+                    storeSnapshot(owner, current)
                 }
                 result.reconnectRequired -> return
                 else -> {
-                    storeCommandFailure(buttonId, result.failureCode)
+                    storeCommandFailure(owner, result.failureCode)
                     return
                 }
             }
         }
     }
 
-    private fun storeSnapshot(buttonId: Int, snapshot: CodexJobSnapshot) {
-        commandFailureCodes.remove(buttonId)
+    private fun storeSnapshot(owner: CodexButtonOwnerKey, snapshot: CodexJobSnapshot) {
+        commandFailureCodes.remove(owner)
         val observedAt = if (
             snapshot.status == CodexJobStatus.Completed || snapshot.status == CodexJobStatus.Cancelled
         ) {
@@ -417,41 +425,41 @@ internal class CodexButtonTaskCoordinator(
             snapshot = snapshot,
             terminalObservedAtMillis = observedAt
         )
-        taskStates[buttonId] = state
-        if (observedAt != null) scheduleTerminalExpiry(buttonId, state)
+        taskStates[owner] = state
+        if (observedAt != null) scheduleTerminalExpiry(owner, state)
     }
 
-    private fun scheduleTerminalExpiry(buttonId: Int, observedState: CodexButtonTaskState) {
-        expiryJobs.remove(buttonId)?.cancel()
+    private fun scheduleTerminalExpiry(owner: CodexButtonOwnerKey, observedState: CodexButtonTaskState) {
+        expiryJobs.remove(owner)?.cancel()
         val expiryJob = scope.launch {
             delayMillis(CODEX_TERMINAL_DISPLAY_MILLIS)
-            if (taskStates[buttonId] === observedState && observedState.isTerminalDisplayExpired(nowMillis())) {
-                taskStates.remove(buttonId)
-                bindings.remove(buttonId)
+            if (taskStates[owner] === observedState && observedState.isTerminalDisplayExpired(nowMillis())) {
+                taskStates.remove(owner)
+                bindings.remove(owner)
             }
         }
-        expiryJobs[buttonId] = expiryJob
+        expiryJobs[owner] = expiryJob
         expiryJob.invokeOnCompletion {
-            if (expiryJobs[buttonId] === expiryJob) expiryJobs.remove(buttonId)
+            if (expiryJobs[owner] === expiryJob) expiryJobs.remove(owner)
         }
     }
 
-    private fun storeCommandFailure(buttonId: Int, errorCode: String?) {
+    private fun storeCommandFailure(owner: CodexButtonOwnerKey, errorCode: String?) {
         onConnectionChanged(true)
-        taskStates.remove(buttonId)
-        submittingButtons.remove(buttonId)
+        taskStates.remove(owner)
+        submittingButtons.remove(owner)
         val safeCode = projectSafeCodexFailureCode(errorCode) ?: "internal_error"
-        commandFailureCodes[buttonId] = safeCode
-        onFailure(buttonId, safeCode)
+        commandFailureCodes[owner] = safeCode
+        onFailure(owner, safeCode)
     }
 
-    private fun removeButton(buttonId: Int) {
-        requestJobs.remove(buttonId)?.cancel()
-        expiryJobs.remove(buttonId)?.cancel()
-        bindings.remove(buttonId)
-        taskStates.remove(buttonId)
-        commandFailureCodes.remove(buttonId)
-        submittingButtons.remove(buttonId)
+    private fun removeButton(owner: CodexButtonOwnerKey) {
+        requestJobs.remove(owner)?.cancel()
+        expiryJobs.remove(owner)?.cancel()
+        bindings.remove(owner)
+        taskStates.remove(owner)
+        commandFailureCodes.remove(owner)
+        submittingButtons.remove(owner)
     }
 }
 
@@ -513,25 +521,60 @@ internal fun codexButtonVisualStatus(
     return null
 }
 
+internal val CodexStatusTextFitsKey = SemanticsPropertyKey<Boolean>("CodexStatusTextFits")
+internal const val CodexStatusContainerTag = "codex-status-container"
+internal const val CodexStatusIconTag = "codex-status-icon"
+internal const val CodexStatusTextTag = "codex-status-text"
+
 @Composable
-internal fun CodexButtonStatusOverlay(
+internal fun DeckButtonPrimaryPresentation(
     status: CodexButtonVisualStatus?,
+    isConsole: Boolean,
+    modifier: Modifier = Modifier,
+    regularContent: @Composable () -> Unit
+) {
+    Box(modifier = modifier, contentAlignment = Alignment.Center) {
+        if (status == null) {
+            regularContent()
+        } else {
+            CodexButtonStatusContent(
+                modifier = Modifier.fillMaxSize(),
+                status = status,
+                isConsole = isConsole
+            )
+        }
+    }
+}
+
+internal fun codexButtonStatusLabel(
+    resources: Resources,
+    status: CodexButtonVisualStatus
+): String {
+    return when (status.phase) {
+        CodexButtonVisualPhase.Queued -> resources.getString(R.string.codex_status_queued)
+        CodexButtonVisualPhase.Running -> resources.getString(
+            R.string.codex_status_running_elapsed,
+            formatCodexElapsed(status.elapsedMs)
+        )
+        CodexButtonVisualPhase.Completed -> resources.getString(R.string.codex_status_completed)
+        CodexButtonVisualPhase.Failed -> status.safeFailureCode?.let { safeCode ->
+            resources.getString(R.string.codex_status_failed_code, safeCode)
+        } ?: resources.getString(R.string.codex_status_failed)
+        CodexButtonVisualPhase.Cancelled -> resources.getString(R.string.codex_status_cancelled)
+        CodexButtonVisualPhase.Disabled -> resources.getString(R.string.codex_status_disabled)
+        CodexButtonVisualPhase.Disconnected -> resources.getString(R.string.codex_status_disconnected)
+        CodexButtonVisualPhase.Reconnecting -> resources.getString(R.string.codex_status_reconnecting)
+    }
+}
+
+@Composable
+private fun CodexButtonStatusContent(
+    status: CodexButtonVisualStatus,
+    isConsole: Boolean,
     modifier: Modifier = Modifier
 ) {
-    status ?: return
-    val elapsed = formatCodexElapsed(status.elapsedMs)
-    val label = when (status.phase) {
-        CodexButtonVisualPhase.Queued -> stringResource(R.string.codex_status_queued)
-        CodexButtonVisualPhase.Running -> stringResource(R.string.codex_status_running_elapsed, elapsed)
-        CodexButtonVisualPhase.Completed -> stringResource(R.string.codex_status_completed)
-        CodexButtonVisualPhase.Failed -> status.safeFailureCode?.let { safeCode ->
-            stringResource(R.string.codex_status_failed_code, safeCode)
-        } ?: stringResource(R.string.codex_status_failed)
-        CodexButtonVisualPhase.Cancelled -> stringResource(R.string.codex_status_cancelled)
-        CodexButtonVisualPhase.Disabled -> stringResource(R.string.codex_status_disabled)
-        CodexButtonVisualPhase.Disconnected -> stringResource(R.string.codex_status_disconnected)
-        CodexButtonVisualPhase.Reconnecting -> stringResource(R.string.codex_status_reconnecting)
-    }
+    LocalConfiguration.current
+    val label = codexButtonStatusLabel(LocalContext.current.resources, status)
     val tint = when (status.phase) {
         CodexButtonVisualPhase.Completed -> Color(0xFF4CD48A)
         CodexButtonVisualPhase.Failed -> Color(0xFFFFC14D)
@@ -540,67 +583,86 @@ internal fun CodexButtonStatusOverlay(
         CodexButtonVisualPhase.Disconnected -> Color(0xFFC7D0D9)
         else -> Color.White
     }
-    Row(
+    var textFits by remember(label, isConsole) { mutableStateOf(false) }
+    Column(
         modifier = modifier
+            .background(Color.Black.copy(alpha = 0.52f))
+            .testTag(CodexStatusContainerTag)
             .semantics { contentDescription = label }
-            .clip(RoundedCornerShape(6.dp))
-            .background(Color.Black.copy(alpha = 0.7f))
-            .padding(horizontal = 6.dp, vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(4.dp)
+            .padding(if (isConsole) 3.dp else 5.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(
+            if (isConsole) 1.dp else 3.dp,
+            Alignment.CenterVertically
+        )
     ) {
+        val iconModifier = Modifier
+            .size(if (isConsole) 10.dp else 14.dp)
+            .testTag(CodexStatusIconTag)
         when (status.phase) {
             CodexButtonVisualPhase.Queued,
             CodexButtonVisualPhase.Running -> CircularProgressIndicator(
-                modifier = Modifier.size(12.dp),
+                modifier = iconModifier,
                 color = tint,
-                strokeWidth = 1.5.dp
+                strokeWidth = if (isConsole) 1.dp else 1.5.dp
             )
             CodexButtonVisualPhase.Completed -> Icon(
                 imageVector = Icons.Filled.Check,
                 contentDescription = null,
-                modifier = Modifier.size(13.dp),
+                modifier = iconModifier,
                 tint = tint
             )
             CodexButtonVisualPhase.Failed -> Icon(
                 imageVector = Icons.Filled.Warning,
                 contentDescription = null,
-                modifier = Modifier.size(13.dp),
+                modifier = iconModifier,
                 tint = tint
             )
             CodexButtonVisualPhase.Cancelled -> Icon(
                 imageVector = Icons.Filled.Close,
                 contentDescription = null,
-                modifier = Modifier.size(13.dp),
+                modifier = iconModifier,
                 tint = tint
             )
             CodexButtonVisualPhase.Disabled -> Icon(
                 imageVector = Icons.Filled.Lock,
                 contentDescription = null,
-                modifier = Modifier.size(13.dp),
+                modifier = iconModifier,
                 tint = tint
             )
             CodexButtonVisualPhase.Disconnected -> Icon(
                 imageVector = Icons.Filled.Link,
                 contentDescription = null,
-                modifier = Modifier.size(13.dp),
+                modifier = iconModifier,
                 tint = tint
             )
             CodexButtonVisualPhase.Reconnecting -> Icon(
                 imageVector = Icons.Filled.Refresh,
                 contentDescription = null,
-                modifier = Modifier.size(13.dp),
+                modifier = iconModifier,
                 tint = tint
             )
         }
         Text(
-            text = label,
-            style = MaterialTheme.typography.labelSmall,
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag(CodexStatusTextTag)
+                .semantics { this[CodexStatusTextFitsKey] = textFits },
+            text = label.withCodexWrapOpportunities(),
             color = tint,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
+            fontSize = if (isConsole) 7.sp else 9.sp,
+            lineHeight = if (isConsole) 8.sp else 10.sp,
+            textAlign = TextAlign.Center,
+            maxLines = 5,
+            softWrap = true,
+            overflow = TextOverflow.Visible,
+            onTextLayout = { layout -> textFits = !layout.hasVisualOverflow }
         )
     }
+}
+
+private fun String.withCodexWrapOpportunities(): String {
+    return replace("_", "_\u200B")
 }
 
 internal fun formatCodexElapsed(elapsedMs: Long): String {
@@ -860,6 +922,9 @@ private fun MobileDeckApp(
     var companionRouteActive by remember { mutableStateOf(false) }
     var companionSyncViewToPc by remember { mutableStateOf(loadCompanionSyncViewToPc(context)) }
     var companionFollowPcView by remember { mutableStateOf(loadCompanionFollowPcView(context)) }
+    val companionSettingsAccess = remember {
+        CompanionSettingsAccessPolicy.forBuild(debugBuild = BuildConfig.DEBUG)
+    }
     var skipNextViewOnlyBundleUpload by remember { mutableStateOf(false) }
     var suppressNextViewSyncUpload by remember { mutableStateOf(false) }
     var classicCompanionConnectionExpanded by remember { mutableStateOf(loadClassicCompanionConnectionExpanded(context)) }
@@ -875,10 +940,11 @@ private fun MobileDeckApp(
     val deckButtons = activeDeckPage.buttonsForMode(activeButtonMode)
     val activeConsoleButtons = activeDeckPage.buttonsForMode(DeckUiMode.Console)
     val allDeckButtons = deckPages.flatMap { it.classicButtons + it.consoleButtons }
-    val latestAllDeckButtons by rememberUpdatedState(allDeckButtons)
-    val codexTaskStates = remember { mutableStateMapOf<Int, CodexButtonTaskState>() }
-    val codexCommandFailures = remember { mutableStateMapOf<Int, String>() }
-    val codexSubmittingButtons = remember { mutableStateMapOf<Int, Boolean>() }
+    val codexOwnerRegistry = remember { CodexButtonOwnerRegistry() }
+    val activeCodexBindings = remember(deckPages) { codexOwnerRegistry.reconcile(deckPages) }
+    val codexTaskStates = remember { mutableStateMapOf<CodexButtonOwnerKey, CodexButtonTaskState>() }
+    val codexCommandFailures = remember { mutableStateMapOf<CodexButtonOwnerKey, String>() }
+    val codexSubmittingButtons = remember { mutableStateMapOf<CodexButtonOwnerKey, Boolean>() }
     val codexTaskCoordinator = remember(companionClient, coroutineScope) {
         CodexButtonTaskCoordinator(
             scope = coroutineScope,
@@ -897,8 +963,9 @@ private fun MobileDeckApp(
                         .getOrElse { CodexJobApiResult(reconnectRequired = true) }
                 }
             },
-            onAccepted = { buttonId, snapshot ->
-                val buttonTitle = latestAllDeckButtons.firstOrNull { it.id == buttonId }?.title ?: "Codex"
+            onAccepted = accepted@{ owner, snapshot ->
+                if (!BuildConfig.DEBUG) return@accepted
+                val buttonTitle = codexOwnerRegistry.titleFor(owner) ?: "Codex"
                 logs = listOf(
                     ActivityLog(
                         buttonTitle = buttonTitle,
@@ -908,8 +975,9 @@ private fun MobileDeckApp(
                     )
                 ) + logs.take(9)
             },
-            onFailure = { buttonId, safeCode ->
-                val buttonTitle = latestAllDeckButtons.firstOrNull { it.id == buttonId }?.title ?: "Codex"
+            onFailure = failure@{ owner, safeCode ->
+                if (!BuildConfig.DEBUG) return@failure
+                val buttonTitle = codexOwnerRegistry.titleFor(owner) ?: "Codex"
                 logs = listOf(
                     ActivityLog(
                         buttonTitle = buttonTitle,
@@ -927,11 +995,6 @@ private fun MobileDeckApp(
             }
         )
     }
-    val activeCodexBindings = allDeckButtons.mapNotNull { button ->
-        if (button.actionType != DeckActionType.CompanionCommand) return@mapNotNull null
-        CodexButtonBindingPayload.parse(button.payload)?.let { binding -> button.id to binding }
-    }.toMap()
-
     LaunchedEffect(activeCodexBindings) {
         codexTaskCoordinator.retainBindings(activeCodexBindings)
     }
@@ -1165,11 +1228,11 @@ private fun MobileDeckApp(
     }
 
     fun updateCompanionSettings(settings: CompanionSettings) {
-        if (!BuildConfig.DEBUG) return
+        val updated = companionSettingsAccess.configurationUpdate(companionSettings, settings)
         codexTaskCoordinator.clear()
-        companionSettings = settings
-        saveCompanionSettings(context, settings)
-        if (!settings.isConfigured()) {
+        companionSettings = updated
+        saveCompanionSettings(context, updated)
+        if (!updated.isConfigured()) {
             companionRouteActive = false
             companionStatus = CompanionConnectionStatus(message = "Companion is not configured")
         }
@@ -1181,7 +1244,7 @@ private fun MobileDeckApp(
     }
 
     fun updateCompanionSyncViewToPc(enabled: Boolean) {
-        if (!BuildConfig.DEBUG) return
+        if (!companionSettingsAccess.canAccess(CompanionSettingsFeature.DeckSyncAutomation)) return
         companionSyncViewToPc = enabled
         saveCompanionSyncViewToPc(context, enabled)
         if (enabled && companionFollowPcView) {
@@ -1191,7 +1254,7 @@ private fun MobileDeckApp(
     }
 
     fun updateCompanionFollowPcView(enabled: Boolean) {
-        if (!BuildConfig.DEBUG) return
+        if (!companionSettingsAccess.canAccess(CompanionSettingsFeature.DeckSyncAutomation)) return
         companionFollowPcView = enabled
         saveCompanionFollowPcView(context, enabled)
         if (enabled && companionSyncViewToPc) {
@@ -2199,6 +2262,7 @@ private fun MobileDeckApp(
     }
 
     fun logCodexRouteRejection(button: DeckButton, note: String) {
+        if (!companionSettingsAccess.canAccess(CompanionSettingsFeature.Logs)) return
         logs = listOf(
             ActivityLog(
                 buttonTitle = button.title,
@@ -2221,7 +2285,16 @@ private fun MobileDeckApp(
                     logCodexRouteRejection(button, "codex route disabled")
                     return
                 }
-                codexTaskCoordinator.submitOnce(button.id, companionSettings, releaseBinding)
+                val owner = codexOwnerRegistry.ownerFor(
+                    pageId = activeDeckPage.id,
+                    presentation = activeButtonMode,
+                    button = button
+                )
+                if (owner == null) {
+                    logCodexRouteRejection(button, "stale binding")
+                    return
+                }
+                codexTaskCoordinator.submitOnce(owner, companionSettings, releaseBinding)
                 return
             }
             if (!BuildConfig.DEBUG) {
@@ -2454,6 +2527,7 @@ private fun MobileDeckApp(
                     codexTaskStates = codexTaskStates,
                     codexCommandFailures = codexCommandFailures,
                     codexSubmittingButtons = codexSubmittingButtons,
+                    codexOwnerForButton = codexOwnerRegistry::ownerFor,
                     codexCompanionConfigured = codexCompanionConfigured,
                     codexCompanionConnected = codexCompanionConnected,
                     previewMode = false,
@@ -2959,7 +3033,10 @@ private fun MobileDeckApp(
                     context.applicationContext.vibrateButtonPress(buttonVibrationLevel)
                     updateCompanionFollowPcView(enabled)
                 },
-                onCompanionRouteActiveChange = { active ->
+                onCompanionRouteActiveChange = routeChange@{ _ ->
+                    if (!companionSettingsAccess.canAccess(CompanionSettingsFeature.DeveloperControls)) {
+                        return@routeChange
+                    }
                     context.applicationContext.vibrateButtonPress(buttonVibrationLevel)
                     companionRouteActive = companionStatus.connected
                 },
@@ -3530,20 +3607,13 @@ private fun ClassicPcConnectionSidebarBox(
     onConnectHost: (PairedHidHost) -> Unit
 ) {
     val colors = LocalDeckThemeColors.current
-    val companionUiEnabled = BuildConfig.DEBUG
     val accent = Color(0xFF25B9FF)
     val secondaryAccent = Color(0xFF0B7FE8)
     val shape = RoundedCornerShape(8.dp)
     val bluetoothHidUnsupported = Build.VERSION.SDK_INT < Build.VERSION_CODES.P
     var showBluetoothUnsupportedDialog by remember { mutableStateOf(false) }
-    val connectionConnected = if (companionUiEnabled) {
-        pcConnectionConnected(companionStatus, status)
-    } else {
-        status.state == HidConnectionState.Connected
-    }
+    val connectionConnected = pcConnectionConnected(companionStatus, status)
     val activeRouteText = when {
-        !companionUiEnabled && bluetoothHidUnsupported -> stringResource(R.string.pc_connection_bluetooth_unavailable_release_short)
-        !companionUiEnabled -> stringResource(status.state.labelRes())
         bluetoothHidUnsupported && companionStatus.connected ->
             companionStatus.appName.ifBlank { stringResource(R.string.companion_connected) }
         bluetoothHidUnsupported -> stringResource(R.string.pc_connection_companion_required)
@@ -3607,7 +3677,7 @@ private fun ClassicPcConnectionSidebarBox(
                 modifier = Modifier.padding(10.dp),
                 verticalArrangement = Arrangement.spacedBy(9.dp)
             ) {
-                if (companionUiEnabled) {
+                if (BuildConfig.DEBUG) {
                     ClassicSidebarSubBox(
                         accent = accent
                     ) {
@@ -3673,6 +3743,26 @@ private fun ClassicPcConnectionSidebarBox(
                             }
                         }
                     }
+                } else {
+                    ClassicSidebarSubBox(accent = accent) {
+                        ClassicSidebarCollapsibleHeader(
+                            icon = Icons.Filled.Link,
+                            title = stringResource(R.string.companion_settings_title),
+                            subtitle = stringResource(companionConnectionState(companionStatus).labelRes()),
+                            accent = accent,
+                            connected = companionStatus.connected,
+                            expanded = companionExpanded,
+                            onToggle = { onCompanionExpandedChange(!companionExpanded) }
+                        )
+                        AnimatedVisibility(visible = companionExpanded) {
+                            CompanionReleaseConfigurationContent(
+                                modifier = Modifier.padding(8.dp),
+                                settings = settings,
+                                status = companionStatus,
+                                onSettingsChange = onSettingsChange
+                            )
+                        }
+                    }
                 }
                 ClassicSidebarSubBox(
                     accent = secondaryAccent,
@@ -3695,13 +3785,7 @@ private fun ClassicPcConnectionSidebarBox(
                     if (bluetoothHidUnsupported) {
                         Text(
                             modifier = Modifier.padding(8.dp),
-                            text = stringResource(
-                                if (companionUiEnabled) {
-                                    R.string.pc_connection_bluetooth_unavailable_desc
-                                } else {
-                                    R.string.pc_connection_bluetooth_unavailable_release_desc
-                                }
-                            ),
+                            text = stringResource(R.string.pc_connection_bluetooth_unavailable_desc),
                             style = MaterialTheme.typography.labelSmall,
                             color = colors.textSecondary,
                             maxLines = 2,
@@ -4817,8 +4901,6 @@ private fun ConsoleSettingsContent(
     onSendDeckToCompanion: () -> Unit,
     onApplyDeckFromCompanion: () -> Unit
 ) {
-    val companionUiEnabled = BuildConfig.DEBUG
-    val effectiveCompanionStatus = if (companionUiEnabled) companionStatus else CompanionConnectionStatus()
     var showBluetoothFallback by remember(category, companionStatus.connected, companionRouteActive) {
         mutableStateOf(!companionStatus.connected || !companionRouteActive)
     }
@@ -4827,20 +4909,14 @@ private fun ConsoleSettingsContent(
         accent = Color(0xFF00A6E7),
         icon = consoleSettingsCategoryIcon(category),
         title = stringResource(consoleSettingsCategoryTitleRes(category)),
-        subtitle = stringResource(
-            if (!companionUiEnabled && category == ConsoleSettingsCategory.PcConnection) {
-                R.string.console_settings_category_pc_connection_desc_release
-            } else {
-                consoleSettingsCategorySubtitleRes(category)
-            }
-        ),
+        subtitle = stringResource(consoleSettingsCategorySubtitleRes(category)),
         connectionStatusLabel = if (category == ConsoleSettingsCategory.PcConnection) {
-            if (companionUiEnabled) pcConnectionTargetText(effectiveCompanionStatus, status) else stringResource(status.state.labelRes())
+            pcConnectionTargetText(companionStatus, status)
         } else {
             null
         },
         connectionConnected = category == ConsoleSettingsCategory.PcConnection &&
-            if (companionUiEnabled) pcConnectionConnected(effectiveCompanionStatus, status) else status.state == HidConnectionState.Connected
+            pcConnectionConnected(companionStatus, status)
     ) {
         if (showDetailGuides) {
             item {
@@ -4849,28 +4925,35 @@ private fun ConsoleSettingsContent(
         }
         when (category) {
             ConsoleSettingsCategory.PcConnection -> {
-                if (companionUiEnabled) {
-                    item {
-                        CompanionSettingsCard(
-                            settings = companionSettings,
-                            status = companionStatus,
-                            hidStatus = status,
-                            routeActive = companionRouteActive,
-                            consoleStyle = true,
-                            syncViewToPc = companionSyncViewToPc,
-                            followPcView = companionFollowPcView,
-                            onSettingsChange = onCompanionSettingsChange,
-                            onRouteActiveChange = onCompanionRouteActiveChange,
-                            onSyncViewToPcChange = onCompanionSyncViewToPcChange,
-                            onFollowPcViewChange = onCompanionFollowPcViewChange,
-                            onTestCompanion = onTestCompanion,
-                            onScanCompanionQr = onScanCompanionQr,
-                            onSendDeckToCompanion = onSendDeckToCompanion,
-                            onApplyDeckFromCompanion = onApplyDeckFromCompanion
-                        )
-                    }
+                item {
+                        if (BuildConfig.DEBUG) {
+                            CompanionSettingsCard(
+                                settings = companionSettings,
+                                status = companionStatus,
+                                hidStatus = status,
+                                routeActive = companionRouteActive,
+                                consoleStyle = true,
+                                syncViewToPc = companionSyncViewToPc,
+                                followPcView = companionFollowPcView,
+                                onSettingsChange = onCompanionSettingsChange,
+                                onRouteActiveChange = onCompanionRouteActiveChange,
+                                onSyncViewToPcChange = onCompanionSyncViewToPcChange,
+                                onFollowPcViewChange = onCompanionFollowPcViewChange,
+                                onTestCompanion = onTestCompanion,
+                                onScanCompanionQr = onScanCompanionQr,
+                                onSendDeckToCompanion = onSendDeckToCompanion,
+                                onApplyDeckFromCompanion = onApplyDeckFromCompanion
+                            )
+                        } else {
+                            CompanionReleaseConfigurationContent(
+                                modifier = Modifier.fillMaxWidth(),
+                                settings = companionSettings,
+                                status = companionStatus,
+                                onSettingsChange = onCompanionSettingsChange
+                            )
+                        }
                 }
-                if (!companionUiEnabled || showBluetoothFallback) {
+                if (showBluetoothFallback) {
                     item {
                         BluetoothManagementBox(
                             status = status,
@@ -10228,6 +10311,91 @@ private fun ClassicCompanionSettingsCard(
     }
 }
 
+internal const val CompanionReleaseSettingsTag = "companion-release-settings"
+internal const val CompanionEnabledSettingTag = "companion-enabled-setting"
+internal const val CompanionEndpointSettingTag = "companion-endpoint-setting"
+internal const val CompanionPairingTokenSettingTag = "companion-pairing-token-setting"
+internal const val CompanionConnectionStatusTag = "companion-connection-status"
+
+@Composable
+internal fun CompanionReleaseConfigurationContent(
+    settings: CompanionSettings,
+    status: CompanionConnectionStatus,
+    onSettingsChange: (CompanionSettings) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val colors = LocalDeckThemeColors.current
+    val accent = ClassicButtonAccent
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .testTag(CompanionReleaseSettingsTag)
+            .padding(10.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Filled.Link,
+                contentDescription = null,
+                tint = accent,
+                modifier = Modifier.size(18.dp)
+            )
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = stringResource(R.string.companion_settings_title),
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = colors.textPrimary
+                )
+                Text(
+                    modifier = Modifier.testTag(CompanionConnectionStatusTag),
+                    text = stringResource(companionConnectionState(status).labelRes()),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (status.connected) Color(0xFF2ECA73) else colors.textSecondary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            Box(modifier = Modifier.testTag(CompanionEnabledSettingTag)) {
+                SettingsSwitch(
+                    checked = settings.enabled,
+                    accent = accent,
+                    onCheckedChange = { enabled ->
+                        onSettingsChange(settings.copy(enabled = enabled))
+                    }
+                )
+            }
+        }
+        OutlinedTextField(
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag(CompanionEndpointSettingTag),
+            value = settings.endpoint,
+            onValueChange = { endpoint ->
+                onSettingsChange(settings.copy(endpoint = endpoint))
+            },
+            singleLine = true,
+            label = { Text(stringResource(R.string.companion_endpoint)) },
+            placeholder = { Text("ws://192.168.0.2:17652") }
+        )
+        OutlinedTextField(
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag(CompanionPairingTokenSettingTag),
+            value = settings.pairingToken,
+            onValueChange = { pairingToken ->
+                onSettingsChange(settings.copy(pairingToken = pairingToken))
+            },
+            singleLine = true,
+            label = { Text(stringResource(R.string.companion_pairing_token)) }
+        )
+    }
+}
+
 @Composable
 private fun ConsoleNestedPanel(
     content: @Composable ColumnScope.() -> Unit
@@ -11599,9 +11767,10 @@ private fun DeckPage(
     classicSolidButtonBackground: Boolean,
     classicDeckBackground: ClassicDeckBackground,
     companionConnected: Boolean = true,
-    codexTaskStates: Map<Int, CodexButtonTaskState> = emptyMap(),
-    codexCommandFailures: Map<Int, String> = emptyMap(),
-    codexSubmittingButtons: Map<Int, Boolean> = emptyMap(),
+    codexTaskStates: Map<CodexButtonOwnerKey, CodexButtonTaskState> = emptyMap(),
+    codexCommandFailures: Map<CodexButtonOwnerKey, String> = emptyMap(),
+    codexSubmittingButtons: Map<CodexButtonOwnerKey, Boolean> = emptyMap(),
+    codexOwnerForButton: (Int, DeckUiMode, DeckButton) -> CodexButtonOwnerKey? = { _, _, _ -> null },
     codexCompanionConfigured: Boolean = false,
     codexCompanionConnected: Boolean = false,
     previewMode: Boolean,
@@ -11674,6 +11843,7 @@ private fun DeckPage(
                 codexTaskStates = codexTaskStates,
                 codexCommandFailures = codexCommandFailures,
                 codexSubmittingButtons = codexSubmittingButtons,
+                codexOwnerForButton = codexOwnerForButton,
                 codexCompanionConfigured = codexCompanionConfigured,
                 codexCompanionConnected = codexCompanionConnected
             )
@@ -11711,6 +11881,7 @@ private fun DeckPage(
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = indicatorPadding,
                     buttons = targetButtons,
+                    pageId = target.pageId,
                     columns = safeColumns,
                     rows = safeRows,
                     cellSize = cellSize,
@@ -11724,6 +11895,7 @@ private fun DeckPage(
                     codexTaskStates = codexTaskStates,
                     codexCommandFailures = codexCommandFailures,
                     codexSubmittingButtons = codexSubmittingButtons,
+                    codexOwnerForButton = codexOwnerForButton,
                     codexCompanionConfigured = codexCompanionConfigured,
                     codexCompanionConnected = codexCompanionConnected,
                     previewMode = previewMode,
@@ -11993,9 +12165,10 @@ private fun ConsoleDeckSurface(
     onButtonTouchStarted: () -> Unit,
     onButtonTouchEnded: () -> Unit,
     companionConnected: Boolean = true,
-    codexTaskStates: Map<Int, CodexButtonTaskState> = emptyMap(),
-    codexCommandFailures: Map<Int, String> = emptyMap(),
-    codexSubmittingButtons: Map<Int, Boolean> = emptyMap(),
+    codexTaskStates: Map<CodexButtonOwnerKey, CodexButtonTaskState> = emptyMap(),
+    codexCommandFailures: Map<CodexButtonOwnerKey, String> = emptyMap(),
+    codexSubmittingButtons: Map<CodexButtonOwnerKey, Boolean> = emptyMap(),
+    codexOwnerForButton: (Int, DeckUiMode, DeckButton) -> CodexButtonOwnerKey? = { _, _, _ -> null },
     codexCompanionConfigured: Boolean = false,
     codexCompanionConnected: Boolean = false
 ) {
@@ -12064,6 +12237,7 @@ private fun ConsoleDeckSurface(
                                     .then(swipeModifier)
                                     .padding(bottom = 12.dp),
                                 rows = consoleRows,
+                                pageId = target.pageId,
                                 rowWeights = consoleWeights,
                                 spacing = consoleSpacing,
                                 status = status,
@@ -12073,6 +12247,7 @@ private fun ConsoleDeckSurface(
                                 codexTaskStates = codexTaskStates,
                                 codexCommandFailures = codexCommandFailures,
                                 codexSubmittingButtons = codexSubmittingButtons,
+                                codexOwnerForButton = codexOwnerForButton,
                                 codexCompanionConfigured = codexCompanionConfigured,
                                 codexCompanionConnected = codexCompanionConnected,
                                 onButtonPressed = onButtonPressed,
@@ -12116,6 +12291,7 @@ private fun ConsoleDeckSurface(
 private fun ConsoleButtonRows(
     modifier: Modifier = Modifier,
     rows: List<List<DeckButton>>,
+    pageId: Int,
     rowWeights: List<Float>,
     spacing: Dp,
     status: HidStatus,
@@ -12127,9 +12303,10 @@ private fun ConsoleButtonRows(
     onButtonTouchStarted: () -> Unit,
     onButtonTouchEnded: () -> Unit,
     companionConnected: Boolean,
-    codexTaskStates: Map<Int, CodexButtonTaskState> = emptyMap(),
-    codexCommandFailures: Map<Int, String> = emptyMap(),
-    codexSubmittingButtons: Map<Int, Boolean> = emptyMap(),
+    codexTaskStates: Map<CodexButtonOwnerKey, CodexButtonTaskState> = emptyMap(),
+    codexCommandFailures: Map<CodexButtonOwnerKey, String> = emptyMap(),
+    codexSubmittingButtons: Map<CodexButtonOwnerKey, Boolean> = emptyMap(),
+    codexOwnerForButton: (Int, DeckUiMode, DeckButton) -> CodexButtonOwnerKey? = { _, _, _ -> null },
     codexCompanionConfigured: Boolean = false,
     codexCompanionConnected: Boolean = false
 ) {
@@ -12151,6 +12328,7 @@ private fun ConsoleButtonRows(
                     horizontalArrangement = Arrangement.spacedBy(spacing)
                 ) {
                     rowButtons.forEach { button ->
+                        val codexOwner = codexOwnerForButton(pageId, DeckUiMode.Console, button)
                         val keyModifier = if (button.isTrimControl()) {
                             Modifier
                                 .width(rowHeight)
@@ -12169,9 +12347,10 @@ private fun ConsoleButtonRows(
                             visualMode = DeckUiMode.Console,
                             classicSolidButtonBackground = true,
                             companionConnected = companionConnected,
-                            codexTaskState = codexTaskStates[button.id],
-                            codexCommandFailure = codexCommandFailures[button.id],
-                            codexSubmitting = codexSubmittingButtons[button.id] == true,
+                            codexOwnerKey = codexOwner,
+                            codexTaskState = codexOwner?.let(codexTaskStates::get),
+                            codexCommandFailure = codexOwner?.let(codexCommandFailures::get),
+                            codexSubmitting = codexOwner?.let(codexSubmittingButtons::get) == true,
                             codexCompanionConfigured = codexCompanionConfigured,
                             codexCompanionConnected = codexCompanionConnected,
                             enabled = true,
@@ -15072,6 +15251,7 @@ private fun ButtonGrid(
     modifier: Modifier = Modifier,
     contentPadding: PaddingValues = PaddingValues(0.dp),
     buttons: List<DeckButton>,
+    pageId: Int,
     columns: Int,
     rows: Int,
     cellSize: Dp,
@@ -15082,9 +15262,10 @@ private fun ButtonGrid(
     visualMode: DeckUiMode,
     classicSolidButtonBackground: Boolean,
     companionConnected: Boolean = true,
-    codexTaskStates: Map<Int, CodexButtonTaskState> = emptyMap(),
-    codexCommandFailures: Map<Int, String> = emptyMap(),
-    codexSubmittingButtons: Map<Int, Boolean> = emptyMap(),
+    codexTaskStates: Map<CodexButtonOwnerKey, CodexButtonTaskState> = emptyMap(),
+    codexCommandFailures: Map<CodexButtonOwnerKey, String> = emptyMap(),
+    codexSubmittingButtons: Map<CodexButtonOwnerKey, Boolean> = emptyMap(),
+    codexOwnerForButton: (Int, DeckUiMode, DeckButton) -> CodexButtonOwnerKey? = { _, _, _ -> null },
     codexCompanionConfigured: Boolean = false,
     codexCompanionConnected: Boolean = false,
     previewMode: Boolean,
@@ -15197,6 +15378,7 @@ private fun ButtonGrid(
                         status = status
                     )
                 } else if (button != null) {
+                    val codexOwner = codexOwnerForButton(pageId, visualMode, button)
                     val buttonPosition = slotToButtonPosition(slot, showTitle)
                     val maxButtonPosition = slotCount - if (showTitle) 2 else 1
                     val spanColumns = button.effectiveSpanColumns(safeColumns, showTitle)
@@ -15212,9 +15394,10 @@ private fun ButtonGrid(
                         visualMode = visualMode,
                         classicSolidButtonBackground = classicSolidButtonBackground,
                         companionConnected = companionConnected,
-                        codexTaskState = codexTaskStates[button.id],
-                        codexCommandFailure = codexCommandFailures[button.id],
-                        codexSubmitting = codexSubmittingButtons[button.id] == true,
+                        codexOwnerKey = codexOwner,
+                        codexTaskState = codexOwner?.let(codexTaskStates::get),
+                        codexCommandFailure = codexOwner?.let(codexCommandFailures::get),
+                        codexSubmitting = codexOwner?.let(codexSubmittingButtons::get) == true,
                         codexCompanionConfigured = codexCompanionConfigured,
                         codexCompanionConnected = codexCompanionConnected,
                         enabled = true,
@@ -16289,6 +16472,7 @@ private fun DeckKey(
     classicSolidButtonBackground: Boolean,
     enabled: Boolean,
     companionConnected: Boolean,
+    codexOwnerKey: CodexButtonOwnerKey? = null,
     codexTaskState: CodexButtonTaskState? = null,
     codexCommandFailure: String? = null,
     codexSubmitting: Boolean = false,
@@ -16361,14 +16545,14 @@ private fun DeckKey(
     }
     val buttonShape = RoundedCornerShape(if (isConsole) 18.dp else 8.dp)
     val density = LocalDensity.current
-    var dragOffset by remember(button.id) { mutableStateOf(Offset.Zero) }
-    var dragInProgress by remember(button.id) { mutableStateOf(false) }
-    var suppressDragReturnAnimation by remember(button.id) { mutableStateOf(false) }
-    var touchPressed by remember(button.id) { mutableStateOf(false) }
-    var trimVisualStep by remember(button.id) { mutableStateOf(0) }
-    var trimVisualValue by remember(button.id) { mutableStateOf(0f) }
-    var trimRepeatStep by remember(button.id) { mutableStateOf(0) }
-    var analogVisualValue by remember(button.id) { mutableStateOf(Offset.Zero) }
+    var dragOffset by remember(button.id, codexOwnerKey) { mutableStateOf(Offset.Zero) }
+    var dragInProgress by remember(button.id, codexOwnerKey) { mutableStateOf(false) }
+    var suppressDragReturnAnimation by remember(button.id, codexOwnerKey) { mutableStateOf(false) }
+    var touchPressed by remember(button.id, codexOwnerKey) { mutableStateOf(false) }
+    var trimVisualStep by remember(button.id, codexOwnerKey) { mutableStateOf(0) }
+    var trimVisualValue by remember(button.id, codexOwnerKey) { mutableStateOf(0f) }
+    var trimRepeatStep by remember(button.id, codexOwnerKey) { mutableStateOf(0) }
+    var analogVisualValue by remember(button.id, codexOwnerKey) { mutableStateOf(Offset.Zero) }
     val effectivePressed = forcedPressed ?: touchPressed
     val effectiveTrimVisualStep = forcedVisualStep ?: trimVisualStep
     val effectiveAnalogValue = forcedAnalogValue ?: analogVisualValue
@@ -16383,7 +16567,7 @@ private fun DeckKey(
             trimVisualStep = 0
         }
     }
-    LaunchedEffect(button.id, button.controlStyle, trimRepeatStep) {
+    LaunchedEffect(button.id, codexOwnerKey, button.controlStyle, trimRepeatStep) {
         if (!button.controlStyle.usesTrimRepeatFrequency()) return@LaunchedEffect
         var repeatIndex = 0
         while (trimRepeatStep != 0) {
@@ -16579,7 +16763,12 @@ private fun DeckKey(
         shadowElevation = 0.dp,
         color = surfaceColor
     ) {
-    val showText = if (isConsole) cellSize >= 58.dp else cellSize >= 96.dp
+        DeckButtonPrimaryPresentation(
+            modifier = Modifier.fillMaxSize(),
+            status = codexVisualStatus,
+            isConsole = isConsole
+        ) regularContent@{
+        val showText = if (isConsole) cellSize >= 58.dp else cellSize >= 96.dp
         val showSubtitle = showText
         if (hasWidget) {
             Box(modifier = Modifier.fillMaxSize()) {
@@ -16624,7 +16813,7 @@ private fun DeckKey(
                     }
                 }
             }
-            return@Surface
+            return@regularContent
         }
         if (button.controlStyle == DeckControlStyle.CompanionToggle) {
             TrimSwitchContent(
@@ -16637,7 +16826,7 @@ private fun DeckKey(
                 visualValue = trimVisualValue,
                 analogValue = effectiveAnalogValue
             )
-            return@Surface
+            return@regularContent
         }
         if (button.isTrimControl()) {
             TrimSwitchContent(
@@ -16650,7 +16839,7 @@ private fun DeckKey(
                 visualValue = trimVisualValue,
                 analogValue = effectiveAnalogValue
             )
-            return@Surface
+            return@regularContent
         }
         if (isConsole) {
             ConsoleRaisedButtonFrame(
@@ -16679,7 +16868,7 @@ private fun DeckKey(
                     )
                 }
             }
-            return@Surface
+            return@regularContent
         }
         if (!isConsole) {
             ClassicDeckKeyContent(
@@ -16690,7 +16879,7 @@ private fun DeckKey(
                 visualShape = visualShape,
                 contentScale = contentScale
             )
-            return@Surface
+            return@regularContent
         }
         Column(
             modifier = Modifier
@@ -16790,21 +16979,15 @@ private fun DeckKey(
                 }
             }
         }
+        }
     }
-        if (companionUnavailable) {
+        if (companionUnavailable && codexVisualStatus == null) {
             CompanionOnlyDisabledOverlay(
                 modifier = Modifier.matchParentSize(),
                 isConsole = isConsole,
                 shape = buttonShape
             )
         }
-        CodexButtonStatusOverlay(
-            status = codexVisualStatus,
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(5.dp)
-                .widthIn(max = visualWidth - 10.dp)
-        )
     }
 }
 
