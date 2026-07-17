@@ -481,6 +481,15 @@
     <string name="companion_connected">Companion connected</string>
     <string name="companion_disconnected">Companion disconnected</string>
     <string name="companion_only_badge">Companion</string>
+    <string name="codex_status_queued">Queued</string>
+    <string name="codex_status_running_elapsed">Running %1$s</string>
+    <string name="codex_status_completed">Completed</string>
+    <string name="codex_status_failed">Failed</string>
+    <string name="codex_status_failed_code">Failed: %1$s</string>
+    <string name="codex_status_cancelled">Cancelled</string>
+    <string name="codex_status_disabled">Disabled</string>
+    <string name="codex_status_disconnected">Disconnected</string>
+    <string name="codex_status_reconnecting">Reconnecting</string>
     <string name="debug_keep_screen_on_title">Keep screen on for debug</string>
     <string name="debug_keep_screen_on_desc">Prevents screen timeout without a host connection in debug builds only.</string>
 </resources>

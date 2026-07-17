@@ -126,6 +126,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Bluetooth
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Computer
@@ -160,6 +161,7 @@ import androidx.compose.material.icons.filled.Vibration
 import androidx.compose.material.icons.filled.VolumeDown
 import androidx.compose.material.icons.filled.VolumeOff
 import androidx.compose.material.icons.filled.VolumeUp
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
@@ -167,9 +169,11 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.withFrameMillis
@@ -222,6 +226,8 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpSize
@@ -241,6 +247,9 @@ import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
 import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -253,6 +262,355 @@ import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.roundToInt
 import kotlin.math.sin
+
+internal class CodexButtonTaskCoordinator(
+    private val scope: CoroutineScope,
+    private val taskStates: MutableMap<Int, CodexButtonTaskState>,
+    private val commandFailureCodes: MutableMap<Int, String>,
+    private val submittingButtons: MutableMap<Int, Boolean>,
+    private val submitJob: suspend (CompanionSettings, CodexButtonBindingPayload) -> CodexJobApiResult,
+    private val pollJob: suspend (CompanionSettings, String, String) -> CodexJobApiResult,
+    private val delayMillis: suspend (Long) -> Unit = { delay(it) },
+    private val nowMillis: () -> Long = SystemClock::elapsedRealtime,
+    private val onAccepted: (Int, CodexJobSnapshot) -> Unit = { _, _ -> },
+    private val onFailure: (Int, String) -> Unit = { _, _ -> },
+    private val onConnectionChanged: (Boolean) -> Unit = {}
+) {
+    private val requestJobs = mutableMapOf<Int, Job>()
+    private val expiryJobs = mutableMapOf<Int, Job>()
+    private val bindings = mutableMapOf<Int, CodexButtonBindingPayload>()
+
+    fun submitOnce(
+        buttonId: Int,
+        settings: CompanionSettings,
+        binding: CodexButtonBindingPayload
+    ): Boolean {
+        if (!CompanionReleaseRoutePolicy.allowsCodexSubmit(settings, codexBindingPayloadJson(binding))) {
+            return false
+        }
+        val existing = taskStates[buttonId]
+        if (existing?.suppressesDuplicateSubmit == true || existing?.reconnecting == true) return false
+        if (existing?.snapshot?.status == CodexJobStatus.Cancelled &&
+            !existing.isTerminalDisplayExpired(nowMillis())
+        ) {
+            return false
+        }
+        if (requestJobs[buttonId]?.isActive == true || submittingButtons[buttonId] == true) return false
+
+        expiryJobs.remove(buttonId)?.cancel()
+        taskStates.remove(buttonId)
+        commandFailureCodes.remove(buttonId)
+        bindings[buttonId] = binding
+        submittingButtons[buttonId] = true
+
+        val requestJob = scope.launch(start = CoroutineStart.LAZY) {
+            submitUntilAccepted(buttonId, settings, binding)
+        }
+        requestJobs[buttonId] = requestJob
+        requestJob.invokeOnCompletion {
+            if (requestJobs[buttonId] === requestJob) {
+                requestJobs.remove(buttonId)
+                submittingButtons.remove(buttonId)
+            }
+        }
+        requestJob.start()
+        return true
+    }
+
+    fun retainBindings(validBindings: Map<Int, CodexButtonBindingPayload>) {
+        val staleIds = bindings.keys.filter { buttonId -> bindings[buttonId] != validBindings[buttonId] }
+        staleIds.forEach(::removeButton)
+    }
+
+    fun clear() {
+        (requestJobs.values + expiryJobs.values).forEach(Job::cancel)
+        requestJobs.clear()
+        expiryJobs.clear()
+        bindings.clear()
+        taskStates.clear()
+        commandFailureCodes.clear()
+        submittingButtons.clear()
+    }
+
+    private suspend fun submitUntilAccepted(
+        buttonId: Int,
+        settings: CompanionSettings,
+        binding: CodexButtonBindingPayload
+    ) {
+        var reconnectAttempt = 0
+        while (bindings[buttonId] == binding) {
+            val result = submitJob(settings, binding)
+            val snapshot = result.snapshot
+            when {
+                snapshot != null -> {
+                    onConnectionChanged(true)
+                    submittingButtons.remove(buttonId)
+                    onAccepted(buttonId, snapshot)
+                    observeSnapshot(buttonId, settings, binding, snapshot)
+                    return
+                }
+                result.reconnectRequired -> {
+                    onConnectionChanged(false)
+                    delayMillis(CodexButtonTaskState.reconnectDelayMillis(reconnectAttempt))
+                    reconnectAttempt += 1
+                }
+                else -> {
+                    storeCommandFailure(buttonId, result.failureCode)
+                    return
+                }
+            }
+        }
+    }
+
+    private suspend fun observeSnapshot(
+        buttonId: Int,
+        settings: CompanionSettings,
+        binding: CodexButtonBindingPayload,
+        acceptedSnapshot: CodexJobSnapshot
+    ) {
+        var current = acceptedSnapshot
+        storeSnapshot(buttonId, current)
+        if (current.status.isTerminal) return
+
+        while (bindings[buttonId] == binding && current.status.isActive) {
+            delayMillis(CODEX_JOB_POLL_INTERVAL_MILLIS)
+            var result = pollJob(settings, current.jobId, binding.bindingId)
+            var reconnectAttempt = 0
+            while (result.reconnectRequired && bindings[buttonId] == binding) {
+                taskStates[buttonId] = CodexButtonTaskState(
+                    snapshot = current,
+                    reconnecting = true,
+                    reconnectAttempt = reconnectAttempt
+                )
+                onConnectionChanged(false)
+                delayMillis(CodexButtonTaskState.reconnectDelayMillis(reconnectAttempt))
+                reconnectAttempt += 1
+                result = pollJob(settings, current.jobId, binding.bindingId)
+            }
+
+            val next = result.snapshot
+            when {
+                next != null -> {
+                    onConnectionChanged(true)
+                    current = next
+                    storeSnapshot(buttonId, current)
+                }
+                result.reconnectRequired -> return
+                else -> {
+                    storeCommandFailure(buttonId, result.failureCode)
+                    return
+                }
+            }
+        }
+    }
+
+    private fun storeSnapshot(buttonId: Int, snapshot: CodexJobSnapshot) {
+        commandFailureCodes.remove(buttonId)
+        val observedAt = if (
+            snapshot.status == CodexJobStatus.Completed || snapshot.status == CodexJobStatus.Cancelled
+        ) {
+            nowMillis()
+        } else {
+            null
+        }
+        val state = CodexButtonTaskState(
+            snapshot = snapshot,
+            terminalObservedAtMillis = observedAt
+        )
+        taskStates[buttonId] = state
+        if (observedAt != null) scheduleTerminalExpiry(buttonId, state)
+    }
+
+    private fun scheduleTerminalExpiry(buttonId: Int, observedState: CodexButtonTaskState) {
+        expiryJobs.remove(buttonId)?.cancel()
+        val expiryJob = scope.launch {
+            delayMillis(CODEX_TERMINAL_DISPLAY_MILLIS)
+            if (taskStates[buttonId] === observedState && observedState.isTerminalDisplayExpired(nowMillis())) {
+                taskStates.remove(buttonId)
+                bindings.remove(buttonId)
+            }
+        }
+        expiryJobs[buttonId] = expiryJob
+        expiryJob.invokeOnCompletion {
+            if (expiryJobs[buttonId] === expiryJob) expiryJobs.remove(buttonId)
+        }
+    }
+
+    private fun storeCommandFailure(buttonId: Int, errorCode: String?) {
+        onConnectionChanged(true)
+        taskStates.remove(buttonId)
+        submittingButtons.remove(buttonId)
+        val safeCode = projectSafeCodexFailureCode(errorCode) ?: "internal_error"
+        commandFailureCodes[buttonId] = safeCode
+        onFailure(buttonId, safeCode)
+    }
+
+    private fun removeButton(buttonId: Int) {
+        requestJobs.remove(buttonId)?.cancel()
+        expiryJobs.remove(buttonId)?.cancel()
+        bindings.remove(buttonId)
+        taskStates.remove(buttonId)
+        commandFailureCodes.remove(buttonId)
+        submittingButtons.remove(buttonId)
+    }
+}
+
+internal enum class CodexButtonVisualPhase {
+    Queued,
+    Running,
+    Completed,
+    Failed,
+    Cancelled,
+    Disabled,
+    Disconnected,
+    Reconnecting
+}
+
+internal data class CodexButtonVisualStatus(
+    val phase: CodexButtonVisualPhase,
+    val elapsedMs: Long = 0L,
+    val safeFailureCode: String? = null
+)
+
+internal fun codexButtonVisualStatus(
+    taskState: CodexButtonTaskState?,
+    commandFailureCode: String?,
+    submitting: Boolean,
+    configured: Boolean,
+    connected: Boolean
+): CodexButtonVisualStatus? {
+    if (commandFailureCode != null) {
+        return CodexButtonVisualStatus(
+            phase = CodexButtonVisualPhase.Failed,
+            safeFailureCode = projectSafeCodexFailureCode(commandFailureCode) ?: "internal_error"
+        )
+    }
+    if (taskState?.reconnecting == true) {
+        return CodexButtonVisualStatus(CodexButtonVisualPhase.Reconnecting)
+    }
+    taskState?.snapshot?.let { snapshot ->
+        return when (snapshot.status) {
+            CodexJobStatus.Queued -> CodexButtonVisualStatus(CodexButtonVisualPhase.Queued)
+            CodexJobStatus.Running -> CodexButtonVisualStatus(
+                CodexButtonVisualPhase.Running,
+                elapsedMs = snapshot.elapsedMs
+            )
+            CodexJobStatus.Completed -> CodexButtonVisualStatus(CodexButtonVisualPhase.Completed)
+            CodexJobStatus.Failed -> CodexButtonVisualStatus(
+                CodexButtonVisualPhase.Failed,
+                safeFailureCode = taskState.safeFailureCode
+            )
+            CodexJobStatus.Cancelled -> CodexButtonVisualStatus(CodexButtonVisualPhase.Cancelled)
+        }
+    }
+    if (submitting) {
+        return CodexButtonVisualStatus(
+            if (connected) CodexButtonVisualPhase.Queued else CodexButtonVisualPhase.Reconnecting
+        )
+    }
+    if (!configured) return CodexButtonVisualStatus(CodexButtonVisualPhase.Disabled)
+    if (!connected) return CodexButtonVisualStatus(CodexButtonVisualPhase.Disconnected)
+    return null
+}
+
+@Composable
+internal fun CodexButtonStatusOverlay(
+    status: CodexButtonVisualStatus?,
+    modifier: Modifier = Modifier
+) {
+    status ?: return
+    val elapsed = formatCodexElapsed(status.elapsedMs)
+    val label = when (status.phase) {
+        CodexButtonVisualPhase.Queued -> stringResource(R.string.codex_status_queued)
+        CodexButtonVisualPhase.Running -> stringResource(R.string.codex_status_running_elapsed, elapsed)
+        CodexButtonVisualPhase.Completed -> stringResource(R.string.codex_status_completed)
+        CodexButtonVisualPhase.Failed -> status.safeFailureCode?.let { safeCode ->
+            stringResource(R.string.codex_status_failed_code, safeCode)
+        } ?: stringResource(R.string.codex_status_failed)
+        CodexButtonVisualPhase.Cancelled -> stringResource(R.string.codex_status_cancelled)
+        CodexButtonVisualPhase.Disabled -> stringResource(R.string.codex_status_disabled)
+        CodexButtonVisualPhase.Disconnected -> stringResource(R.string.codex_status_disconnected)
+        CodexButtonVisualPhase.Reconnecting -> stringResource(R.string.codex_status_reconnecting)
+    }
+    val tint = when (status.phase) {
+        CodexButtonVisualPhase.Completed -> Color(0xFF4CD48A)
+        CodexButtonVisualPhase.Failed -> Color(0xFFFFC14D)
+        CodexButtonVisualPhase.Cancelled,
+        CodexButtonVisualPhase.Disabled,
+        CodexButtonVisualPhase.Disconnected -> Color(0xFFC7D0D9)
+        else -> Color.White
+    }
+    Row(
+        modifier = modifier
+            .semantics { contentDescription = label }
+            .clip(RoundedCornerShape(6.dp))
+            .background(Color.Black.copy(alpha = 0.7f))
+            .padding(horizontal = 6.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        when (status.phase) {
+            CodexButtonVisualPhase.Queued,
+            CodexButtonVisualPhase.Running -> CircularProgressIndicator(
+                modifier = Modifier.size(12.dp),
+                color = tint,
+                strokeWidth = 1.5.dp
+            )
+            CodexButtonVisualPhase.Completed -> Icon(
+                imageVector = Icons.Filled.Check,
+                contentDescription = null,
+                modifier = Modifier.size(13.dp),
+                tint = tint
+            )
+            CodexButtonVisualPhase.Failed -> Icon(
+                imageVector = Icons.Filled.Warning,
+                contentDescription = null,
+                modifier = Modifier.size(13.dp),
+                tint = tint
+            )
+            CodexButtonVisualPhase.Cancelled -> Icon(
+                imageVector = Icons.Filled.Close,
+                contentDescription = null,
+                modifier = Modifier.size(13.dp),
+                tint = tint
+            )
+            CodexButtonVisualPhase.Disabled -> Icon(
+                imageVector = Icons.Filled.Lock,
+                contentDescription = null,
+                modifier = Modifier.size(13.dp),
+                tint = tint
+            )
+            CodexButtonVisualPhase.Disconnected -> Icon(
+                imageVector = Icons.Filled.Link,
+                contentDescription = null,
+                modifier = Modifier.size(13.dp),
+                tint = tint
+            )
+            CodexButtonVisualPhase.Reconnecting -> Icon(
+                imageVector = Icons.Filled.Refresh,
+                contentDescription = null,
+                modifier = Modifier.size(13.dp),
+                tint = tint
+            )
+        }
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = tint,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+    }
+}
+
+internal fun formatCodexElapsed(elapsedMs: Long): String {
+    val totalSeconds = elapsedMs.coerceAtLeast(0L) / 1_000L
+    return "${totalSeconds / 60}:${(totalSeconds % 60).toString().padStart(2, '0')}"
+}
+
+private fun codexBindingPayloadJson(binding: CodexButtonBindingPayload): String {
+    return """{"programId":"codex","command":"exec.submit","args":{"contractVersion":${binding.contractVersion},"presetId":"${binding.presetId}","bindingId":"${binding.bindingId}"}}"""
+}
 
 class MainActivity : ComponentActivity() {
     private var pendingCompanionPairingUri by mutableStateOf<String?>(null)
@@ -517,6 +875,66 @@ private fun MobileDeckApp(
     val deckButtons = activeDeckPage.buttonsForMode(activeButtonMode)
     val activeConsoleButtons = activeDeckPage.buttonsForMode(DeckUiMode.Console)
     val allDeckButtons = deckPages.flatMap { it.classicButtons + it.consoleButtons }
+    val latestAllDeckButtons by rememberUpdatedState(allDeckButtons)
+    val codexTaskStates = remember { mutableStateMapOf<Int, CodexButtonTaskState>() }
+    val codexCommandFailures = remember { mutableStateMapOf<Int, String>() }
+    val codexSubmittingButtons = remember { mutableStateMapOf<Int, Boolean>() }
+    val codexTaskCoordinator = remember(companionClient, coroutineScope) {
+        CodexButtonTaskCoordinator(
+            scope = coroutineScope,
+            taskStates = codexTaskStates,
+            commandFailureCodes = codexCommandFailures,
+            submittingButtons = codexSubmittingButtons,
+            submitJob = { settings, binding ->
+                withContext(Dispatchers.IO) {
+                    runCatching { companionClient.submitCodexJob(settings, binding) }
+                        .getOrElse { CodexJobApiResult(reconnectRequired = true) }
+                }
+            },
+            pollJob = { settings, jobId, bindingId ->
+                withContext(Dispatchers.IO) {
+                    runCatching { companionClient.codexJobStatus(settings, jobId, bindingId) }
+                        .getOrElse { CodexJobApiResult(reconnectRequired = true) }
+                }
+            },
+            onAccepted = { buttonId, snapshot ->
+                val buttonTitle = latestAllDeckButtons.firstOrNull { it.id == buttonId }?.title ?: "Codex"
+                logs = listOf(
+                    ActivityLog(
+                        buttonTitle = buttonTitle,
+                        payload = "codex exec.submit",
+                        delivered = true,
+                        note = if (snapshot.duplicate) "accepted existing job" else "accepted"
+                    )
+                ) + logs.take(9)
+            },
+            onFailure = { buttonId, safeCode ->
+                val buttonTitle = latestAllDeckButtons.firstOrNull { it.id == buttonId }?.title ?: "Codex"
+                logs = listOf(
+                    ActivityLog(
+                        buttonTitle = buttonTitle,
+                        payload = "codex exec.submit",
+                        delivered = false,
+                        note = safeCode
+                    )
+                ) + logs.take(9)
+            },
+            onConnectionChanged = { connected ->
+                companionStatus = companionStatus.copy(
+                    connected = connected,
+                    message = if (connected) "Companion connected" else "Companion reconnecting"
+                )
+            }
+        )
+    }
+    val activeCodexBindings = allDeckButtons.mapNotNull { button ->
+        if (button.actionType != DeckActionType.CompanionCommand) return@mapNotNull null
+        CodexButtonBindingPayload.parse(button.payload)?.let { binding -> button.id to binding }
+    }.toMap()
+
+    LaunchedEffect(activeCodexBindings) {
+        codexTaskCoordinator.retainBindings(activeCodexBindings)
+    }
 
     fun addConsoleLayoutDiagnostic(message: String) {
         val time = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
@@ -748,6 +1166,7 @@ private fun MobileDeckApp(
 
     fun updateCompanionSettings(settings: CompanionSettings) {
         if (!BuildConfig.DEBUG) return
+        codexTaskCoordinator.clear()
         companionSettings = settings
         saveCompanionSettings(context, settings)
         if (!settings.isConfigured()) {
@@ -791,7 +1210,6 @@ private fun MobileDeckApp(
     }
 
     fun applyCompanionStatus(result: CompanionApiResult) {
-        if (!BuildConfig.DEBUG) return
         val capabilities = result.data.optJSONArray("capabilities")?.let { array ->
             List(array.length()) { index -> array.optString(index) }.filter { it.isNotBlank() }.toSet()
         } ?: companionStatus.capabilities
@@ -908,6 +1326,7 @@ private fun MobileDeckApp(
     }
 
     fun applyImportedDeckBundle(imported: ImportedDeckBundle) {
+        codexTaskCoordinator.clear()
         val importedPages = ensureSettingsButton(imported.pages, darkTheme).ifEmpty {
             defaultDeckPages(darkTheme = darkTheme)
         }
@@ -1039,7 +1458,6 @@ private fun MobileDeckApp(
     }
 
     LaunchedEffect(companionSettings.enabled, companionSettings.endpoint, companionSettings.pairingToken) {
-        if (!BuildConfig.DEBUG) return@LaunchedEffect
         if (!companionSettings.isConfigured()) return@LaunchedEffect
         companionStatus = companionStatus.copy(message = "Checking Companion...")
         val result = withContext(Dispatchers.IO) {
@@ -1780,7 +2198,37 @@ private fun MobileDeckApp(
         ) + logs.take(9)
     }
 
+    fun logCodexRouteRejection(button: DeckButton, note: String) {
+        logs = listOf(
+            ActivityLog(
+                buttonTitle = button.title,
+                payload = "codex exec.submit",
+                delivered = false,
+                note = note
+            )
+        ) + logs.take(9)
+    }
+
     fun pressDeckButton(button: DeckButton) {
+        if (button.actionType == DeckActionType.CompanionCommand) {
+            val strictBinding = CodexButtonBindingPayload.parse(button.payload)
+            if (strictBinding != null) {
+                val releaseBinding = CompanionReleaseRoutePolicy.bindingForSubmit(
+                    companionSettings,
+                    button.payload
+                )
+                if (releaseBinding == null) {
+                    logCodexRouteRejection(button, "codex route disabled")
+                    return
+                }
+                codexTaskCoordinator.submitOnce(button.id, companionSettings, releaseBinding)
+                return
+            }
+            if (!BuildConfig.DEBUG) {
+                logCodexRouteRejection(button, "invalid_request")
+                return
+            }
+        }
         coroutineScope.launch {
             val delivered = performDeckButtonActionAsync(button)
             logDeckButtonAction(button, button.payload, delivered)
@@ -1904,12 +2352,17 @@ private fun MobileDeckApp(
         onDispose { hidManager.stop() }
     }
     DisposableEffect(companionClient) {
-        onDispose { companionClient.close() }
+        onDispose {
+            codexTaskCoordinator.clear()
+            companionClient.close()
+        }
     }
 
     val appColors = deckThemeColors(deckUiMode, darkTheme)
     val bluetoothConnected = hidStatus.state == HidConnectionState.Connected
     val companionConnected = BuildConfig.DEBUG && companionStatus.connected && companionSettings.isConfigured()
+    val codexCompanionConfigured = companionSettings.isConfigured()
+    val codexCompanionConnected = companionStatus.connected && codexCompanionConfigured
     val companionControlMode = when {
         companionConnected -> CompanionControlMode.CompanionActive
         bluetoothConnected -> CompanionControlMode.HidOnly
@@ -1998,6 +2451,11 @@ private fun MobileDeckApp(
                     classicSolidButtonBackground = classicSolidButtonBackground,
                     classicDeckBackground = classicDeckBackground,
                     companionConnected = companionConnected,
+                    codexTaskStates = codexTaskStates,
+                    codexCommandFailures = codexCommandFailures,
+                    codexSubmittingButtons = codexSubmittingButtons,
+                    codexCompanionConfigured = codexCompanionConfigured,
+                    codexCompanionConnected = codexCompanionConnected,
                     previewMode = false,
                     pageSwipeAxis = pageSwipeAxis,
                     pageSwipeMode = pageSwipeMode,
@@ -11141,6 +11599,11 @@ private fun DeckPage(
     classicSolidButtonBackground: Boolean,
     classicDeckBackground: ClassicDeckBackground,
     companionConnected: Boolean = true,
+    codexTaskStates: Map<Int, CodexButtonTaskState> = emptyMap(),
+    codexCommandFailures: Map<Int, String> = emptyMap(),
+    codexSubmittingButtons: Map<Int, Boolean> = emptyMap(),
+    codexCompanionConfigured: Boolean = false,
+    codexCompanionConnected: Boolean = false,
     previewMode: Boolean,
     pageSwipeAxis: PageSwipeAxis,
     pageSwipeMode: PageSwipeMode,
@@ -11207,7 +11670,12 @@ private fun DeckPage(
                 onAnalogValue = onAnalogValue,
                 onButtonTouchStarted = onButtonTouchStarted,
                 onButtonTouchEnded = onButtonTouchEnded,
-                companionConnected = companionConnected
+                companionConnected = companionConnected,
+                codexTaskStates = codexTaskStates,
+                codexCommandFailures = codexCommandFailures,
+                codexSubmittingButtons = codexSubmittingButtons,
+                codexCompanionConfigured = codexCompanionConfigured,
+                codexCompanionConnected = codexCompanionConnected
             )
             return@BoxWithConstraints
         }
@@ -11253,6 +11721,11 @@ private fun DeckPage(
                     visualMode = DeckUiMode.Classic,
                     classicSolidButtonBackground = classicSolidButtonBackground,
                     companionConnected = companionConnected,
+                    codexTaskStates = codexTaskStates,
+                    codexCommandFailures = codexCommandFailures,
+                    codexSubmittingButtons = codexSubmittingButtons,
+                    codexCompanionConfigured = codexCompanionConfigured,
+                    codexCompanionConnected = codexCompanionConnected,
                     previewMode = previewMode,
                     showTitle = target.pageId == deckPages.firstOrNull()?.id,
                     onButtonPressed = onButtonPressed,
@@ -11519,7 +11992,12 @@ private fun ConsoleDeckSurface(
     onAnalogValue: (DeckButton, AnalogStickPoint) -> Unit = { _, _ -> },
     onButtonTouchStarted: () -> Unit,
     onButtonTouchEnded: () -> Unit,
-    companionConnected: Boolean = true
+    companionConnected: Boolean = true,
+    codexTaskStates: Map<Int, CodexButtonTaskState> = emptyMap(),
+    codexCommandFailures: Map<Int, String> = emptyMap(),
+    codexSubmittingButtons: Map<Int, Boolean> = emptyMap(),
+    codexCompanionConfigured: Boolean = false,
+    codexCompanionConnected: Boolean = false
 ) {
     val colors = LocalDeckThemeColors.current
     val density = LocalDensity.current
@@ -11592,6 +12070,11 @@ private fun ConsoleDeckSurface(
                                 appWidgetHost = appWidgetHost,
                                 appWidgetManager = appWidgetManager,
                                 companionConnected = companionConnected,
+                                codexTaskStates = codexTaskStates,
+                                codexCommandFailures = codexCommandFailures,
+                                codexSubmittingButtons = codexSubmittingButtons,
+                                codexCompanionConfigured = codexCompanionConfigured,
+                                codexCompanionConnected = codexCompanionConnected,
                                 onButtonPressed = onButtonPressed,
                                 onTrimStep = onTrimStep,
                                 onAnalogValue = onAnalogValue,
@@ -11643,7 +12126,12 @@ private fun ConsoleButtonRows(
     onAnalogValue: (DeckButton, AnalogStickPoint) -> Unit,
     onButtonTouchStarted: () -> Unit,
     onButtonTouchEnded: () -> Unit,
-    companionConnected: Boolean
+    companionConnected: Boolean,
+    codexTaskStates: Map<Int, CodexButtonTaskState> = emptyMap(),
+    codexCommandFailures: Map<Int, String> = emptyMap(),
+    codexSubmittingButtons: Map<Int, Boolean> = emptyMap(),
+    codexCompanionConfigured: Boolean = false,
+    codexCompanionConnected: Boolean = false
 ) {
     BoxWithConstraints(modifier = modifier) {
         val safeRows = rows.ifEmpty { listOf(emptyList()) }
@@ -11681,6 +12169,11 @@ private fun ConsoleButtonRows(
                             visualMode = DeckUiMode.Console,
                             classicSolidButtonBackground = true,
                             companionConnected = companionConnected,
+                            codexTaskState = codexTaskStates[button.id],
+                            codexCommandFailure = codexCommandFailures[button.id],
+                            codexSubmitting = codexSubmittingButtons[button.id] == true,
+                            codexCompanionConfigured = codexCompanionConfigured,
+                            codexCompanionConnected = codexCompanionConnected,
                             enabled = true,
                             previewMode = false,
                             columns = rowButtons.size.coerceAtLeast(1),
@@ -14589,6 +15082,11 @@ private fun ButtonGrid(
     visualMode: DeckUiMode,
     classicSolidButtonBackground: Boolean,
     companionConnected: Boolean = true,
+    codexTaskStates: Map<Int, CodexButtonTaskState> = emptyMap(),
+    codexCommandFailures: Map<Int, String> = emptyMap(),
+    codexSubmittingButtons: Map<Int, Boolean> = emptyMap(),
+    codexCompanionConfigured: Boolean = false,
+    codexCompanionConnected: Boolean = false,
     previewMode: Boolean,
     showTitle: Boolean,
     onButtonPressed: (DeckButton) -> Unit,
@@ -14714,6 +15212,11 @@ private fun ButtonGrid(
                         visualMode = visualMode,
                         classicSolidButtonBackground = classicSolidButtonBackground,
                         companionConnected = companionConnected,
+                        codexTaskState = codexTaskStates[button.id],
+                        codexCommandFailure = codexCommandFailures[button.id],
+                        codexSubmitting = codexSubmittingButtons[button.id] == true,
+                        codexCompanionConfigured = codexCompanionConfigured,
+                        codexCompanionConnected = codexCompanionConnected,
                         enabled = true,
                         previewMode = previewMode,
                         columns = safeColumns,
@@ -15786,6 +16289,11 @@ private fun DeckKey(
     classicSolidButtonBackground: Boolean,
     enabled: Boolean,
     companionConnected: Boolean,
+    codexTaskState: CodexButtonTaskState? = null,
+    codexCommandFailure: String? = null,
+    codexSubmitting: Boolean = false,
+    codexCompanionConfigured: Boolean = false,
+    codexCompanionConnected: Boolean = false,
     previewMode: Boolean,
     columns: Int,
     slot: Int,
@@ -15812,8 +16320,29 @@ private fun DeckKey(
     val isConsole = visualMode == DeckUiMode.Console
     val themeColors = LocalDeckThemeColors.current
     val darkTheme = isSystemInDarkTheme()
-    val companionUnavailable = button.isCompanionOnly() && !companionConnected && !previewMode
-    val keyEnabled = enabled && !companionUnavailable
+    val isStrictCodexButton = button.actionType == DeckActionType.CompanionCommand &&
+        CodexButtonBindingPayload.parse(button.payload) != null
+    val companionUnavailable = !isStrictCodexButton && button.isCompanionOnly() && !companionConnected && !previewMode
+    val codexUnavailable = isStrictCodexButton && !codexCompanionConfigured && !previewMode
+    val keyEnabled = enabled && !companionUnavailable && !codexUnavailable
+    val suppressCodexTap = isStrictCodexButton && !previewMode && (
+        codexSubmitting ||
+            codexTaskState?.reconnecting == true ||
+            codexTaskState?.snapshot?.status?.isActive == true ||
+            codexTaskState?.snapshot?.status == CodexJobStatus.Cancelled
+        )
+    val interactionEnabled = keyEnabled && !suppressCodexTap
+    val codexVisualStatus = if (isStrictCodexButton && !previewMode) {
+        codexButtonVisualStatus(
+            taskState = codexTaskState,
+            commandFailureCode = codexCommandFailure,
+            submitting = codexSubmitting,
+            configured = codexCompanionConfigured,
+            connected = codexCompanionConnected
+        )
+    } else {
+        null
+    }
     val containerColor = when {
         !keyEnabled -> MaterialTheme.colorScheme.surfaceVariant
         isConsole -> consoleButtonColor(button)
@@ -15959,7 +16488,7 @@ private fun DeckKey(
         hasWidget || letWidgetHandleTouch -> Modifier
         button.actionType == DeckActionType.CompanionStatus && !previewMode -> Modifier
         button.isTrimControl() && !previewMode -> Modifier.trimSwitchGesture(
-            enabled = keyEnabled,
+            enabled = interactionEnabled,
             style = button.controlStyle,
             joyPadEightWay = joyPadPayloadParts(button.payload).eightWay,
             analogDeadZone = companionControlData(button).deadZone,
@@ -15977,11 +16506,11 @@ private fun DeckKey(
             onAnalogValue = onAnalogValue
         )
         previewMode -> Modifier.deckSlotGesture(
-            enabled = keyEnabled,
+            enabled = interactionEnabled,
             onClick = onPressed
         )
         else -> Modifier.deckTapGesture(
-            enabled = keyEnabled,
+            enabled = interactionEnabled,
             onPress = onPressFeedback,
             onRelease = onReleaseFeedback,
             onPressedChange = { touchPressed = it },
@@ -16269,6 +16798,13 @@ private fun DeckKey(
                 shape = buttonShape
             )
         }
+        CodexButtonStatusOverlay(
+            status = codexVisualStatus,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(5.dp)
+                .widthIn(max = visualWidth - 10.dp)
+        )
     }
 }
 

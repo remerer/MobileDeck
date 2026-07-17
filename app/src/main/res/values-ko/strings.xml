@@ -481,6 +481,15 @@
     <string name="companion_connected">Companion 연결됨</string>
     <string name="companion_disconnected">Companion 연결 안 됨</string>
     <string name="companion_only_badge">Companion</string>
+    <string name="codex_status_queued">대기 중</string>
+    <string name="codex_status_running_elapsed">실행 중 %1$s</string>
+    <string name="codex_status_completed">완료</string>
+    <string name="codex_status_failed">실패</string>
+    <string name="codex_status_failed_code">실패: %1$s</string>
+    <string name="codex_status_cancelled">취소됨</string>
+    <string name="codex_status_disabled">비활성화됨</string>
+    <string name="codex_status_disconnected">연결 안 됨</string>
+    <string name="codex_status_reconnecting">재연결 중</string>
     <string name="debug_keep_screen_on_title">디버그 화면 켜짐 유지</string>
     <string name="debug_keep_screen_on_desc">디버그 빌드에서만 연결 없이 화면 꺼짐을 막습니다.</string>
 </resources>
